@@ -569,6 +569,39 @@ struct WindowContentDecoderTests {
         #expect(delta.accessibilityCursorUTF16 == 9)
     }
 
+    @Test("Resident hover source decodes, applies, and clears without replacing text")
+    func residentHoverSourceOverlay() throws {
+        let clear = Data([OP_GUI_WINDOW_OVERLAY_DELTA, 0, 9, 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff])
+        var data = clear
+        data[7] = 4
+        data.append(contentsOf: [0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 4])
+        let length = data.count
+        data.append(OP_COMMIT_FRAME)
+
+        let (command, size) = try decodeCommand(data: data, offset: 0)
+        let (clearCommand, _) = try decodeCommand(data: clear, offset: 0)
+        #expect(size == length)
+        guard case .guiWindowOverlayDelta(let overlay) = command,
+              case .guiWindowOverlayDelta(let dismissal) = clearCommand else {
+            Issue.record("Expected overlay deltas")
+            return
+        }
+        let row = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "word", spans: [])
+        let content = try GUIWindowContent(
+            windowId: 9, fullRefresh: true, contentEpoch: 42,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block, rowStoreMode: .sequential,
+            rows: [row], selection: nil, searchMatches: [],
+            diagnosticUnderlines: [], documentHighlights: []
+        )
+        let shown = try #require(content.applyingOverlayDelta(overlay))
+        #expect(shown.documentHighlights == [GUIDocumentHighlight(startRow: 0, startCol: 0, endRow: 0, endCol: 3, kind: .hover)])
+        #expect(shown.resourceWeight.overlays == content.resourceWeight.overlays + 1)
+        let hidden = try #require(shown.applyingOverlayDelta(dismissal))
+        #expect(hidden.documentHighlights.isEmpty)
+        #expect(hidden.resourceWeight == content.resourceWeight)
+        #expect(hidden.rows.first == row)
+    }
+
     @Test("Overlay delta replaces the retained accessibility cursor")
     func overlayDeltaUpdatesAccessibilityCursor() throws {
         let row = GUIVisualRow(rowType: .normal, rowId: 1, bufLine: 0, contentHash: 11, text: "a🙂b", spans: [])

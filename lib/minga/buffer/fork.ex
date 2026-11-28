@@ -32,6 +32,7 @@ defmodule Minga.Buffer.Fork do
 
   alias Minga.Buffer.Author
   alias Minga.Buffer.Document
+  alias Minga.Buffer.DraftOrigins
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Lines
@@ -50,14 +51,15 @@ defmodule Minga.Buffer.Fork do
           ancestor: Document.t(),
           document: Document.t(),
           deleted: boolean(),
-          undo: [{Document.t(), boolean(), boolean()}],
+          undo: [{Document.t(), boolean(), boolean(), Author.key() | nil, DraftOrigins.t()}],
           phase: :editing | :published,
           parent: pid(),
           parent_monitor: reference(),
           parent_alive: boolean(),
           version: non_neg_integer(),
           dirty: boolean(),
-          author: Author.key() | nil
+          author: Author.key() | nil,
+          origins: DraftOrigins.t()
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -85,6 +87,10 @@ defmodule Minga.Buffer.Fork do
   @doc "Reads the fork's logical file, including an explicit absence after deletion."
   @spec read_file(GenServer.server()) :: {:ok, String.t()} | {:error, :enoent}
   def read_file(server), do: GenServer.call(server, :read_file)
+
+  @doc "Returns staged bytes and their writing origins from the same fork revision."
+  @spec staged_content(GenServer.server()) :: {binary() | :deleted, [DraftOrigins.range()]}
+  def staged_content(server), do: GenServer.call(server, :staged_content)
 
   @doc "Returns whether this fork's logical file is present or deleted."
   @spec status(GenServer.server()) :: :present | :deleted
@@ -146,7 +152,8 @@ defmodule Minga.Buffer.Fork do
   """
   @spec publish(
           GenServer.server(),
-          (String.t() -> :ok | {:conflict, term()} | {:error, term()}) | nil
+          ({binary(), [DraftOrigins.range()]} -> :ok | {:conflict, term()} | {:error, term()})
+          | nil
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
   def publish(server, staging \\ nil) when is_nil(staging) or is_function(staging, 1) do
     GenServer.call(server, {:publish, staging}, :infinity)
@@ -165,7 +172,8 @@ defmodule Minga.Buffer.Fork do
           GenServer.server(),
           review_revision(),
           [:accepted | :rejected],
-          (String.t(), String.t() -> :ok | {:conflict, term()} | {:error, term()})
+          (binary(), {binary(), [DraftOrigins.range()]} ->
+             :ok | {:conflict, term()} | {:error, term()})
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
   def publish_resolution(server, revision, decisions, staging) do
     GenServer.call(server, {:publish_resolution, revision, decisions, staging}, :infinity)
@@ -260,7 +268,8 @@ defmodule Minga.Buffer.Fork do
       parent_alive: true,
       version: 0,
       dirty: false,
-      author: nil
+      author: nil,
+      origins: DraftOrigins.from_base(Document.content_byte_size(doc))
     }
 
     {:ok, state}
@@ -291,6 +300,13 @@ defmodule Minga.Buffer.Fork do
 
   def handle_call(:read_file, _from, state), do: {:reply, file_source(state), state}
 
+  def handle_call(:staged_content, _from, %{deleted: true} = state),
+    do: {:reply, {:deleted, []}, state}
+
+  def handle_call(:staged_content, _from, state) do
+    {:reply, {Document.content(state.document), DraftOrigins.ranges(state.origins)}, state}
+  end
+
   def handle_call(message, _from, %{deleted: true} = state)
       when message in [:content, :content_with_version] do
     {:reply, {:error, :enoent}, state}
@@ -312,12 +328,18 @@ defmodule Minga.Buffer.Fork do
     {:reply, {:error, :nothing_to_undo}, state}
   end
 
-  def handle_call(:undo, _from, %{undo: [{document, deleted, dirty} | rest]} = state) do
+  def handle_call(
+        :undo,
+        _from,
+        %{undo: [{document, deleted, dirty, author, origins} | rest]} = state
+      ) do
     new_state = %{
       state
       | document: document,
         deleted: deleted,
         dirty: dirty,
+        author: author,
+        origins: origins,
         undo: rest,
         version: state.version + 1
     }
@@ -372,9 +394,10 @@ defmodule Minga.Buffer.Fork do
   end
 
   def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
-    case Replace.apply(state.document, old_text, new_text, boundary) do
-      {:ok, new_doc, msg} ->
-        {:reply, {:ok, msg}, commit_fork(state, new_doc, false)}
+    case Replace.apply_with_delta(state.document, old_text, new_text, boundary) do
+      {:ok, new_doc, delta, msg} ->
+        geometry = if old_text == new_text, do: [], else: [{delta.start_byte, old_text, new_text}]
+        {:reply, {:ok, msg}, commit_fork(state, new_doc, false, geometry)}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -392,12 +415,14 @@ defmodule Minga.Buffer.Fork do
     source = file_source(state)
 
     case FileMutation.prepare(source, generation, identity, expected, operation) do
-      {:ok, new_content} when is_binary(new_content) ->
+      {:ok, new_content, geometry} when is_binary(new_content) ->
         new_doc = Document.new(new_content)
         receipt = FileMutation.Receipt.committed(source, new_content)
-        {:reply, {:ok, receipt}, state |> commit_fork(new_doc, false) |> attribute(author)}
+        origin = DraftOrigins.at(author, System.system_time(:millisecond))
+        state = commit_fork(state, new_doc, false, geometry, origin)
+        {:reply, {:ok, receipt}, attribute(state, author)}
 
-      {:ok, :deleted} ->
+      {:ok, :deleted, :whole} ->
         receipt = FileMutation.Receipt.committed(source, :deleted)
         {:reply, {:ok, receipt}, state |> commit_fork(state.document, true) |> attribute(author)}
 
@@ -448,13 +473,19 @@ defmodule Minga.Buffer.Fork do
   end
 
   def handle_call({:publish, staging}, _from, state) do
+    stage =
+      if staging do
+        origins = DraftOrigins.ranges(state.origins)
+        fn raw -> staging.({raw, origins}) end
+      end
+
     result =
       BufferProcess.merge_fork(
         state.parent,
-        Document.content(state.ancestor),
-        Document.content(state.document),
+        state.ancestor,
+        {state.document, state.origins},
         publication_source(state),
-        staging
+        stage
       )
 
     case result do
@@ -485,18 +516,39 @@ defmodule Minga.Buffer.Fork do
         %{version: version, deleted: false} = state
       )
       when pid == self() do
-    {ancestor, _parent, revisions, regions} = review_sources(state)
+    {ancestor, parent, revisions, regions} = review_sources(state)
 
     with {^pid, ^version, ^parent_version} <- revisions,
-         {:ok, merged, selected} <-
+         {:ok, {{merged, merged_sources}, alignment}, {selected, selected_sources}} <-
            Diff.resolve_merge(String.split(ancestor, "\n"), regions, decisions),
+         merged_bytes = Enum.join(merged, "\n"),
+         {geometry, merged_origins} =
+           DraftOrigins.replay(
+             state.origins,
+             state.ancestor,
+             Document.new(parent),
+             state.document,
+             merged_bytes,
+             merged_sources,
+             alignment
+           ),
          {:ok, _} = result <-
            BufferProcess.install_fork_resolution(
              state.parent,
              parent_version,
-             Enum.join(merged, "\n"),
+             {merged_bytes, geometry, merged_origins},
              Enum.join(selected, "\n"),
-             fn selected_content -> staging.(ancestor, selected_content) end,
+             fn selected_content ->
+               origins =
+                 DraftOrigins.project(
+                   state.origins,
+                   state.document,
+                   selected_content,
+                   selected_sources
+                 )
+
+               staging.(ancestor, {selected_content, origins})
+             end,
              publication_source(state)
            ) do
       {:reply, result, %{state | phase: :published}}
@@ -553,7 +605,8 @@ defmodule Minga.Buffer.Fork do
       Diff.merge_regions(
         String.split(ancestor, "\n"),
         String.split(Document.content(state.document), "\n"),
-        String.split(parent, "\n")
+        String.split(parent, "\n"),
+        DraftOrigins.base_lines(state.origins, state.ancestor, state.document)
       )
 
     {ancestor, parent, {self(), state.version, parent_version}, regions}
@@ -563,9 +616,29 @@ defmodule Minga.Buffer.Fork do
   defp file_source(%{deleted: true}), do: {:error, :enoent}
   defp file_source(state), do: {:ok, Document.content(state.document)}
 
-  @spec commit_fork(state(), Document.t(), boolean()) :: state()
-  defp commit_fork(state, document, deleted) do
-    undo = [{state.document, state.deleted, state.dirty} | state.undo]
+  @spec commit_fork(
+          state(),
+          Document.t(),
+          boolean(),
+          FileMutation.geometry(),
+          DraftOrigins.origin() | nil
+        ) :: state()
+  defp commit_fork(state, document, deleted, geometry \\ :whole, origin \\ nil) do
+    undo = [
+      {state.document, state.deleted, state.dirty, state.author, state.origins} | state.undo
+    ]
+
+    origins =
+      cond do
+        deleted ->
+          DraftOrigins.empty()
+
+        state.deleted ->
+          DraftOrigins.edited(state.origins, Document.new(""), document, geometry, origin)
+
+        true ->
+          DraftOrigins.edited(state.origins, state.document, document, geometry, origin)
+      end
 
     %{
       state
@@ -573,6 +646,7 @@ defmodule Minga.Buffer.Fork do
         deleted: deleted,
         undo: undo,
         dirty: true,
+        origins: origins,
         version: state.version + 1
     }
   end

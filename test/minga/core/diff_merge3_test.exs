@@ -106,12 +106,16 @@ defmodule Minga.Core.DiffMerge3Test do
         Diff.merge_regions(
           ancestor,
           ~w(header spacer fork-a gap fork-b footer),
-          ~w(human spacer parent-a gap parent-b footer)
+          ~w(prefix human spacer parent-a gap parent-b footer)
         )
 
-      assert Diff.resolve_merge(ancestor, regions, [:accepted, :rejected]) ==
-               {:ok, ~w(human spacer fork-a gap parent-b footer),
-                ~w(header spacer fork-a gap b footer)}
+      assert {:ok, {{merged, [{2, 3, 1}]}, alignment}, {selected, [{2, 2, 1}]}} =
+               Diff.resolve_merge(ancestor, regions, [:accepted, :rejected])
+
+      assert merged == ~w(prefix human spacer fork-a gap parent-b footer)
+      assert selected == ~w(header spacer fork-a gap b footer)
+      assert {:keep, {4, 4, 1}} in alignment
+      assert {:keep, {5, 5, 1}} in alignment
 
       assert Diff.resolve_merge(ancestor, regions, [:accepted]) == {:error, :invalid_decisions}
     end

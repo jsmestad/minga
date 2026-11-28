@@ -17,6 +17,7 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
       assert %HoverPopup{} = model
       refute model.visible?
       assert model.content_lines == []
+      assert model.offer_id == nil
     end
 
     test "builds hidden hover popup when hover_popup key is absent" do
@@ -28,15 +29,15 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
       assert model.content_lines == []
     end
 
-    test "builds semantic hover popup data" do
-      popup = %MingaEditor.HoverPopup{
-        content_lines: [{[{"hello", :plain}], :text}],
-        anchor_row: 5,
-        anchor_col: 10,
-        focused: true,
-        scroll_offset: 3,
-        open_action: :open_docs
-      }
+    test "projects an exact hover offer and its footer label without the internal command" do
+      lines = for text <- ["first", "second", "third", "hello"], do: {[{text, :plain}], :text}
+
+      popup =
+        lines
+        |> MingaEditor.HoverPopup.from_parsed_lines(5, 10)
+        |> MingaEditor.HoverPopup.with_open_action({:open_session, "task", "step"})
+        |> MingaEditor.HoverPopup.focus()
+        |> MingaEditor.HoverPopup.scroll_down()
 
       ctx = build_minimal_context(%{hover_popup: popup})
 
@@ -47,10 +48,16 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilderTest do
       assert model.anchor_row == 5
       assert model.anchor_col == 10
       assert model.focused?
-      assert model.scroll_offset == 3
-      assert model.open_action_name == "open_docs"
+      assert model.scroll_offset == 1
+      assert model.offer_id == popup.offer_id
+      assert model.open_label == "↩ conversation"
 
-      assert [%Line{segments: [%Segment{text: "hello", style: :plain}], line_type: :text}] =
+      assert [
+               _,
+               _,
+               _,
+               %Line{segments: [%Segment{text: "hello", style: :plain}], line_type: :text}
+             ] =
                model.content_lines
     end
 

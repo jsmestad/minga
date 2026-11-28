@@ -337,7 +337,27 @@ defmodule Minga.Core.Diff do
   """
   @type merge_hunk :: {:resolved, [String.t()]} | {:conflict, [String.t()], [String.t()]}
 
-  @typep merge_edit :: {non_neg_integer(), non_neg_integer(), [String.t()]}
+  # Ancestor start and length, replacement lines, and their start in the writing side.
+  @typep merge_edit :: {non_neg_integer(), non_neg_integer(), [String.t()], non_neg_integer()}
+
+  @typedoc "A fork line interval kept at a known line in a publication result."
+  @type placement ::
+          {fork_line :: non_neg_integer(), result_line :: non_neg_integer(),
+           count :: pos_integer()}
+
+  @typep choice :: {[String.t()], [placement()]}
+
+  @typedoc "Lines retained from the parent, or fork lines to replay against an unchanged ancestor interval in the parent."
+  @type parent_alignment ::
+          {:keep, placement()}
+          | {:reconcile, non_neg_integer(), non_neg_integer(), non_neg_integer(),
+             non_neg_integer()}
+          | {:replay, ancestor_line :: non_neg_integer(), parent_line :: non_neg_integer(),
+             parent_count :: non_neg_integer(), fork_line :: non_neg_integer(),
+             result_line :: non_neg_integer(), result_count :: non_neg_integer()}
+
+  @typedoc "The merged lines, selected fork positions, and the parent alignment of the same merge."
+  @type projected_merge :: {choice(), [parent_alignment()]}
 
   @typedoc "Result of a three-way merge."
   @type merge3_result :: {:ok, [String.t()]} | {:conflict, [merge_hunk()]}
@@ -374,51 +394,160 @@ defmodule Minga.Core.Diff do
   @typedoc "A three-way region retaining the ancestor-relative Agent edits."
   @type merge_region ::
           {:resolved, [String.t()]}
-          | {:fork, [String.t()], merge_edit()}
-          | {:conflict, [String.t()], [String.t()], [merge_edit()]}
+          | {:fork | :shared, [String.t()], merge_edit()}
+          | {:conflict, [String.t()], [String.t()], {[merge_edit()], non_neg_integer()}}
 
   @doc "Produces the ordered merge regions without discarding fork edit provenance."
-  @spec merge_regions([String.t()], [String.t()], [String.t()]) :: [merge_region()]
-  def merge_regions(ancestor, fork, parent) do
-    fork_edits = ancestor |> List.myers_difference(fork) |> ops_to_edits()
+  @spec merge_regions([String.t()], [String.t()], [String.t()], :by_text | [placement()]) ::
+          [merge_region()]
+  def merge_regions(ancestor, fork, parent, retained \\ :by_text) do
+    fork_edits = fork_edits(ancestor, fork, retained)
     parent_edits = ancestor |> List.myers_difference(parent) |> ops_to_edits()
     merge_edits(ancestor, fork_edits, parent_edits)
   end
 
+  @spec fork_edits([String.t()], [String.t()], :by_text | [placement()]) :: [merge_edit()]
+  defp fork_edits(ancestor, fork, :by_text),
+    do: ancestor |> List.myers_difference(fork) |> ops_to_edits()
+
+  defp fork_edits(ancestor, fork, retained),
+    do: anchored_edits(ancestor, fork, retained, {0, 0}, [])
+
+  @spec anchored_edits(
+          [String.t()],
+          [String.t()],
+          [placement()],
+          {non_neg_integer(), non_neg_integer()},
+          [merge_edit()]
+        ) :: [merge_edit()]
+  defp anchored_edits(ancestor, fork, [], {base, side}, edits) do
+    Enum.reverse(prepend_edit(ancestor, fork, base, side, edits))
+  end
+
+  defp anchored_edits(ancestor, fork, [{old, new, count} | rest], {base, side}, edits) do
+    {before, ancestor} = Enum.split(ancestor, old - base)
+    {after_edit, fork} = Enum.split(fork, new - side)
+
+    anchored_edits(
+      Enum.drop(ancestor, count),
+      Enum.drop(fork, count),
+      rest,
+      {old + count, new + count},
+      prepend_edit(before, after_edit, base, side, edits)
+    )
+  end
+
+  @spec prepend_edit([String.t()], [String.t()], non_neg_integer(), non_neg_integer(), [
+          merge_edit()
+        ]) :: [merge_edit()]
+  defp prepend_edit(same, same, _base, _side, edits), do: edits
+
+  defp prepend_edit([], replacement, base, side, edits),
+    do: [{base, 0, replacement, side} | edits]
+
+  defp prepend_edit(before, [], base, side, edits),
+    do: [{base, length(before), [], side} | edits]
+
+  defp prepend_edit(before, replacement, base, side, edits) do
+    # Byte-identity anchors bound the gap. A splice may still preserve whole lines inside it.
+    before |> List.myers_difference(replacement) |> prepend_ops(base, side, edits)
+  end
+
   @spec review_region(merge_region()) :: merge_hunk()
-  defp review_region({:fork, lines, _edit}), do: {:resolved, lines}
-  defp review_region({:conflict, fork, parent, _edits}), do: {:conflict, fork, parent}
+  defp review_region({side, lines, _edit}) when side in [:fork, :shared], do: {:resolved, lines}
+  defp review_region({:conflict, fork, parent, _selected}), do: {:conflict, fork, parent}
   defp review_region({:resolved, _lines} = region), do: region
 
-  @doc "Resolves the reviewed regions and reconstructs the accepted fork edits on the ancestor alone."
+  @doc "Merges cleanly while retaining both source alignments of the selected result."
+  @spec merge3_projected([String.t()], [String.t()], [String.t()], :by_text | [placement()]) ::
+          {:ok, projected_merge()} | {:conflict, [merge_hunk()]}
+  def merge3_projected(ancestor, fork, parent, retained \\ :by_text)
+
+  def merge3_projected(ancestor, fork, ancestor, _retained) do
+    count = length(fork)
+    choice = {fork, place([], 0, 0, count)}
+    {:ok, {choice, [{:replay, 0, 0, length(ancestor), 0, 0, count}]}}
+  end
+
+  def merge3_projected(ancestor, ancestor, parent, _retained), do: {:ok, kept_parent(parent)}
+  def merge3_projected(_ancestor, fork, fork, _retained), do: {:ok, kept_parent(fork)}
+
+  def merge3_projected(ancestor, fork, parent, retained) do
+    regions = merge_regions(ancestor, fork, parent, retained)
+
+    case resolve_regions(regions, [], [], []) do
+      {:ok, ordered, _edits} -> {:ok, place_results(ordered)}
+      {:error, :invalid_decisions} -> {:conflict, Enum.map(regions, &review_region/1)}
+    end
+  end
+
+  @doc "Resolves the reviewed regions, retaining the actual parent and fork alignments and the selected fork."
   @spec resolve_merge([String.t()], [merge_region()], [:accepted | :rejected]) ::
-          {:ok, [String.t()], [String.t()]} | {:error, :invalid_decisions}
+          {:ok, projected_merge(), choice()} | {:error, :invalid_decisions}
   def resolve_merge(ancestor, regions, decisions) do
     case resolve_regions(regions, decisions, [], []) do
-      {:ok, merged, edits} ->
-        {:ok, Enum.reverse(merged), apply_region_edits(ancestor, 0, Enum.reverse(edits), [])}
+      {:ok, ordered, edits} ->
+        merged = place_results(ordered)
+        selected = place_edits(ancestor, edits, 0, 0, [], [])
+        {:ok, merged, selected}
 
       {:error, :invalid_decisions} = error ->
         error
     end
   end
 
-  @spec resolve_regions([merge_region()], [:accepted | :rejected], [String.t()], [merge_edit()]) ::
-          {:ok, [String.t()], [merge_edit()]} | {:error, :invalid_decisions}
-  defp resolve_regions([], [], merged, edits), do: {:ok, merged, edits}
+  @typep parent_choice ::
+           :keep
+           | {:replay, non_neg_integer(), non_neg_integer()}
+           | {:replace, non_neg_integer()}
+  @typep chosen_region :: {[String.t()], non_neg_integer() | nil, parent_choice()}
+
+  @spec resolve_regions(
+          [merge_region()],
+          [:accepted | :rejected],
+          [chosen_region()],
+          [merge_edit()]
+        ) :: {:ok, [chosen_region()], [merge_edit()]} | {:error, :invalid_decisions}
+  defp resolve_regions([], [], merged, edits),
+    do: {:ok, Enum.reverse(merged), Enum.reverse(edits)}
 
   defp resolve_regions([{:resolved, lines} | rest], decisions, merged, edits),
-    do: resolve_regions(rest, decisions, Enum.reverse(lines, merged), edits)
-
-  defp resolve_regions([{:fork, lines, edit} | rest], decisions, merged, edits),
-    do: resolve_regions(rest, decisions, Enum.reverse(lines, merged), [edit | edits])
-
-  defp resolve_regions([{:conflict, lines, lines, selected} | rest], decisions, merged, edits),
-    do:
-      resolve_regions(rest, decisions, Enum.reverse(lines, merged), Enum.reverse(selected, edits))
+    do: resolve_regions(rest, decisions, [{lines, nil, :keep} | merged], edits)
 
   defp resolve_regions(
-         [{:conflict, fork, _parent, selected} | rest],
+         [{:fork, lines, {ancestor, count, _, start} = edit} | rest],
+         decisions,
+         merged,
+         edits
+       ) do
+    choice = {lines, start, {:replay, ancestor, count}}
+    resolve_regions(rest, decisions, [choice | merged], [edit | edits])
+  end
+
+  defp resolve_regions(
+         [{:shared, lines, {_, _, _, start} = edit} | rest],
+         decisions,
+         merged,
+         edits
+       ),
+       do: resolve_regions(rest, decisions, [{lines, start, :keep} | merged], [edit | edits])
+
+  defp resolve_regions(
+         [{:conflict, lines, lines, {selected, start}} | rest],
+         decisions,
+         merged,
+         edits
+       ),
+       do:
+         resolve_regions(
+           rest,
+           decisions,
+           [{lines, start, :keep} | merged],
+           Enum.reverse(selected, edits)
+         )
+
+  defp resolve_regions(
+         [{:conflict, fork, parent, {selected, start}} | rest],
          [:accepted | decisions],
          merged,
          edits
@@ -427,7 +556,7 @@ defmodule Minga.Core.Diff do
          resolve_regions(
            rest,
            decisions,
-           Enum.reverse(fork, merged),
+           [{fork, start, {:replace, length(parent)}} | merged],
            Enum.reverse(selected, edits)
          )
 
@@ -437,46 +566,117 @@ defmodule Minga.Core.Diff do
          merged,
          edits
        ),
-       do: resolve_regions(rest, decisions, Enum.reverse(parent, merged), edits)
+       do: resolve_regions(rest, decisions, [{parent, nil, :keep} | merged], edits)
 
   defp resolve_regions(_regions, _decisions, _merged, _edits), do: {:error, :invalid_decisions}
 
-  # Converts myers_difference ops into a list of {start, count, replacement_lines}
-  # edit records, where start/count refer to the ancestor line range.
-  @spec ops_to_edits([{atom(), [String.t()]}]) :: [
-          {non_neg_integer(), non_neg_integer(), [String.t()]}
-        ]
-  defp ops_to_edits(ops) do
-    {edits, _pos} =
-      Enum.reduce(ops, {[], 0}, fn
-        {:eq, lines}, {acc, pos} ->
-          {acc, pos + Enum.count(lines)}
+  @spec kept_parent([String.t()]) :: projected_merge()
+  defp kept_parent([]), do: {{[], []}, []}
+  defp kept_parent(parent), do: {{parent, []}, [{:keep, {0, 0, length(parent)}}]}
 
-        {:del, del_lines}, {acc, pos} ->
-          {[{pos, Enum.count(del_lines), :pending_del} | acc], pos + Enum.count(del_lines)}
+  @spec place_results([chosen_region()]) :: projected_merge()
+  defp place_results(regions) do
+    {_, _, lines, placements, alignment} =
+      Enum.reduce(regions, {0, 0, [], [], []}, &place_region/2)
 
-        {:ins, ins_lines}, {[{start, count, :pending_del} | rest], pos} ->
-          # del followed by ins = replacement
-          {[{start, count, ins_lines} | rest], pos}
+    {{Enum.reverse(lines), Enum.reverse(placements)}, Enum.reverse(alignment)}
+  end
 
-        {:ins, ins_lines}, {acc, pos} ->
-          # pure insertion at current position
-          {[{pos, 0, ins_lines} | acc], pos}
-      end)
+  @typep placed_regions ::
+           {non_neg_integer(), non_neg_integer(), [String.t()], [placement()],
+            [parent_alignment()]}
+  @spec place_region(chosen_region(), placed_regions()) :: placed_regions()
+  defp place_region({lines, source, choice}, {parent, result, out, placements, alignment}) do
+    count = length(lines)
+    placements = place(placements, source, result, count)
 
-    # Resolve any trailing pending_del (pure deletion)
-    edits
-    |> Enum.map(fn
-      {start, count, :pending_del} -> {start, count, []}
-      edit -> edit
-    end)
-    |> Enum.reverse()
+    {parent_count, alignment} =
+      case choice do
+        :keep when count > 0 ->
+          {count, [{:keep, {parent, result, count}} | alignment]}
+
+        :keep ->
+          {0, alignment}
+
+        {:replay, ancestor, consumed} ->
+          {consumed, [{:replay, ancestor, parent, consumed, source, result, count} | alignment]}
+
+        {:replace, consumed} ->
+          {consumed, [{:reconcile, parent, result, consumed, count} | alignment]}
+      end
+
+    {parent + parent_count, result + count, Enum.reverse(lines, out), placements, alignment}
+  end
+
+  @spec place_edits(
+          [String.t()],
+          [merge_edit()],
+          non_neg_integer(),
+          non_neg_integer(),
+          [String.t()],
+          [placement()]
+        ) :: choice()
+  defp place_edits(lines, [], _pos, _result, out, placements),
+    do: {Enum.reverse(out, lines), Enum.reverse(placements)}
+
+  defp place_edits(
+         lines,
+         [{start, count, replacement, source} | edits],
+         pos,
+         result,
+         out,
+         placements
+       ) do
+    {unchanged, remaining} = consume_ancestor_region(lines, pos, start, start + count)
+    at = result + length(unchanged)
+    size = length(replacement)
+    out = Enum.reverse(replacement, Enum.reverse(unchanged, out))
+
+    place_edits(
+      remaining,
+      edits,
+      start + count,
+      at + size,
+      out,
+      place(placements, source, at, size)
+    )
+  end
+
+  @spec place([placement()], non_neg_integer() | nil, non_neg_integer(), non_neg_integer()) ::
+          [placement()]
+  defp place(placements, nil, _result, _count), do: placements
+  defp place(placements, _source, _result, 0), do: placements
+  defp place(placements, source, result, count), do: [{source, result, count} | placements]
+
+  # Ancestor and side coordinates advance independently over the same diff.
+  @spec ops_to_edits([{atom(), [String.t()]}]) :: [merge_edit()]
+  defp ops_to_edits(ops), do: ops |> prepend_ops(0, 0, []) |> Enum.reverse()
+
+  @spec prepend_ops([{atom(), [String.t()]}], non_neg_integer(), non_neg_integer(), [merge_edit()]) ::
+          [merge_edit()]
+  defp prepend_ops([], _base, _side, edits), do: edits
+
+  defp prepend_ops([{:eq, lines} | rest], base, side, edits) do
+    count = length(lines)
+    prepend_ops(rest, base + count, side + count, edits)
+  end
+
+  defp prepend_ops([{:del, lines}, {:ins, added} | rest], base, side, edits) do
+    count = length(lines)
+    prepend_ops(rest, base + count, side + length(added), [{base, count, added, side} | edits])
+  end
+
+  defp prepend_ops([{:del, lines} | rest], base, side, edits) do
+    count = length(lines)
+    prepend_ops(rest, base + count, side, [{base, count, [], side} | edits])
+  end
+
+  defp prepend_ops([{:ins, lines} | rest], base, side, edits) do
+    prepend_ops(rest, base, side + length(lines), [{base, 0, lines, side} | edits])
   end
 
   # Walks both edit lists against the ancestor, producing merge hunks.
-  @spec merge_edits([String.t()], [{non_neg_integer(), non_neg_integer(), [String.t()]}], [
-          {non_neg_integer(), non_neg_integer(), [String.t()]}
-        ]) :: [merge_region()]
+  @spec merge_edits([String.t()], [merge_edit()], [merge_edit()]) :: [merge_region()]
   defp merge_edits(ancestor, fork_edits, parent_edits) do
     do_merge(ancestor, 0, fork_edits, parent_edits, [])
     |> Enum.reverse()
@@ -489,7 +689,7 @@ defmodule Minga.Core.Diff do
 
   # Only fork edits remain.
   defp do_merge(ancestor_remaining, pos, [fe | fork_rest], [], acc) do
-    {start, count, replacement} = fe
+    {start, count, replacement, _side} = fe
     end_pos = start + count
 
     {unchanged, ancestor_remaining} =
@@ -502,7 +702,7 @@ defmodule Minga.Core.Diff do
 
   # Only parent edits remain.
   defp do_merge(ancestor_remaining, pos, [], [pe | parent_rest], acc) do
-    {start, count, replacement} = pe
+    {start, count, replacement, _side} = pe
     end_pos = start + count
 
     {unchanged, ancestor_remaining} =
@@ -530,8 +730,8 @@ defmodule Minga.Core.Diff do
   defp merge_overlapping_edits(
          ancestor_remaining,
          pos,
-         {{start, count, replacement}, fork_rest},
-         {{start, count, replacement}, parent_rest},
+         {{start, count, replacement, fork_start}, fork_rest},
+         {{start, count, replacement, _parent_start}, parent_rest},
          acc
        ) do
     end_pos = start + count
@@ -540,7 +740,7 @@ defmodule Minga.Core.Diff do
       consume_ancestor_region(ancestor_remaining, pos, start, end_pos)
 
     acc = prepend_non_empty_resolved(unchanged, acc)
-    acc = [{:fork, replacement, {start, count, replacement}} | acc]
+    acc = [{:shared, replacement, {start, count, replacement, fork_start}} | acc]
     do_merge(ancestor_remaining, end_pos, fork_rest, parent_rest, acc)
   end
 
@@ -548,8 +748,8 @@ defmodule Minga.Core.Diff do
   defp merge_overlapping_edits(
          ancestor_remaining,
          pos,
-         {{f_start, f_count, f_replacement}, fork_rest},
-         {{p_start, p_count, p_replacement}, parent_rest},
+         {{f_start, f_count, f_replacement, _side} = fork_edit, fork_rest},
+         {{p_start, p_count, _p_replacement, _side2} = parent_edit, parent_rest},
          acc
        )
        when f_start + f_count <= p_start and
@@ -560,13 +760,13 @@ defmodule Minga.Core.Diff do
       consume_ancestor_region(ancestor_remaining, pos, f_start, f_end)
 
     acc = prepend_non_empty_resolved(unchanged, acc)
-    acc = [{:fork, f_replacement, {f_start, f_count, f_replacement}} | acc]
+    acc = [{:fork, f_replacement, fork_edit} | acc]
 
     do_merge(
       ancestor_remaining,
       f_end,
       fork_rest,
-      [{p_start, p_count, p_replacement} | parent_rest],
+      [parent_edit | parent_rest],
       acc
     )
   end
@@ -575,8 +775,8 @@ defmodule Minga.Core.Diff do
   defp merge_overlapping_edits(
          ancestor_remaining,
          pos,
-         {{f_start, f_count, f_replacement}, fork_rest},
-         {{p_start, p_count, p_replacement}, parent_rest},
+         {{f_start, f_count, _f_replacement, _side} = fork_edit, fork_rest},
+         {{p_start, p_count, p_replacement, _side2}, parent_rest},
          acc
        )
        when p_start + p_count <= f_start and
@@ -592,7 +792,7 @@ defmodule Minga.Core.Diff do
     do_merge(
       ancestor_remaining,
       p_end,
-      [{f_start, f_count, f_replacement} | fork_rest],
+      [fork_edit | fork_rest],
       parent_rest,
       acc
     )
@@ -602,8 +802,8 @@ defmodule Minga.Core.Diff do
   defp merge_overlapping_edits(
          ancestor_remaining,
          pos,
-         {{f_start, f_count, f_replacement}, fork_rest},
-         {{p_start, p_count, p_replacement}, parent_rest},
+         {{f_start, f_count, _f_replacement, f_side} = fork_edit, fork_rest},
+         {{p_start, p_count, _p_replacement, _p_side} = parent_edit, parent_rest},
          acc
        ) do
     conflict_start = min(f_start, p_start)
@@ -612,9 +812,9 @@ defmodule Minga.Core.Diff do
     {conflict_end, fork_edits, fork_rest, parent_edits, parent_rest} =
       extend_conflict(
         conflict_end,
-        [{f_start, f_count, f_replacement}],
+        [fork_edit],
         fork_rest,
-        [{p_start, p_count, p_replacement}],
+        [parent_edit],
         parent_rest
       )
 
@@ -626,7 +826,7 @@ defmodule Minga.Core.Diff do
     acc = prepend_non_empty_resolved(unchanged, acc)
 
     do_merge(remaining, conflict_end, fork_rest, parent_rest, [
-      {:conflict, fork, parent, fork_edits} | acc
+      {:conflict, fork, parent, {fork_edits, f_side - (f_start - conflict_start)}} | acc
     ])
   end
 
@@ -654,7 +854,7 @@ defmodule Minga.Core.Diff do
   defp extend_conflict(
          end_pos,
          fork_edits,
-         [{start, count, _} = edit | rest],
+         [{start, count, _, _side} = edit | rest],
          parent_edits,
          parent_rest
        )
@@ -669,7 +869,7 @@ defmodule Minga.Core.Diff do
   end
 
   defp extend_conflict(end_pos, fork_edits, fork_rest, parent_edits, [
-         {start, count, _} = edit | rest
+         {start, count, _, _side} = edit | rest
        ])
        when start < end_pos do
     extend_conflict(
@@ -689,7 +889,7 @@ defmodule Minga.Core.Diff do
         ]
   defp apply_region_edits(lines, _pos, [], acc), do: Enum.reverse(acc, lines)
 
-  defp apply_region_edits(lines, pos, [{start, count, replacement} | edits], acc) do
+  defp apply_region_edits(lines, pos, [{start, count, replacement, _side} | edits], acc) do
     {unchanged, remaining} = consume_ancestor_region(lines, pos, start, start + count)
     acc = Enum.reverse(replacement, Enum.reverse(unchanged, acc))
     apply_region_edits(remaining, start + count, edits, acc)

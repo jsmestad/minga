@@ -39,19 +39,17 @@ func (m Model) overlayLayer() *lipgloss.Layer {
 	if len(lines) == 0 {
 		return nil
 	}
-	// Bottom-align the content inside the band rect: the rect is bottom-anchored
-	// (its bottom edge sits directly above the minibuffer, where the old footer-
-	// append put the overlay), so a shorter content block is pinned to the rect's
-	// bottom rows rather than its top. For the count-derivable surfaces the BEAM
-	// already sizes the rect to the content, so this offset is ~0; for the wrap-
-	// dependent surfaces it pushes the content down to the bottom and leaves the
-	// residual phantom zone ABOVE the content (documented in FooterOverlays).
-	y := rect.Y + rect.Height - len(lines)
+	y := rect.Y
+	if winner.surfaceID != surfaceIDHoverPopup {
+		// Keep shorter footer overlays pinned to the bottom of their band.
+		// An anchored hover stays at the authored top when its scroll window shortens.
+		y += rect.Height - len(lines)
+	}
 	// Scan the overlay's content for zone markers and merge them into the frame's
 	// zone map at the placement offset, so chrome zone routing (completion items,
 	// hover action) keeps working even though the overlay is composited as its own
 	// layer instead of footer-appended (#2281). ScanInto returns the marker-
-	// stripped content for compositing; zones are offset by the bottom-aligned Y.
+	// stripped content for compositing at the same Y.
 	content := m.zones.ScanInto(strings.Join(lines, "\n"), rect.X, y)
 	// Z is offset above the base content/window layers (Z 0 and 1 in composeFrame)
 	// while staying below the picker/which-key floating layers; the placement z is
@@ -227,17 +225,130 @@ func (m Model) surfaceRectOnGrid(surfaceID uint16, grid uiRect) (uiRect, bool) {
 }
 
 func (m Model) renderHover(hover protocol.HoverPopup) []string {
-	style := m.panelStyle()
-	title := fmt.Sprintf("Hover %d:%d", hover.AnchorRow+1, hover.AnchorCol+1)
-	lines := []string{style.Bold(true).Foreground(m.palette().Accent()).Render(fit(title, m.width))}
-	for _, line := range hover.Lines[:min(len(hover.Lines), max(m.maxOverlayHeight()-1, 0))] {
-		lines = append(lines, style.Render(fit(renderRichLine(line), m.width)))
+	rect, _ := m.surfaceScreenRect(surfaceIDHoverPopup)
+	limit := min(rect.Height, m.maxOverlayHeight())
+	action, _ := m.hoverAction()
+	if action.Actions {
+		return m.renderCodeHover(hover, action, rect)
 	}
-	if action, ok := m.hoverAction(); ok && action.Visible {
-		rendered := style.Foreground(m.palette().Accent()).Render(fit(action.Name, m.width))
-		lines = append(lines, m.zones.Mark(zoneIDHoverAction, rendered))
+	hasFooter := limit > 1 && action.Offer != 0 && action.OpenLabel != ""
+	bodyLimit := limit - 1
+	if hasFooter {
+		bodyLimit--
 	}
-	return takeLines(lines, m.maxOverlayHeight())
+	style := m.panelStyle().Width(0)
+	title := xansi.Truncate(fmt.Sprintf("Hover %d:%d", hover.AnchorRow+1, hover.AnchorCol+1), rect.Width, "")
+	lines := make([]string, 0, max(limit, 1))
+	lines = append(lines, style.Width(rect.Width).Bold(true).Render(title))
+	offset := min(int(hover.ScrollOffset), len(hover.Lines))
+	end := min(len(hover.Lines), offset+max(bodyLimit, 0))
+	for row, line := range hover.Lines[offset:end] {
+		lines = append(lines, m.renderHoverLine(line, style, rect.Width, action.Offer, offset+row))
+	}
+	if hasFooter {
+		footer, _ := m.hoverFooter(action, style, rect.Width)
+		lines = append(lines, style.Width(rect.Width).Render(footer))
+	}
+	return lines
+}
+
+// The BEAM already wraps and pages code hover to the placement's inner width.
+// Only decoration and click hit regions are local to the terminal.
+func (m Model) renderCodeHover(hover protocol.HoverPopup, action protocol.HoverAction, rect uiRect) []string {
+	if rect.Width < 6 || rect.Height < 1 {
+		return nil
+	}
+	width := rect.Width - 4
+	style := m.panelStyle().Width(0)
+	if rect.Height < 3 {
+		if len(hover.Lines) == 0 {
+			return nil
+		}
+		return []string{m.renderHoverLine(hover.Lines[0], style, rect.Width, action.Offer, 0)}
+	}
+	border := style.Foreground(m.palette().PopupBorder())
+	hint := "K more"
+	if hover.Focused {
+		border = border.Foreground(m.palette().Accent())
+		hint = "j/k scroll · q close"
+	}
+	title := xansi.Truncate(hint, width-1, "")
+	lines := make([]string, 0, rect.Height)
+	lines = append(lines, border.Render("╭─")+style.Render(" "+title+" ")+
+		border.Render(strings.Repeat("─", rect.Width-5-xansi.StringWidth(title))+"╮"))
+	inset := style.Render(" ")
+	left, right := border.Render("│")+inset, inset+border.Render("│")
+	for row, line := range hover.Lines[:min(len(hover.Lines), rect.Height-2)] {
+		lines = append(lines, left+m.renderHoverLine(line, style, width, action.Offer, row)+right)
+	}
+	footer, cells := m.hoverFooter(action, style, width)
+	if cells > 0 {
+		footer = inset + footer + inset
+		cells += 2
+	}
+	rail := "╰" + strings.Repeat("─", rect.Width-2-cells)
+	lines = append(lines, border.Render(rail)+footer+border.Render("╯"))
+	return lines
+}
+
+func (m Model) hoverFooter(action protocol.HoverAction, style lipgloss.Style, width int) (string, int) {
+	const actions = "g. actions"
+	label := style.Underline(true)
+	footer, cells := "", 0
+	openWidth := xansi.StringWidth(action.OpenLabel)
+	if openWidth > 0 && openWidth <= width {
+		footer = m.zones.Mark(zoneIDHoverAction(action.Offer, 0), label.Render(action.OpenLabel))
+		cells = openWidth
+	}
+	separator := ""
+	if cells > 0 {
+		separator = gap(spacePanel)
+	}
+	actionsWidth := len(actions) + xansi.StringWidth(separator)
+	if action.Actions && cells+actionsWidth <= width {
+		footer += style.Render(separator) + m.zones.Mark(zoneIDHoverAction(action.Offer, 1), label.Render(actions))
+		cells += actionsWidth
+	}
+	return footer, cells
+}
+
+func (m Model) renderHoverLine(line protocol.RichLine, base lipgloss.Style, width int, offer uint64, row int) string {
+	var rendered strings.Builder
+	for _, segment := range line.Segments {
+		if width <= 0 {
+			break
+		}
+		text := segment.Text
+		cells := xansi.StringWidth(text)
+		if cells > width {
+			text = xansi.Truncate(text, width, "")
+			cells = xansi.StringWidth(text)
+		}
+		width -= cells
+		style := base
+		switch segment.Style {
+		case 1, 7, 8, 9:
+			style = style.Bold(true)
+		case 2:
+			style = style.Italic(true)
+		case 3:
+			style = style.Bold(true).Italic(true)
+		case 13:
+			style = style.Foreground(packedRGB(segment.FG)).
+				Bold(segment.Flags&1 != 0).Italic(segment.Flags&2 != 0).Underline(segment.Flags&4 != 0)
+		case 14, 15:
+			style = style.Underline(true).Bold(segment.Style == 15)
+		}
+		styled := style.Render(text)
+		if offer != 0 && segment.LinkID >= 2 {
+			styled = m.zones.Mark(zoneIDHoverLink(offer, segment.LinkID, row), styled)
+		}
+		rendered.WriteString(styled)
+	}
+	if width > 0 {
+		rendered.WriteString(base.Render(strings.Repeat(" ", width)))
+	}
+	return rendered.String()
 }
 
 func (m Model) renderSignature(sig protocol.SignatureHelp) []string {

@@ -37,6 +37,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
 
   alias Minga.RenderModel.Window.Viewport
   alias Minga.Test.GUIWindowDecoder
+  alias Minga.Test.HeadlessPort
 
   defp window(opts) do
     %Window{
@@ -129,6 +130,69 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoderTest do
     assert byte_size(encoded) == 17
     assert Bitwise.band(flags, 0x01) != 0
     assert Bitwise.band(flags, 0x02) == 0
+  end
+
+  test "sends the hover source on resident overlay updates without sending rows" do
+    highlight = %DocumentHighlight{
+      start_row: 2,
+      start_col: 3,
+      end_row: 2,
+      end_col: 9,
+      kind: :hover
+    }
+
+    model =
+      window(
+        window_id: 9,
+        content_epoch: 42,
+        row_store_mode: {:resident, 20},
+        document_highlights: [highlight]
+      )
+
+    opcode = Opcodes.gui_window_overlay_delta()
+
+    assert <<^opcode, 9::16, 42::32, 4, 0::16, 0::16, 0, 0xFFFF_FFFF::32, 1::16, 2::16, 3::16,
+             2::16, 9::16, 4>> = WindowEncoder.encode_overlay_delta(model)
+
+    assert <<^opcode, 9::16, 42::32, 0, 0::16, 0::16, 0, 0xFFFF_FFFF::32>> =
+             WindowEncoder.encode_overlay_delta(%{model | document_highlights: []})
+  end
+
+  test "retained hover source is replaced by row deltas and cleared without touching rows" do
+    port = start_supervised!({HeadlessPort, width: 80, height: 24})
+
+    row = %Row{
+      row_id: Row.stable_id(:normal, 0),
+      row_type: :normal,
+      buf_line: 0,
+      text: "alpha",
+      spans: [],
+      content_hash: 1
+    }
+
+    first = %DocumentHighlight{start_row: 0, start_col: 0, end_row: 0, end_col: 3, kind: :hover}
+    content = window(row_store_mode: {:resident, 1}, rows: [row], document_highlights: [first])
+
+    assert :accepted =
+             HeadlessPort.send_commands(port, [WindowEncoder.encode_window_content(content)])
+
+    assert %{document_highlights: [%{kind: :hover, start_col: 0, end_col: 3}]} =
+             HeadlessPort.window(port, 1)
+
+    changed = %{row | text: "a beta", content_hash: 2}
+    second = %{first | start_col: 2, end_col: 6}
+    content = %{content | rows: [changed], document_highlights: [second]}
+    {:ok, delta} = RowDelta.new(1, 1, [RowSplice.new(0, 1, [changed])])
+    {packet, false} = WindowEncoder.encode_rows_delta(content, delta, %{row.row_id => 1})
+    assert :accepted = HeadlessPort.send_commands(port, [packet])
+
+    assert %{rows: [retained], document_highlights: [%{kind: :hover, start_col: 2, end_col: 6}]} =
+             HeadlessPort.window(port, 1)
+
+    assert retained.text == "a beta"
+    clear = WindowEncoder.encode_overlay_delta(%{content | document_highlights: []})
+    assert :accepted = HeadlessPort.send_commands(port, [clear])
+    assert %{rows: [^retained], document_highlights: []} = HeadlessPort.window(port, 1)
   end
 
   test "encodes bounded resident diagnostic range replacements with the documented flag" do

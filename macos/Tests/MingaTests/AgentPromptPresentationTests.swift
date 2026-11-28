@@ -361,7 +361,7 @@ struct AgentPromptPresentationTests {
         }
         #expect(typed == "typed 界".unicodeScalars.map(\.value))
         let targets = spy.actions.compactMap { action -> EditorTextTarget? in
-            if case .editorText(let target, _, _, _, _, _, _) = action { return target }
+            if case .editorText(let target, _, _, _, _, _, _, _, _) = action { return target }
             return nil
         }
         #expect(targets.count == 3)

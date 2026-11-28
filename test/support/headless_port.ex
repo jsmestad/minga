@@ -238,6 +238,11 @@ defmodule Minga.Test.HeadlessPort do
   @doc "Returns the decoded file tree (rows, selection, focus) from the latest committed frame."
   @spec file_tree(GenServer.server()) :: map() | nil
   def file_tree(server), do: GenServer.call(server, :file_tree)
+
+  @doc "Returns the retained decoded wire state for one window."
+  @spec window(GenServer.server(), non_neg_integer()) :: map() | nil
+  def window(server, id), do: GenServer.call(server, {:window, id})
+
   @doc "Returns just the text of a specific row."
   @spec get_row_text(GenServer.server(), non_neg_integer()) :: String.t()
   def get_row_text(server, row) do
@@ -404,6 +409,8 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call(:agent_chat, _from, state), do: {:reply, state.agent_chat, state}
   def handle_call(:file_tree, _from, state), do: {:reply, state.file_tree, state}
+
+  def handle_call({:window, id}, _from, state), do: {:reply, Map.get(state.windows, id), state}
 
   def handle_call({:get_row_text, row}, _from, state) do
     text =
@@ -594,7 +601,7 @@ defmodule Minga.Test.HeadlessPort do
       |> Map.put(:cursor_row, cursor_row)
       |> Map.put(:cursor_col, cursor_col)
       |> Map.put(:cursor_shape, decode_cursor_shape(cursor_shape))
-      |> maybe_put_overlay_cursorline(flags, tail)
+      |> decode_overlay_tail(flags, tail)
 
     %{state | windows: Map.put(state.windows, window_id, window)}
   end
@@ -1193,6 +1200,7 @@ defmodule Minga.Test.HeadlessPort do
       scroll_left: 0,
       content_epoch: 0,
       geometry: nil,
+      document_highlights: [],
       base_rows: base_rows
     }
 
@@ -1262,6 +1270,9 @@ defmodule Minga.Test.HeadlessPort do
     true = length(rows) == result_count
     %{result | rows: rows}
   end
+
+  defp decode_delta_section(0x06, payload, result, _row_cache),
+    do: %{result | document_highlights: GUIWindowDecoder.decode_document_highlights(payload)}
 
   defp decode_delta_section(0x08, payload, result, _row_cache),
     do: Map.put(result, :geometry, decode_geometry_payload(payload))
@@ -1748,11 +1759,33 @@ defmodule Minga.Test.HeadlessPort do
     |> then(&if(row.selected?, do: "> " <> &1, else: "  " <> &1))
   end
 
-  defp maybe_put_overlay_cursorline(window, flags, <<row::16, r::8, g::8, b::8>>)
-       when (flags &&& 2) == 2,
-       do: Map.put(window, :cursorline, %{row: row, bg_rgb: r <<< 16 ||| g <<< 8 ||| b})
+  @spec decode_overlay_tail(map(), non_neg_integer(), binary()) :: map()
+  defp decode_overlay_tail(window, flags, tail) do
+    {cursorline, <<_cursor_utf16::32, highlights::binary>>} =
+      if (flags &&& 2) == 2 do
+        <<row::16, bg::24, rest::binary>> = tail
+        {%{row: row, bg_rgb: bg}, rest}
+      else
+        {nil, tail}
+      end
 
-  defp maybe_put_overlay_cursorline(window, _flags, _tail), do: window
+    window = Map.put(window, :cursorline, cursorline)
+
+    cond do
+      (flags &&& 4) == 4 ->
+        Map.put(
+          window,
+          :document_highlights,
+          GUIWindowDecoder.decode_document_highlights(highlights)
+        )
+
+      Map.get(window, :sequential_rows, false) or Map.get(window, :wrapped_rows, false) ->
+        Map.put(window, :document_highlights, [])
+
+      true ->
+        window
+    end
+  end
 
   defp semantic_attrs_for_col(spans, col) do
     spans

@@ -1010,6 +1010,7 @@ final class EditorNSView: MTKView {
 
         registerForDraggedTypes([.fileURL])
 
+        window.acceptsMouseMovedEvents = true
         updateTrackingArea()
         observeScrollerStyle()
         observeAccessibilityChanges()
@@ -1938,7 +1939,9 @@ final class EditorNSView: MTKView {
             guard lastTextHover != hit.target else { return true }
             lastTextHover = hit.target
         }
-        encoder.send(.editorText(target: hit.target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: eventType == MOUSE_DRAG ? hit.scrollX : 0, scrollY: eventType == MOUSE_DRAG ? hit.scrollY : 0))
+        let row = eventType == MOUSE_MOTION ? Int16(clamping: Int(point.y / effectiveCellHeight)) : 0
+        let col = eventType == MOUSE_MOTION ? cellColumn(at: point, row: row) : 0
+        encoder.send(.editorText(target: hit.target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: eventType == MOUSE_DRAG ? hit.scrollX : 0, scrollY: eventType == MOUSE_DRAG ? hit.scrollY : 0, anchorRow: UInt16(clamping: row), anchorCol: UInt16(clamping: col)))
         return true
     }
 
@@ -2123,6 +2126,11 @@ final class EditorNSView: MTKView {
 
     override func mouseMoved(with event: NSEvent) {
         guard !inLiveResize else { return }
+        if dispatcher.guiState.hoverPopupState.capturesPointer(at: event.locationInWindow, window: window) {
+            // An AppKit tracking area still receives motion under a SwiftUI overlay.
+            lastTextHover = nil
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         if editorPresentation?.textLayout?.promptTransform == nil {
             setDividerCursorState(dividerHitState(at: point))

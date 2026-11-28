@@ -56,6 +56,11 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
   test "explicit save before dirty debounce reopens without layout, with exact authorship", ctx do
     first = start_buffer(ctx)
     replace(first, {0, 0}, 6, "AFTER", @first)
+
+    assert {@task, @first, written_at, :unreviewed} =
+             Buffer.attribution_at(first, {0, 1}, Buffer.version(first))
+
+    assert is_integer(written_at)
     assert :ok = Buffer.save(first)
     assert :ok = GenServer.stop(first)
     assert {:ok, %{kind: :clean}, ""} = Swap.read(swap_path(ctx))
@@ -65,6 +70,10 @@ defmodule Minga.Buffer.ReviewRecoveryTest do
     assert Buffer.content(reopened) == "AFTER\nother\n"
     refute Buffer.dirty?(reopened)
     assert Buffer.author_at(reopened, {0, 0}) == @task
+
+    assert Buffer.attribution_at(reopened, {0, 1}, Buffer.version(reopened)) ==
+             {@task, @first, written_at, :unreviewed}
+
     assert :ok = Buffer.undo(reopened)
     assert Buffer.content(reopened) == "AFTER\nother\n"
 

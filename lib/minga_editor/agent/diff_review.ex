@@ -112,7 +112,7 @@ defmodule MingaEditor.Agent.DiffReview do
   def from_fork_snapshot(path, revision, regions) do
     hunks =
       Enum.map(regions, fn
-        {:fork, lines, _edit} -> {:resolved, lines}
+        {side, lines, _edit} when side in [:fork, :shared] -> {:resolved, lines}
         {:conflict, fork, parent, _edits} -> {:conflict, fork, parent}
         {:resolved, _lines} = region -> region
       end)

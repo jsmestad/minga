@@ -1954,23 +1954,23 @@ struct CommandDispatcherRoutingTests {
         let (actionFirstDispatcher, actionFirstGUI) = makeDispatcher()
         actionFirstDispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         actionFirstDispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        actionFirstDispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open docs"))
+        actionFirstDispatcher.dispatch(.guiHoverAction(.init(id: 32, showsActions: true, openLabel: "Open docs")))
         actionFirstDispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 1, anchorCol: 2, focused: false, scrollOffset: 0, lines: [line]))
         actionFirstDispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        #expect(actionFirstGUI.hoverPopupState.content?.openActionName == "Open docs")
+        #expect(actionFirstGUI.hoverPopupState.content?.offer == .init(id: 32, showsActions: true, openLabel: "Open docs"))
 
         let (payloadFirstDispatcher, payloadFirstGUI) = makeDispatcher()
         payloadFirstDispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         payloadFirstDispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         payloadFirstDispatcher.dispatch(.guiHoverPopup(visible: true, anchorRow: 3, anchorCol: 4, focused: false, scrollOffset: 0, lines: [line]))
-        payloadFirstDispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open source"))
+        payloadFirstDispatcher.dispatch(.guiHoverAction(.init(id: 33, showsActions: false, openLabel: "Open source")))
         payloadFirstDispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        #expect(payloadFirstGUI.hoverPopupState.content?.openActionName == "Open source")
+        #expect(payloadFirstGUI.hoverPopupState.content?.offer == .init(id: 33, showsActions: false, openLabel: "Open source"))
 
         payloadFirstDispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
-        payloadFirstDispatcher.dispatch(.guiHoverAction(visible: false, actionName: ""))
+        payloadFirstDispatcher.dispatch(.guiHoverAction(.hidden))
         payloadFirstDispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
-        #expect(payloadFirstGUI.hoverPopupState.content?.openActionName == nil)
+        #expect(payloadFirstGUI.hoverPopupState.content?.offer == nil)
         #expect(payloadFirstGUI.hoverPopupState.content?.lines.count == 1)
     }
 
@@ -1983,7 +1983,7 @@ struct CommandDispatcherRoutingTests {
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
-        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Stale action"))
+        dispatcher.dispatch(.guiHoverAction(.init(id: 32, showsActions: true, openLabel: "Stale action")))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(gui.hoverPopupState.content == nil)
 
@@ -1992,7 +1992,7 @@ struct CommandDispatcherRoutingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
         #expect(gui.hoverPopupState.content?.lines.first?.segments.first?.text == "later hover")
-        #expect(gui.hoverPopupState.content?.openActionName == nil)
+        #expect(gui.hoverPopupState.content?.offer == nil)
     }
 
     @Test("signature help and float popup route complete visible content")
@@ -2036,10 +2036,10 @@ struct CommandDispatcherRoutingTests {
                 Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "last good hover"),
             ])]
         ))
-        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Open last good"))
+        dispatcher.dispatch(.guiHoverAction(.init(id: 30, showsActions: true, openLabel: "Open last good")))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(gui.completionState.content?.items.first?.label == "last good")
-        #expect(gui.hoverPopupState.content?.openActionName == "Open last good")
+        #expect(gui.hoverPopupState.content?.offer?.id == 30)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiCompletion(
@@ -2047,7 +2047,7 @@ struct CommandDispatcherRoutingTests {
             items: [Wire.CompletionItem(kind: 2, label: "rejected", detail: "")],
             documentation: "must not publish"
         ))
-        dispatcher.dispatch(.guiHoverAction(visible: true, actionName: "Rejected action"))
+        dispatcher.dispatch(.guiHoverAction(.init(id: 31, showsActions: false, openLabel: "Rejected action")))
         dispatcher.dispatch(.guiHoverPopup(
             visible: true, anchorRow: 9, anchorCol: 10, focused: true,
             scrollOffset: 0,
@@ -2066,7 +2066,7 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.completionState.content?.documentation == "published")
         #expect(gui.completionState.content?.anchorRow == 2)
         #expect(gui.hoverPopupState.content?.lines.first?.segments.first?.text == "last good hover")
-        #expect(gui.hoverPopupState.content?.openActionName == "Open last good")
+        #expect(gui.hoverPopupState.content?.offer == .init(id: 30, showsActions: true, openLabel: "Open last good"))
     }
 
     // MARK: - Batch lifecycle

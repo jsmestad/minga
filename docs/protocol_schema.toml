@@ -99,7 +99,9 @@ version = "2.0.0"
 # protocol_version 58 adds independent authored-region revisions to gui_gutter (0x7B).
 # protocol_version 59 requires gui_theme's shared You shade (0x81) and kept Minga ink (0x82) slots.
 # protocol_version 60 adds the shared act menu (0xB1), native file-location actions (0xB2), focus owner surface 16, and exact menu, ribbon and chrome target actions (0x78–0x7A).
-protocol_version = 60
+# protocol_version 61 scopes hover activations to one presented offer and names the exact action (0x3F). gui_hover_action (0x96) carries the offer's ID and footer; gui_hover_popup (0x81) segments can carry exact link action IDs.
+# gui_window_update (0xA0) optionally carries the transient document-highlight section (kind 4) without replacing resident rows.
+protocol_version = 61
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -237,7 +239,7 @@ category = "input"
 name = "editor_text_event"
 value = 0x1E
 direction = "frontend_to_beam"
-framing = "fixed:33"
+framing = "fixed:39"
 
 # Durable, ordered lifetime signal: state 0 discards an unused candidate; state 1
 # activates the presentation used by subsequent editor text input.
@@ -855,6 +857,7 @@ framing = "len32"
 
 [[opcodes]]
 category = "gui_semantic"
+# Hover link styles 14/15 insert a link_action_id(u16) before the text.
 name = "gui_hover_popup"
 value = 0x81
 direction = "beam_to_frontend"
@@ -943,6 +946,7 @@ framing = "custom"
 
 [[opcodes]]
 category = "gui_semantic"
+# Payload: valid(u8); when set, offer_id(u64) + actions(u8) + open_label(string16).
 name = "gui_hover_action"
 value = 0x96
 direction = "beam_to_frontend"
@@ -1388,6 +1392,7 @@ name = "tab_copy_path"
 value = 0x3E
 
 [[gui_actions]]
+# Payload: offer_id(u64) + action_id(u16); 0 = Open, 1 = Act menu, 2+ = documentation link.
 name = "hover_open_action"
 value = 0x3F
 

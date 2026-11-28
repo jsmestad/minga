@@ -147,10 +147,10 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
     [encode_window_content(window)] ++ encode_frame_metadata(window)
   end
 
-  @doc "Encodes a cursor and cursorline overlay delta for a retained GUI window."
+  @doc "Encodes transient overlays for a retained GUI window."
   @spec encode_overlay_delta(RenderWindow.t()) :: binary()
   def encode_overlay_delta(%RenderWindow{row_store_mode: {:resident, _count}} = window) do
-    encode_overlay_delta_payload(window, false, nil, nil)
+    encode_overlay_delta_payload(window, false, nil, nil, window.document_highlights)
   end
 
   def encode_overlay_delta(%RenderWindow{} = window) do
@@ -158,7 +158,8 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
       window,
       Map.get(window, :cursor_visible, true),
       window.cursorline,
-      window.accessibility_cursor
+      window.accessibility_cursor,
+      []
     )
   end
 
@@ -166,14 +167,17 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
          window,
          cursor_visible,
          cursorline_model,
-         accessibility_cursor
+         accessibility_cursor,
+         highlights
        ) do
     command = :gui_window_overlay_delta
     cursorline = encode_cursorline_section(cursorline_model, window.rect, command)
+    highlight_payload = if highlights != [], do: encode_document_highlights(highlights, command)
 
     flags =
       if(cursor_visible, do: 0x01, else: 0x00) |||
-        if(cursorline != nil, do: 0x02, else: 0x00)
+        if(cursorline != nil, do: 0x02, else: 0x00) |||
+        if(highlight_payload != nil, do: 0x04, else: 0x00)
 
     command
     |> Writer.new()
@@ -192,6 +196,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         nil -> 0xFFFF_FFFF
       end
     )
+    |> Writer.append(highlight_payload || [])
     |> Writer.finish()
   end
 
@@ -704,12 +709,21 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
         section_encoder
       )
 
+    highlights =
+      case sw.document_highlights do
+        [] ->
+          <<>>
+
+        ranges ->
+          section_encoder.(@section_wc_highlights, encode_document_highlights(ranges, command))
+      end
+
     %{
-      sections: [],
+      sections: if(highlights == <<>>, do: [], else: [highlights]),
       selection: <<>>,
       search: <<>>,
       diagnostics: <<>>,
-      highlights: <<>>,
+      highlights: highlights,
       annotations: <<>>,
       geometry: geometry,
       cursorline: [],
@@ -1103,6 +1117,7 @@ defmodule Minga.Frontend.Adapter.GUI.WindowEncoder do
   defp encode_highlight_kind(:text), do: 1
   defp encode_highlight_kind(:read), do: 2
   defp encode_highlight_kind(:write), do: 3
+  defp encode_highlight_kind(:hover), do: 4
 
   # ── Line annotations ─────────────────────────────────────────────────────
 

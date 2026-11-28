@@ -808,10 +808,10 @@ final class CommandDispatcher {
                 focused: payload.focused,
                 scrollOffset: payload.scrollOffset,
                 rawLines: payload.lines,
-                openAction: update.action.map { (visible: $0.visible, name: $0.name) }
+                openAction: update.action
             )
         } else if let action = update.action {
-            guiState.hoverPopupState.updateOpenAction(visible: action.visible, name: action.name)
+            guiState.hoverPopupState.updateOpenAction(action)
         }
     }
 
@@ -1423,8 +1423,8 @@ final class CommandDispatcher {
                 focused: focused, scrollOffset: scrollOffset, rawLines: lines
             )
 
-        case .guiHoverAction(let visible, let actionName):
-            guiState.hoverPopupState.updateOpenAction(visible: visible, name: actionName)
+        case .guiHoverAction(let offer):
+            guiState.hoverPopupState.updateOpenAction(offer)
 
         case .guiSignatureHelp(let visible, let anchorRow, let anchorCol,
                                 let activeSignature, let activeParameter, let signatures):

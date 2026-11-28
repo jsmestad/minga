@@ -116,6 +116,20 @@ defmodule MingaEditor.State.MouseTest do
       Process.cancel_timer(timer)
     end
 
+    test "only the latest dwell can trigger hover, and it can trigger only once" do
+      old = make_ref()
+      current = make_ref()
+      mouse = %Mouse{} |> Mouse.set_hover(5, 10) |> Mouse.accept_hover_timer(old)
+      {moved, ^old, true} = Mouse.prepare_hover(mouse, 6, 11, backend: :tui)
+      armed = Mouse.accept_hover_timer(moved, current)
+
+      assert Mouse.dwell_elapsed(armed, old) == :stale
+      assert {:ready, elapsed} = Mouse.dwell_elapsed(armed, current)
+      assert Mouse.hover_position(elapsed) == {6, 11}
+      assert Mouse.dwell_elapsed(elapsed, current) == :stale
+      assert Mouse.dwell_elapsed(Mouse.clear_hover(armed), current) == :stale
+    end
+
     test "hover_position/1 returns active position only" do
       assert Mouse.hover_position(%Mouse{}) == nil
       assert %Mouse{} |> Mouse.set_hover(5, 10) |> Mouse.hover_position() == {5, 10}

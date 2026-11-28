@@ -5,7 +5,8 @@ defmodule MingaEditor.Input.Hover do
   When a hover popup is visible, this handler intercepts keys:
 
   - **K** (when not focused): focuses into the hover for scrolling
-  - **j/k** (when focused): scrolls the hover content
+  - **j/k** or **Ctrl-D/Ctrl-U** (when focused): scrolls the hover content
+  - **y** (when focused): yanks the whole displayed document
   - **q/Escape** (when focused): dismisses the hover
   - **Any other key** (when not focused): dismisses the hover and passes through
 
@@ -17,13 +18,15 @@ defmodule MingaEditor.Input.Hover do
 
   @type state :: MingaEditor.Input.Handler.handler_state()
 
-  alias MingaEditor.Commands
+  alias MingaEditor.Commands.Helpers
   alias MingaEditor.HoverPopup
-  alias MingaEditor.LspActions
 
   # Escape and Enter codepoints from the port protocol
   @key_escape 27
   @key_enter 13
+  @key_tab 9
+  @shift 0x01
+  @control 0x02
   # Control, Alt and Command: a key held with any of them is a chord.
   @chord_mods 0x0E
 
@@ -32,6 +35,34 @@ defmodule MingaEditor.Input.Hover do
           MingaEditor.Input.Handler.result()
   def handle_key(%{shell_runtime: %{state: %{hover_popup: nil}}} = state, _codepoint, _modifiers) do
     {:passthrough, state}
+  end
+
+  # The normal-state trie owns g. and all other g commands. Keep the offer alive only for g.
+  def handle_key(
+        %{
+          shell_runtime: %{state: %{hover_popup: %HoverPopup{code_source: source}}},
+          workspace: %{editing: %{mode: :normal, mode_state: %Minga.Mode.State{prefix_keys: []}}}
+        } = state,
+        ?g,
+        0
+      )
+      when source != nil,
+      do: {:passthrough, state}
+
+  def handle_key(
+        %{
+          shell_runtime: %{state: %{hover_popup: %HoverPopup{code_source: source}}},
+          workspace: %{
+            editing: %{mode: :normal, mode_state: %Minga.Mode.State{prefix_keys: ["g"]}}
+          }
+        } = state,
+        codepoint,
+        mods
+      )
+      when source != nil do
+    if codepoint == ?. and mods == 0,
+      do: {:passthrough, state},
+      else: {:passthrough, MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)}
   end
 
   # K pressed while hover is visible but not focused: focus into it.
@@ -46,47 +77,97 @@ defmodule MingaEditor.Input.Hover do
     {:handled, MingaEditor.Shell.Traditional.HoverPopupWorkflow.focus(state)}
   end
 
-  # When focused, j scrolls down
   def handle_key(
-        %{shell_runtime: %{state: %{hover_popup: %MingaEditor.HoverPopup{focused: true}}}} = state,
-        ?j,
-        0
-      ) do
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        codepoint,
+        modifiers
+      )
+      when (codepoint == ?j and modifiers == 0) or (codepoint == ?d and modifiers == @control) do
     {:handled, MingaEditor.Shell.Traditional.HoverPopupWorkflow.scroll_down(state)}
   end
 
-  # When focused, k scrolls up
   def handle_key(
-        %{shell_runtime: %{state: %{hover_popup: %MingaEditor.HoverPopup{focused: true}}}} = state,
-        ?k,
-        0
-      ) do
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true}}}} = state,
+        codepoint,
+        modifiers
+      )
+      when (codepoint == ?k and modifiers == 0) or (codepoint == ?u and modifiers == @control) do
     {:handled, MingaEditor.Shell.Traditional.HoverPopupWorkflow.scroll_up(state)}
   end
 
-  # When focused, Enter accepts the popup's Open action when one exists.
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true} = popup}}} = state,
+        ?y,
+        0
+      ) do
+    case HoverPopup.copy_text(popup) do
+      "" -> {:handled, state}
+      text -> {:handled, Helpers.put_register(state, text, :yank)}
+    end
+  end
+
+  def handle_key(
+        %{shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, links: links}}}} =
+          state,
+        @key_tab,
+        mods
+      )
+      when tuple_size(links) > 0 and mods in [0, @shift] do
+    direction = if mods == @shift, do: :previous, else: :next
+    {:handled, MingaEditor.Shell.Traditional.HoverPopupWorkflow.select_link(state, direction)}
+  end
+
   def handle_key(
         %{
-          shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}}
+          shell_runtime: %{
+            state: %{hover_popup: %HoverPopup{focused: true, selected_link: id, offer_id: offer}}
+          }
         } = state,
         @key_enter,
         mods
       )
-      when action != nil and Bitwise.band(mods, @chord_mods) == 0 do
-    state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
-    {:handled, execute_open_action(state, action)}
+      when id != nil do
+    if Bitwise.band(mods, @chord_mods) == 0,
+      do:
+        {:handled,
+         MingaEditor.Shell.Traditional.HoverPopupWorkflow.activate_offer(
+           state,
+           offer,
+           {:link, id}
+         )},
+      else: {:handled, state}
+  end
+
+  # An attributed code hover offers its conversation immediately. Other popups require focus.
+  def handle_key(
+        %{
+          shell_runtime: %{
+            state: %{
+              hover_popup: %HoverPopup{focused: focused, code_source: source, open_action: action}
+            }
+          }
+        } = state,
+        @key_enter,
+        mods
+      )
+      when action != nil and (focused or source != nil) and Bitwise.band(mods, @chord_mods) == 0 do
+    {:handled, MingaEditor.Shell.Traditional.HoverPopupWorkflow.activate_open(state)}
   end
 
   # Enter held with Control, Alt or Command neither accepts nor dismisses: Esc then Enter that arrive together are
   # Alt+Enter in a terminal without enhanced key reporting.
   def handle_key(
         %{
-          shell_runtime: %{state: %{hover_popup: %HoverPopup{focused: true, open_action: action}}}
+          shell_runtime: %{
+            state: %{
+              hover_popup: %HoverPopup{focused: focused, code_source: source, open_action: action}
+            }
+          }
         } = state,
         @key_enter,
         _mods
       )
-      when action != nil do
+      when action != nil and (focused or source != nil) do
     {:handled, state}
   end
 
@@ -137,22 +218,6 @@ defmodule MingaEditor.Input.Hover do
         _mods
       ) do
     {:passthrough, MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)}
-  end
-
-  @spec execute_open_action(state(), HoverPopup.open_action()) :: state()
-  defp execute_open_action(state, {:goto_location, uri, line, col}) do
-    LspActions.open_location(state, uri, line, col)
-  end
-
-  defp execute_open_action(state, {:open_session, session_id, tool_call_id}) do
-    Commands.Agent.open_session(state, session_id, tool_call_id)
-  end
-
-  defp execute_open_action(state, action) when is_atom(action) do
-    case Commands.execute(state, action) do
-      {new_state, _action} -> new_state
-      new_state -> new_state
-    end
   end
 
   # ── Mouse handling ──────────────────────────────────────────────────────

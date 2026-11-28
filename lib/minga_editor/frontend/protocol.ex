@@ -677,7 +677,8 @@ defmodule MingaEditor.Frontend.Protocol do
   def decode_event(
         <<@op_editor_text_event, window_id::16, presentation_id::unsigned-64, row_index::32,
           row_id::unsigned-64, utf16_offset::32, button::8, mods::8, event_type::8,
-          click_count::8, scroll_x::8-signed, scroll_y::8-signed>>
+          click_count::8, scroll_x::8-signed, scroll_y::8-signed, anchor_row::16, anchor_col::16,
+          terminal_caret_row::16>>
       )
       when scroll_x in -1..1 and scroll_y in -1..1 and click_count > 0 do
     {:ok,
@@ -693,7 +694,10 @@ defmodule MingaEditor.Frontend.Protocol do
         event_type: decode_mouse_event_type(event_type),
         click_count: click_count,
         scroll_x: scroll_x,
-        scroll_y: scroll_y
+        scroll_y: scroll_y,
+        anchor: if(event_type == 2, do: {anchor_row, anchor_col}),
+        terminal_caret_row:
+          if(event_type == 2 and terminal_caret_row < 65_535, do: terminal_caret_row)
       })}}
   end
 

@@ -34,6 +34,61 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
     assert {:error, :nothing_to_undo} = Changeset.undo(cs, "file.txt")
   end
 
+  test "staging a resolution moves the writer's bytes past independent disk additions",
+       %{cs: cs, root: root} do
+    file = "file.txt"
+    File.write!(Path.join(root, file), "prefix\nheader\nold\nsame\n")
+    assert :ok = Changeset.capture_original(cs, file)
+    source = Minga.Buffer.EditSource.minga("draft-task", "step")
+    draft = {"header\nα\nsame\n", [{7, 2, {source, 75}}]}
+    assert :ok = Changeset.stage_fork_resolution(cs, file, "header\nold\nsame\n", draft)
+
+    assert {[%{content: "prefix\nheader\nα\nsame\n", origins: [{14, 2, {^source, 75}}]}], %{}} =
+             Changeset.staged_drafts(cs)
+  end
+
+  test "restoring and undoing a closed-file edit preserves its original attribution", %{
+    cs: cs,
+    identity: identity
+  } do
+    file = "file.txt"
+    {:ok, bytes, version} = Changeset.read_file_with_version(cs, file)
+    a = Minga.Buffer.EditSource.minga("a", "first")
+    b = Minga.Buffer.EditSource.minga("b", "second")
+    expected = FileMutation.revision(bytes, version, identity)
+
+    assert {:ok, _} =
+             Changeset.conditional_mutate(
+               cs,
+               file,
+               expected,
+               {:edit, [{"one", "ONE"}]},
+               identity,
+               a
+             )
+
+    assert {[%{content: "ONE two three\n", origins: [{0, 3, {^a, time}}]} = draft], %{}} =
+             Changeset.staged_drafts(cs)
+
+    assert :ok = Changeset.undo(cs, file)
+    assert :ok = Changeset.restore_draft(cs, draft)
+    {:ok, bytes, version} = Changeset.read_file_with_version(cs, file)
+    expected = FileMutation.revision(bytes, version, identity)
+
+    assert {:ok, _} =
+             Changeset.conditional_mutate(cs, file, expected, {:edit, [{"N", "β"}]}, identity, b)
+
+    assert {[
+              %{
+                content: "OβE two three\n",
+                origins: [{0, 1, {^a, ^time}}, {1, 2, {^b, _}}, {3, 1, {^a, ^time}}]
+              }
+            ], %{}} = Changeset.staged_drafts(cs)
+
+    assert :ok = Changeset.undo(cs, file)
+    assert {[^draft], %{}} = Changeset.staged_drafts(cs)
+  end
+
   test "rejects a failed middle edit and stale delete without any state changes", context do
     %{cs: cs, identity: identity} = context
     {:ok, bytes, version} = Changeset.read_file_with_version(cs, "file.txt")

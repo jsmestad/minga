@@ -62,6 +62,219 @@ defmodule Minga.Buffer.AttributedEditsTest do
     assert_attributed_like_whole(parent, twin, 3, @old)
   end
 
+  test "a merged fork keeps both original writers across a parent-only insertion" do
+    original = "a\nspacer\nb\n"
+    parent = start_supervised!({BufferProcess, content: original})
+    fork = start_supervised!({Fork, parent: parent, content: original})
+    later = EditSource.minga("task-2", "call-2")
+    mutate_fork(fork, "αζ\nspacer\nb\n", @minga)
+    mutate_fork(fork, "αβ\nspacer\nB\n", later)
+
+    assert {_, [{0, 2, {@minga, first_at}}, {2, 2, {^later, second_at}} | _]} =
+             Fork.staged_content(fork)
+
+    assert :ok = BufferProcess.replace_content(parent, "human\n" <> original, :user)
+    assert {:ok, "human\nαβ\nspacer\nB\n"} = Fork.publish(fork)
+    version = BufferProcess.version(parent)
+
+    assert BufferProcess.attribution_at(parent, {0, 0}, version) == nil
+
+    assert BufferProcess.attribution_at(parent, {1, 0}, version) ==
+             {{:minga, "task-1"}, @minga, first_at, :unreviewed}
+
+    assert BufferProcess.attribution_at(parent, {1, 2}, version) ==
+             {{:minga, "task-2"}, later, second_at, :unreviewed}
+
+    assert {:ok, 1} = BufferProcess.undo_agent_session(parent)
+    assert BufferProcess.content(parent) == "human\n" <> original
+  end
+
+  test "a multiline splice preserves an independent parent edit inside the rewritten text" do
+    original = "left\nold\nright"
+    parent = start_supervised!({BufferProcess, content: original})
+    fork = start_supervised!({Fork, parent: parent, content: original})
+    identity = {:fork, "/retained-line-in-splice"}
+    expected = FileMutation.revision(original, 0, identity)
+
+    assert {:ok, _} =
+             Fork.conditional_mutate(
+               fork,
+               expected,
+               {:edit, [{"left\nold", "left\nNEW"}]},
+               identity,
+               @minga
+             )
+
+    assert :ok = BufferProcess.replace_content(parent, "LEFT\nold\nright", :user)
+    assert {:ok, "LEFT\nNEW\nright"} = Fork.publish(fork)
+    version = BufferProcess.version(parent)
+
+    assert nil == BufferProcess.attribution_at(parent, {0, 0}, version)
+
+    assert {{:minga, "task-1"}, @minga, _, :unreviewed} =
+             BufferProcess.attribution_at(parent, {1, 0}, version)
+
+    assert {:ok, target, {:minga, "task-1"}, _} = Minga.Buffer.prepare_review(parent, :latest)
+    assert {:ok, [{:rejected, _}]} = Minga.Buffer.decide_review(parent, target, :reject)
+    assert BufferProcess.content(parent) == "LEFT\nold\nright"
+  end
+
+  test "appending a duplicate line does not move the parent's earlier writer to the new copy" do
+    parent = start_supervised!({BufferProcess, content: "base"})
+    assert {:ok, version} = BufferProcess.replace_content_if_version(parent, 0, "x", @minga)
+
+    assert {{:minga, "task-1"}, @minga, first_at, :unreviewed} =
+             BufferProcess.attribution_at(parent, {0, 0}, version)
+
+    fork = start_supervised!({Fork, parent: parent, content: "x"})
+    identity = {:fork, "/repeat-at-eof"}
+    later = EditSource.minga("task-2", "append")
+    expected = FileMutation.revision("x", 0, identity)
+
+    assert {:ok, _} =
+             Fork.conditional_mutate(fork, expected, {:edit, [{"", "x"}]}, identity, later)
+
+    assert {"x\nx", [{1, 2, {^later, second_at}}]} = Fork.staged_content(fork)
+    assert {:ok, "x\nx"} = Fork.publish(fork)
+    version = BufferProcess.version(parent)
+
+    assert BufferProcess.attribution_at(parent, {0, 0}, version) ==
+             {{:minga, "task-1"}, @minga, first_at, :unreviewed}
+
+    assert BufferProcess.attribution_at(parent, {1, 0}, version) ==
+             {{:minga, "task-2"}, later, second_at, :unreviewed}
+
+    assert {:ok, 1} = BufferProcess.undo_agent_session(parent)
+    assert BufferProcess.content(parent) == "x"
+  end
+
+  test "a divergent parent keeps its earlier writer on the original copy of an appended duplicate" do
+    original = "header\nspacer\nx"
+    parent = start_supervised!({BufferProcess, content: "header\nspacer\nz"})
+    assert {:ok, version} = BufferProcess.replace_content_if_version(parent, 0, original, @minga)
+
+    assert {{:minga, "task-1"}, @minga, first_at, :unreviewed} =
+             BufferProcess.attribution_at(parent, {2, 0}, version)
+
+    fork = start_supervised!({Fork, parent: parent, content: original})
+    identity = {:fork, "/duplicate-divergent-parent"}
+    later = EditSource.minga("task-2", "append")
+    expected = FileMutation.revision(original, 0, identity)
+
+    assert {:ok, _} =
+             Fork.conditional_mutate(fork, expected, {:edit, [{"", "x"}]}, identity, later)
+
+    assert {_, [{_, 2, {^later, second_at}}]} = Fork.staged_content(fork)
+    diverged = "human\nspacer\nx"
+    assert :ok = BufferProcess.replace_content(parent, diverged, :user)
+    assert {:ok, "human\nspacer\nx\nx"} = Fork.publish(fork)
+    version = BufferProcess.version(parent)
+
+    assert BufferProcess.attribution_at(parent, {2, 0}, version) ==
+             {{:minga, "task-1"}, @minga, first_at, :unreviewed}
+
+    assert BufferProcess.attribution_at(parent, {3, 0}, version) ==
+             {{:minga, "task-2"}, later, second_at, :unreviewed}
+
+    assert {:ok, 1} = BufferProcess.undo_agent_session(parent)
+    assert BufferProcess.content(parent) == diverged
+  end
+
+  test "deleting the first of two equal rows blocks its user's Undo after merging" do
+    parent = start_supervised!({BufferProcess, content: "start\nz\nx\nend"})
+    original = "start\nx\nx\nend"
+    assert :ok = BufferProcess.replace_content(parent, original, :user)
+    fork = start_supervised!({Fork, parent: parent, content: original})
+    identity = {:fork, "/delete-first-copy"}
+    expected = FileMutation.revision(original, 0, identity)
+
+    assert {:ok, _} =
+             Fork.conditional_mutate(
+               fork,
+               expected,
+               {:edit, [{"start\nx\n", "start\n"}]},
+               identity,
+               @minga
+             )
+
+    independent = EditSource.minga("independent", "edit-tail")
+    version = BufferProcess.version(parent)
+
+    assert {:ok, _} =
+             BufferProcess.replace_content_if_version(
+               parent,
+               version,
+               "start\nx\nx\nparent",
+               independent
+             )
+
+    assert {:ok, "start\nx\nparent"} = Fork.publish(fork)
+    assert BufferProcess.undo(parent) == {:blocked, {:overlaps, @minga}}
+    assert BufferProcess.content(parent) == "start\nx\nparent"
+  end
+
+  for {decision, tail} <- [accepted: "fork", rejected: "human"] do
+    test "#{decision} conflict keeps Undo for the inherited part of the line" do
+      parent = start_supervised!({BufferProcess, content: "old tail\nkeep"})
+      original = "mine tail\nkeep"
+      assert :ok = BufferProcess.replace_content(parent, original, :user)
+      fork = start_supervised!({Fork, parent: parent, content: original})
+      mutate_fork(fork, "mine fork\nkeep", @minga)
+      independent = EditSource.minga("independent", "edit-tail")
+      version = BufferProcess.version(parent)
+
+      assert {:ok, _} =
+               BufferProcess.replace_content_if_version(
+                 parent,
+                 version,
+                 "mine human\nkeep",
+                 independent
+               )
+
+      assert {:ok, revision, _} = Fork.conflict_snapshot(fork)
+      expected = "mine " <> unquote(tail) <> "\nkeep"
+
+      assert {:ok, ^expected} =
+               Fork.publish_resolution(fork, revision, [unquote(decision)], fn _, _ -> :ok end)
+
+      assert :ok = BufferProcess.undo(parent)
+      assert BufferProcess.content(parent) == "old " <> unquote(tail) <> "\nkeep"
+    end
+  end
+
+  test "the selected append retains the inserted separator's writer across a rejected conflict" do
+    original = "head\nlast"
+    parent = start_supervised!({BufferProcess, content: original})
+    fork = start_supervised!({Fork, parent: parent, content: original})
+    identity = {:fork, "/selected-append"}
+    expected = FileMutation.revision(original, 0, identity)
+
+    assert {:ok, _} =
+             Fork.conditional_mutate(fork, expected, {:edit, [{"", "added"}]}, identity, @minga)
+
+    assert {"head\nlast\nadded", [{9, 6, {@minga, written_at}}]} = Fork.staged_content(fork)
+    later = EditSource.minga("task-2", "edit-head")
+    mutate_fork(fork, "fork\nlast\nadded", later)
+    assert :ok = BufferProcess.replace_content(parent, "user\nlast", :user)
+    assert {:ok, revision, _} = Fork.conflict_snapshot(fork)
+    test_pid = self()
+
+    assert {:ok, "user\nlast\nadded"} =
+             Fork.publish_resolution(fork, revision, [:rejected], fn _, selected ->
+               send(test_pid, {:staged, selected})
+               :ok
+             end)
+
+    assert_received {:staged, {"head\nlast\nadded", origins}}
+
+    assert Enum.any?(origins, fn {start, count, origin} ->
+             start <= 9 and 9 < start + count and origin == {@minga, written_at}
+           end)
+
+    assert BufferProcess.attribution_at(parent, {1, 4}, BufferProcess.version(parent)) ==
+             {{:minga, "task-1"}, @minga, written_at, :unreviewed}
+  end
+
   test "a resolved fork (install_fork_resolution) records the fork's Minga step", ctx do
     {parent, twin} = start_pair(ctx, @old)
     fork = start_supervised!({Fork, parent: parent, content: @old})

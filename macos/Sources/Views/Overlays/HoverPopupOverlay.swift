@@ -3,27 +3,46 @@
 /// Renders markdown-styled content with code blocks, headers, bold/italic text,
 /// and blockquotes. `EditorOverlayHost` owns anchor placement, viewport
 /// clipping, and z-order.
-/// Non-interactive by default; interactive when focused for scrolling.
+/// Pointer users can select and scroll text. Editor focus also moves VoiceOver to the card.
 
 import SwiftUI
 import MingaProtocol
 
-public struct HoverPopupOverlay: View {
-    public enum Action: Equatable, Sendable {
-        case open
+private struct HoverPointerSurface: NSViewRepresentable {
+    let state: HoverPopupState
+
+    func makeNSView(context: Context) -> NSView {
+        let view = RegionView()
+        state.registerPointerSurface(view)
+        return view
     }
 
-    public init(state: HoverPopupState, sendAction: ViewActionHandler<Action>?) {
+    func updateNSView(_ view: NSView, context: Context) {
+        state.registerPointerSurface(view)
+    }
+
+    private final class RegionView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+public struct HoverPopupOverlay: View {
+    public enum Action: Equatable, Sendable {
+        case activate(offer: UInt64, action: UInt16)
+    }
+
+    public init(state: HoverPopupState, maxWidth: CGFloat = 500, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.sendAction = sendAction
+        self.maxWidth = min(maxWidth, 500)
     }
     public let state: HoverPopupState
     @Environment(\.themeColors) private var theme
 
-    @Environment(\.anchoredOverlayContext) private var overlayContext
+    @AccessibilityFocusState(for: .voiceOver) private var accessibilityFocused: Bool
     public let sendAction: ViewActionHandler<Action>?
 
-    private let maxWidth: CGFloat = 500
+    private let maxWidth: CGFloat
 
     private func showsScrollIndicators(_ content: HoverPopupContent) -> Bool {
         content.focused || content.scrollOffset > 0 || content.lines.count > 12
@@ -31,59 +50,108 @@ public struct HoverPopupOverlay: View {
 
     public var body: some View {
         if let content = state.content, !content.lines.isEmpty {
-            popupContent(content)
-                .frame(maxWidth: maxWidth)
+            VStack(alignment: .leading, spacing: 0) {
+                ViewThatFits(in: .vertical) {
+                    let document = popupContent(content)
+                    document.fixedSize(horizontal: false, vertical: true)
+                    ScrollView(.vertical, showsIndicators: showsScrollIndicators(content)) {
+                        document
+                    }
+                    .mask {
+                        // The document's bottom inset keeps its last line fully visible at the end of the scroll.
+                        VStack(spacing: 0) {
+                            Rectangle()
+                            LinearGradient(colors: [theme.popupBg, .clear], startPoint: .top, endPoint: .bottom)
+                                .frame(height: Spacing.md)
+                        }
+                    }
+                }
+                .anatomyPart("hover.document", text: "Hover documentation")
+                if let offer = content.offer, offer.showsActions || !offer.openLabel.isEmpty {
+                    Divider()
+                        .overlay(theme.popupBorder)
+                        .padding(.horizontal, Spacing.lg)
+                    footer(offer)
+                }
+            }
+                .frame(maxWidth: maxWidth, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.lg)
                         .fill(theme.popupBg)
-                        .shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.lg)
                         .strokeBorder(
                             content.focused
                                 ? theme.accent.opacity(0.8)
-                                : theme.popupBorder.opacity(0.5),
+                                : theme.popupBorder,
                             lineWidth: content.focused ? 2 : 1
                         )
                 )
-                // Always intercept mouse events inside the popup (#2629). SwiftUI
-                // then handles motion (keeping the popup alive instead of the
-                // motion reaching EditorNSView and dismissing it via the BEAM),
-                // scrolling, clicks, and the Open button without requiring the
-                // user to keyboard-focus the popup first. Moving the pointer back
-                // out resumes editor motion events, which dismiss on leaving.
+                .background {
+                    HoverPointerSurface(state: state)
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                }
+                .anatomyPart("hover.panel")
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Hover details")
+                .accessibilityIdentifier("editor-hover-details")
+                .accessibilityFocused($accessibilityFocused)
+                .onChange(of: content.focused, initial: true) { _, focused in
+                    accessibilityFocused = focused
+                }
+                // Keep native selection, scrolling, and links inside the popup.
                 .allowsHitTesting(true)
         }
     }
 
     @ViewBuilder
     private func popupContent(_ content: HoverPopupContent) -> some View {
-        ScrollView(.vertical, showsIndicators: showsScrollIndicators(content)) {
-            VStack(alignment: .leading, spacing: Spacing.hairline) {
-                ForEach(content.visibleLines) { line in
-                    lineView(line)
-                }
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
+            ForEach(content.visibleLines) { line in
+                lineView(line, offer: content.offer)
+            }
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+    }
 
-                if content.openActionName != nil {
-                    Divider()
-                        .background(theme.popupBorder.opacity(0.3))
-                        .padding(.vertical, Spacing.xs)
-
-                    Button("Open") {
-                        sendAction?(.open)
-                    }
-                    .buttonStyle(.borderless)
-                    .font(Typography.font(.body, weight: .semibold))
+    private func footer(_ offer: Wire.HoverOffer) -> some View {
+        HStack(spacing: Spacing.lg) {
+            if !offer.openLabel.isEmpty {
+                Button {
+                    sendAction?(.activate(offer: offer.id, action: 0))
+                } label: {
+                    Text(offer.openLabel)
+                        .underline()
+                        .anatomyPart("hover.openAction", text: offer.openLabel, font: .body, monospaced: true)
                 }
             }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.md)
+            if offer.showsActions {
+                Button {
+                    sendAction?(.activate(offer: offer.id, action: 1))
+                } label: {
+                    Text("g. actions")
+                        .underline()
+                        .anatomyPart("hover.actions", text: "g. actions", font: .body, monospaced: true)
+                }
+                .accessibilityLabel("Actions")
+                .accessibilityHint("Shortcut: g then period")
+            }
         }
+        .buttonStyle(.plain)
+        .font(Typography.font(.body, design: .monospaced))
+        .foregroundStyle(theme.popupFg)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.top, Spacing.xs)
+        .padding(.bottom, Spacing.md)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     @ViewBuilder
-    private func lineView(_ line: HoverLine) -> some View {
+    private func lineView(_ line: HoverLine, offer: Wire.HoverOffer?) -> some View {
         switch line.lineType {
         case .empty:
             Spacer().frame(height: 6)
@@ -96,7 +164,7 @@ public struct HoverPopupOverlay: View {
         case .code, .codeHeader:
             HStack(spacing: 0) {
                 ForEach(line.segments) { seg in
-                    segmentText(seg)
+                    segmentView(seg, offer: offer)
                 }
                 Spacer(minLength: 0)
             }
@@ -116,7 +184,7 @@ public struct HoverPopupOverlay: View {
 
                 HStack(spacing: 0) {
                     ForEach(line.segments) { seg in
-                        segmentText(seg)
+                        segmentView(seg, offer: offer)
                     }
                 }
             }
@@ -125,7 +193,7 @@ public struct HoverPopupOverlay: View {
         case .header:
             HStack(spacing: 0) {
                 ForEach(line.segments) { seg in
-                    segmentText(seg)
+                    segmentView(seg, offer: offer)
                 }
             }
             .padding(.bottom, Spacing.hairline)
@@ -133,18 +201,36 @@ public struct HoverPopupOverlay: View {
         default:
             HStack(spacing: 0) {
                 ForEach(line.segments) { seg in
-                    segmentText(seg)
+                    segmentView(seg, offer: offer)
                 }
             }
         }
     }
 
     @ViewBuilder
+    private func segmentView(_ segment: HoverSegment, offer: Wire.HoverOffer?) -> some View {
+        if let id = segment.linkID, let offer {
+            Button {
+                sendAction?(.activate(offer: offer.id, action: id))
+            } label: {
+                Text(segment.text)
+                    .font(Typography.font(.emphasis, weight: segment.style == .selectedLink ? .semibold : .regular))
+                    .foregroundStyle(theme.popupFg)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(segment.style == .selectedLink ? [.isLink, .isSelected] : .isLink)
+        } else {
+            segmentText(segment)
+        }
+    }
+
     private func segmentText(_ seg: HoverSegment) -> some View {
         Text(seg.text)
             .font(segmentFont(seg))
             .foregroundStyle(segmentColor(seg))
             .underline(segmentUnderline(seg))
+            .textSelection(.enabled)
     }
 
     private func segmentFont(_ seg: HoverSegment) -> Font {
@@ -180,21 +266,13 @@ public struct HoverPopupOverlay: View {
     private func segmentColor(_ seg: HoverSegment) -> Color {
         let style = seg.style
         switch style {
-        case .code, .codeBlock, .codeContent:
-            return theme.popupFg.opacity(0.85)
         case .syntaxHighlighted:
-            guard let fgColor = seg.fgColor else { return theme.popupFg.opacity(0.85) }
+            guard let fgColor = seg.fgColor else { return theme.popupFg }
             return rgbColor(fgColor)
-        case .header1, .header2, .header3:
-            return theme.popupFg
-        case .blockquote:
-            return theme.popupFg.opacity(0.7)
-        case .listBullet:
-            return theme.popupFg.opacity(0.6)
         case .rule:
             return theme.popupBorder
         default:
-            return theme.popupFg.opacity(0.9)
+            return theme.popupFg
         }
     }
 

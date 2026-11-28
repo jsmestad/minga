@@ -92,8 +92,7 @@ defmodule Minga.Test.GUIWindowDecoder do
   end
 
   defp decode_section(0x06, payload, result) do
-    {document_highlights, <<>>} = decode_document_highlights(payload)
-    %{result | document_highlights: document_highlights}
+    %{result | document_highlights: decode_document_highlights(payload)}
   end
 
   defp decode_section(0x07, payload, result) do
@@ -329,8 +328,11 @@ defmodule Minga.Test.GUIWindowDecoder do
 
   # ── Document highlights ─────────────────────────────────────────────────
 
-  defp decode_document_highlights(<<count::16, rest::binary>>) do
-    decode_highlight_entries(rest, count, [])
+  @doc "Decodes the document-highlight payload shared by the full and delta formats."
+  @spec decode_document_highlights(binary()) :: [map()]
+  def decode_document_highlights(<<count::16, rest::binary>>) do
+    {highlights, <<>>} = decode_highlight_entries(rest, count, [])
+    highlights
   end
 
   defp decode_highlight_entries(rest, 0, acc), do: {Enum.reverse(acc), rest}
@@ -354,6 +356,7 @@ defmodule Minga.Test.GUIWindowDecoder do
   defp decode_highlight_kind(1), do: :text
   defp decode_highlight_kind(2), do: :read
   defp decode_highlight_kind(3), do: :write
+  defp decode_highlight_kind(4), do: :hover
 
   # ── Line annotations ─────────────────────────────────────────────────────
 

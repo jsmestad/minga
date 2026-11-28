@@ -13,6 +13,14 @@ defmodule Minga.Buffer.FileMutation do
   @type expectation :: String.t() | :absent
   @type identity :: {atom(), String.t()}
   @type source :: {:ok, binary()} | {:error, term()}
+  @typedoc "An accepted replacement in the byte coordinates it was applied to."
+  @type splice :: {start_byte :: non_neg_integer(), removed :: binary(), inserted :: binary()}
+
+  @typedoc "Exact splices in undo order, or a whole-file operation with no observed match points."
+  @type geometry :: [splice()] | :whole
+
+  @type preparation :: {:ok, binary() | :deleted, geometry()} | {:error, term()}
+
   @typep touched :: [{non_neg_integer(), non_neg_integer()}]
 
   @doc "Returns the existing full-source read revision token for these bytes and owner generation."
@@ -36,12 +44,12 @@ defmodule Minga.Buffer.FileMutation do
     )
   end
 
-  @doc "Validates current owner content and prepares the complete mutation. Call inside the writer transition."
+  @doc "Validates the writer's revision and prepares the bytes and exact geometry of the complete mutation."
   @spec prepare(source(), non_neg_integer() | nil, identity(), expectation(), operation()) ::
-          {:ok, binary() | :deleted} | {:error, term()}
+          preparation()
   def prepare({:error, :enoent}, _generation, _identity, :absent, {:create, content})
       when is_binary(content),
-      do: validate_content(content)
+      do: prepare_whole(content)
 
   def prepare({:ok, _content}, _generation, _identity, :absent, {:create, _new}),
     do: {:error, :already_exists}
@@ -61,38 +69,41 @@ defmodule Minga.Buffer.FileMutation do
   def prepare(_source, _generation, _identity, _expected, _operation),
     do: {:error, :revision_required}
 
-  @spec prepare_operation(binary(), operation()) :: {:ok, binary() | :deleted} | {:error, term()}
+  @spec prepare_operation(binary(), operation()) :: preparation()
   defp prepare_operation(_content, {:replace, replacement}) when is_binary(replacement),
-    do: validate_content(replacement)
+    do: prepare_whole(replacement)
 
-  defp prepare_operation(_content, :delete), do: {:ok, :deleted}
+  defp prepare_operation(_content, :delete), do: {:ok, :deleted, :whole}
 
   defp prepare_operation(content, {:edit, [_ | _] = edits}),
-    do: prepare_edits(content, edits, 1, [])
+    do: prepare_edits(content, edits, 1, [], [])
 
   defp prepare_operation(_content, _operation), do: {:error, :invalid_operation}
 
-  @spec prepare_edits(binary(), list(), pos_integer(), touched()) ::
-          {:ok, binary()} | {:error, term()}
-  defp prepare_edits(content, [], _index, _touched), do: {:ok, content}
+  @spec prepare_edits(binary(), list(), pos_integer(), touched(), [splice()]) :: preparation()
+  defp prepare_edits(content, [], _index, _touched, splices), do: {:ok, content, splices}
 
-  defp prepare_edits(_content, [{"", ""} | _rest], index, _touched),
+  defp prepare_edits(_content, [{"", ""} | _rest], index, _touched, _splices),
     do: {:error, {:edit_failed, index, :empty_edit}}
 
-  defp prepare_edits(content, [{"", new} | rest], index, touched) when is_binary(new) do
+  defp prepare_edits(content, [{"", new} | rest], index, touched, splices) when is_binary(new) do
     case validate_content(new) do
       {:ok, _} ->
         # The separator is inserted text too: later edits cannot touch it.
         appended = append_separator(content, new) <> new
-        inserted = {byte_size(content), byte_size(appended)}
-        prepare_edits(content <> appended, rest, index + 1, [inserted | touched])
+        start = byte_size(content)
+        inserted = {start, byte_size(appended)}
+
+        prepare_edits(content <> appended, rest, index + 1, [inserted | touched], [
+          {start, "", appended} | splices
+        ])
 
       {:error, reason} ->
         {:error, {:edit_failed, index, reason}}
     end
   end
 
-  defp prepare_edits(content, [{old, new} | rest], index, touched)
+  defp prepare_edits(content, [{old, new} | rest], index, touched, splices)
        when is_binary(old) and byte_size(old) > 0 and is_binary(new) do
     with {:ok, _} <- validate_content(old),
          {:ok, _} <- validate_content(new),
@@ -113,14 +124,20 @@ defmodule Minga.Buffer.FileMutation do
         {start, new_size} | move_touched(touched, suffix_start, new_size - old_size)
       ]
 
-      prepare_edits(prepared, rest, index + 1, next_touched)
+      splices = if old == new, do: splices, else: [{start, old, new} | splices]
+      prepare_edits(prepared, rest, index + 1, next_touched, splices)
     else
       {:error, reason} -> {:error, {:edit_failed, index, reason}}
     end
   end
 
-  defp prepare_edits(_content, _edits, index, _touched),
+  defp prepare_edits(_content, _edits, index, _touched, _splices),
     do: {:error, {:edit_failed, index, :invalid_edit}}
+
+  @spec prepare_whole(binary()) :: preparation()
+  defp prepare_whole(content) do
+    with {:ok, content} <- validate_content(content), do: {:ok, content, :whole}
+  end
 
   @spec append_separator(binary(), binary()) :: binary()
   defp append_separator("", _new), do: ""

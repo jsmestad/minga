@@ -30,7 +30,6 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.Commands
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspDecorations
-  alias MingaEditor.Mouse.HitTest
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.State, as: EditorState
@@ -38,14 +37,12 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
-  alias MingaEditor.State.Mouse
   alias MingaEditor.SyntaxSelection
   alias MingaEditor.VimState
   alias Minga.Log
   alias Minga.LSP.BufferEdit
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentContext
-  alias Minga.LSP.HoverContent
   alias Minga.LSP.Location
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.DocumentHighlight
@@ -159,22 +156,6 @@ defmodule MingaEditor.LspActions do
 
   def open_location(state, uri, line, col) do
     jump_to_location(state, uri, line, col)
-  end
-
-  @doc "Sends a textDocument/hover request for the symbol under the cursor."
-  @spec hover(state()) :: state()
-  def hover(%{workspace: %{buffers: %{active: nil}}} = state) do
-    NoticeWorkflow.publish(state, "No active buffer")
-  end
-
-  def hover(%{workspace: %{buffers: %{active: buf}}} = state) do
-    case lsp_client_for(state, buf) do
-      nil ->
-        NoticeWorkflow.publish(state, "No language server")
-
-      client ->
-        send_lsp_request(state, client, buf, "textDocument/hover", :hover)
-    end
   end
 
   # ── Find references ─────────────────────────────────────────────────────────
@@ -961,117 +942,6 @@ defmodule MingaEditor.LspActions do
         show_peek_definition_popup(state, uri, line, col)
     end
   end
-
-  @doc """
-  Handles a textDocument/hover response.
-
-  Creates a floating hover popup with markdown-rendered content anchored
-  at the cursor position. Falls back to a minibuffer message if the
-  content is very short (single line, no markdown).
-  """
-  @spec handle_hover_response(state(), {:ok, term()} | {:error, term()}) :: state()
-  def handle_hover_response(state, {:error, error}) do
-    Log.debug(:lsp, "Hover request failed: #{inspect(error)}")
-    NoticeWorkflow.publish(state, "Hover request failed")
-  end
-
-  def handle_hover_response(state, {:ok, nil}) do
-    NoticeWorkflow.publish(state, "No hover information")
-  end
-
-  def handle_hover_response(state, {:ok, %{"contents" => contents}}) do
-    markdown = HoverContent.markdown(contents)
-
-    case markdown do
-      "" ->
-        NoticeWorkflow.publish(state, "No hover information")
-
-      text ->
-        {cursor_row, cursor_col} = hover_cursor_screen_position(state)
-
-        popup =
-          MingaEditor.HoverPopup.Builder.new(text, cursor_row, cursor_col,
-            theme: state.appearance.theme
-          )
-
-        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
-    end
-  end
-
-  def handle_hover_response(state, {:ok, _}) do
-    NoticeWorkflow.publish(state, "No hover information")
-  end
-
-  @doc """
-  Handles a hover response for a mouse-position hover request.
-
-  Creates a floating hover popup anchored at the mouse screen position when the
-  response still matches the buffer position observed when the request was sent.
-  """
-
-  @spec handle_hover_mouse_response(
-          state(),
-          {:ok, term()} | {:error, term()},
-          non_neg_integer(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: state()
-  def handle_hover_mouse_response(state, response, row, col, buffer, line, buffer_col, version) do
-    if current_hover_mouse_target?(state, row, col, buffer, line, buffer_col, version) do
-      handle_current_hover_mouse_response(state, response, row, col)
-    else
-      state
-    end
-  end
-
-  @spec current_hover_mouse_target?(
-          state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: boolean()
-  defp current_hover_mouse_target?(state, row, col, buffer, line, buffer_col, version) do
-    with {^row, ^col} <- Mouse.hover_position(state.workspace.mouse),
-         {:buffer, %{buffer: ^buffer, line: ^line, col: ^buffer_col}} <-
-           HitTest.resolve_buffer(state, row, col),
-         ^version <- Buffer.version(buffer) do
-      true
-    else
-      _ -> false
-    end
-  catch
-    :exit, _ -> false
-  end
-
-  @spec handle_current_hover_mouse_response(
-          state(),
-          {:ok, term()} | {:error, term()},
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: state()
-  defp handle_current_hover_mouse_response(state, {:error, _}, _row, _col), do: state
-  defp handle_current_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
-
-  defp handle_current_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
-    markdown = HoverContent.markdown(contents)
-
-    case markdown do
-      "" ->
-        state
-
-      text ->
-        popup = MingaEditor.HoverPopup.Builder.new(text, row, col, theme: state.appearance.theme)
-        MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
-    end
-  end
-
-  defp handle_current_hover_mouse_response(state, {:ok, _}, _row, _col), do: state
 
   # ── References response ─────────────────────────────────────────────────────
 

@@ -1,0 +1,280 @@
+{
+ "authorship": [
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 2,
+   "shared": false
+  },
+  {
+   "column": 0,
+   "head": false,
+   "role": 0,
+   "row": 3,
+   "shared": false
+  }
+ ],
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule UsageLimit do\n  def label, do: \"Your plan limit applies\"\n  def window, do: 45\n  def retry?, do: true\nend\n"
+  },
+  {
+   "frame": [
+    251,
+    108,
+    238,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Minga \u00b7 Clarify the plan limit message"
+  },
+  {
+   "frame": [
+    251,
+    126,
+    135,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Unreviewed \u00b7 just now"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    342,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    131,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.hover.attribution"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    442,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    470,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    240,
+    101,
+    260,
+    50
+   ],
+   "part": "hover.document",
+   "text": "Hover documentation"
+  },
+  {
+   "frame": [
+    240,
+    101,
+    500,
+    78
+   ],
+   "part": "hover.panel"
+  },
+  {
+   "baseline": 167.5,
+   "frame": [
+    537,
+    156,
+    104,
+    15
+   ],
+   "part": "hover.openAction",
+   "text": "\u21a9 conversation"
+  },
+  {
+   "baseline": 167.5,
+   "frame": [
+    653,
+    156,
+    75,
+    15
+   ],
+   "part": "hover.actions",
+   "text": "g. actions"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    86,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex \u25cf"
+  },
+  {
+   "frame": [
+    169,
+    904,
+    56,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "change: change 1/1"
+  },
+  {
+   "frame": [
+    1377,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1411,
+    904,
+    23,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 2:19"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.hover.attribution",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

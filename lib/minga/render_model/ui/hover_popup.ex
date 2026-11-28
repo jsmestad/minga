@@ -12,7 +12,9 @@ defmodule Minga.RenderModel.UI.HoverPopup do
           focused?: boolean(),
           scroll_offset: non_neg_integer(),
           content_lines: [Line.t()],
-          open_action_name: String.t() | nil
+          offer_id: pos_integer() | nil,
+          actions?: boolean(),
+          open_label: String.t() | nil
         }
 
   defstruct visible?: false,
@@ -21,5 +23,7 @@ defmodule Minga.RenderModel.UI.HoverPopup do
             focused?: false,
             scroll_offset: 0,
             content_lines: [],
-            open_action_name: nil
+            offer_id: nil,
+            actions?: false,
+            open_label: nil
 end

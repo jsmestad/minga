@@ -93,7 +93,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
         expected = revision(ctx)
         operation = {:replace, "agent\n"}
 
-        assert {:ok, "agent\n"} =
+        assert {:ok, "agent\n", :whole} =
                  FileMutation.prepare(
                    {:ok, content},
                    generation,
@@ -174,6 +174,15 @@ defmodule Minga.Buffer.ConditionalMutationTest do
 
     assert :ok = mutate(ctx, revision(ctx), {:edit, [{"one", "1"}, {"three", "3"}]})
     assert Buffer.content(server) == "1 two 3"
+
+    assert {{:minga, "task-1"}, @source, first_at, :unreviewed} =
+             Buffer.attribution_at(server, {0, 0}, Buffer.version(server))
+
+    assert Buffer.attribution_at(server, {0, 2}, Buffer.version(server)) == nil
+
+    assert {{:minga, "task-1"}, @source, ^first_at, :unreviewed} =
+             Buffer.attribution_at(server, {0, 6}, Buffer.version(server))
+
     assert [{@source, [_one, _three]}] = Minga.Buffer.Process.minga_changes(server, "task-1")
 
     assert {:error, {:edit_failed, 2, :not_found}} =
@@ -432,7 +441,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
                :ok
              end)
 
-    assert_receive {:staged_draft, "agent\ntwo\nthree", ^parent}
+    assert_receive {:staged_draft, {"agent\ntwo\nthree", []}, ^parent}
     assert Buffer.content(parent) == "agent\ntwo\nhuman"
     assert Buffer.version(parent) == version + 1
     assert {:ok, 1} = Buffer.undo_agent_session(parent)
@@ -571,7 +580,8 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     assert_receive {^mutation_tag,
                     {:ok, %FileMutation.Receipt{before: "original", after: "agent"}}}
 
-    assert_receive {:staged_pending_edit, "agent"}
+    assert_receive {:staged_pending_edit, {"agent", [{0, 5, {@source, time}}]}}
+    assert is_integer(time)
     assert Fork.published?(fork)
     assert Fork.dirty?(fork)
     assert Buffer.content(parent) == "agent"

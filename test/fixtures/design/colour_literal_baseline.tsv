@@ -121,7 +121,6 @@ macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("bg ✕\(worksp
 macos/Sources/Views/Extensions/ExtensionOverlayView.swift	.foregroundStyle(.white)
 macos/Sources/Views/Overlays/CompletionOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
 macos/Sources/Views/Overlays/FloatPopupOverlay.swift	.shadow(color: .black.opacity(0.5), radius: 16, y: 4)
-macos/Sources/Views/Overlays/HoverPopupOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
 macos/Sources/Views/Overlays/LatencyHUDOverlay.swift	.shadow(color: .black.opacity(0.25), radius: 4, y: 1)
 macos/Sources/Views/Overlays/MessagesContentState.swift	case .debug: return .gray
 macos/Sources/Views/Overlays/MessagesContentState.swift	case .info: return .green

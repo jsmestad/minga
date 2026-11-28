@@ -423,12 +423,13 @@ func validateScrollPresentation(window *WindowContent) {
 // overlayDeltaCursorlineFlag marks a trailing cursorline section in an overlay
 // delta (see WindowEncoder.encode_overlay_delta/1).
 const overlayDeltaCursorlineFlag = 0x02
+const overlayDeltaHighlightsFlag = 0x04
 
 func decodeOverlayDelta(payload []byte) (Command, error) {
 	// opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) +
-	// cursor_col(2) + cursor_shape(1), optional cursorline(5), then the mandatory
-	// accessibility_cursor_utf16(4). The TUI does not expose native AX, but must
-	// consume its trailer so it never becomes the next opcode in a wire batch.
+	// cursor_col(2) + cursor_shape(1), optional cursorline(5), the mandatory
+	// accessibility_cursor_utf16(4), then optional resident source highlights.
+	// The TUI must consume the AX trailer even though it does not expose native AX.
 	const base = 13
 	if len(payload) < base {
 		return Command{}, fmt.Errorf("short overlay delta")
@@ -454,6 +455,18 @@ func decodeOverlayDelta(payload []byte) (Command, error) {
 	size += 4
 	if len(payload) < size {
 		return Command{}, fmt.Errorf("short overlay delta accessibility cursor")
+	}
+
+	if payload[7]&overlayDeltaHighlightsFlag != 0 {
+		if len(payload)-size < 2 {
+			return Command{}, fmt.Errorf("short overlay delta highlight count")
+		}
+		end := size + 2 + int(u16(payload, size))*9
+		if len(payload) < end {
+			return Command{}, fmt.Errorf("short overlay delta highlights")
+		}
+		decodeDocumentHighlights(payload[size:end], &window)
+		size = end
 	}
 
 	return Command{Kind: CommandWindowDelta, Size: size, Window: window}, nil

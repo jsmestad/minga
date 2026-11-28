@@ -750,8 +750,9 @@ defmodule MingaAgent.Markdown do
     do_parse_inline(remaining, [{label, style} | acc], dead)
   end
 
+  @doc "Returns whether Markdown may expose this URI as an actionable link."
   @spec safe_url?(String.t()) :: boolean()
-  defp safe_url?(url) do
+  def safe_url?(url) when is_binary(url) do
     if valid_percent_escapes?(url) do
       case URI.new(url) do
         {:ok, uri} -> safe_uri?(uri.scheme, uri)

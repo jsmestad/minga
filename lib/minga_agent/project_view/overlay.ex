@@ -10,6 +10,7 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   @behaviour MingaAgent.ProjectView.Backend
 
+  alias Minga.Buffer.DraftOrigins
   alias Minga.Buffer.Fork
   alias Minga.Session.StagedDraft
   alias MingaAgent.BufferForkStore
@@ -66,7 +67,7 @@ defmodule MingaAgent.ProjectView.Overlay do
          :ok <-
            Changeset.restore_draft(
              changeset(view),
-             StagedDraft.new(path, draft.base, draft.content)
+             StagedDraft.new(path, draft.base, draft.content, draft.origins)
            ),
          {:ok, {:changeset, _cs}} <-
            BufferForkStore.claim_owner(
@@ -118,8 +119,9 @@ defmodule MingaAgent.ProjectView.Overlay do
   defp fork_drafts(forks, baselines) do
     Enum.reduce_while(forks, {:ok, []}, fn {path, fork}, {:ok, drafts} ->
       case fork_draft_content(fork) do
-        {:ok, content} ->
-          {:cont, {:ok, [StagedDraft.new(path, Map.get(baselines, path), content) | drafts]}}
+        {:ok, content, origins} ->
+          draft = StagedDraft.new(path, Map.get(baselines, path), content, origins)
+          {:cont, {:ok, [draft | drafts]}}
 
         {:error, reason} ->
           {:halt, {:error, {:fork_unavailable, reason}}}
@@ -162,12 +164,11 @@ defmodule MingaAgent.ProjectView.Overlay do
   # One read decides presence and bytes, so a fork deleted between two calls
   # cannot be misread. A fork process that has stopped exits the call; report
   # only the exit kind so no content reaches the reason.
-  @spec fork_draft_content(pid()) :: {:ok, StagedDraft.content()} | {:error, atom()}
+  @spec fork_draft_content(pid()) ::
+          {:ok, StagedDraft.content(), [DraftOrigins.range()]} | {:error, atom()}
   defp fork_draft_content(fork) do
-    case Fork.read_file(fork) do
-      {:ok, content} -> {:ok, content}
-      {:error, :enoent} -> {:ok, :deleted}
-    end
+    {content, origins} = Fork.staged_content(fork)
+    {:ok, content, origins}
   catch
     :exit, reason -> {:error, exit_kind(reason)}
   end
@@ -249,7 +250,6 @@ defmodule MingaAgent.ProjectView.Overlay do
     end
   end
 
-  # Changeset drafts never reach an open buffer, so only a fork mutation records its source.
   @spec mutate_source(
           ProjectView.t(),
           Source.t(),
@@ -262,9 +262,9 @@ defmodule MingaAgent.ProjectView.Overlay do
          %Source{source_id: id, owner: {:changeset, cs, path}},
          expected,
          operation,
-         _edit_source
+         edit_source
        ) do
-    Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id})
+    Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id}, edit_source)
   end
 
   defp mutate_source(

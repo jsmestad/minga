@@ -19,16 +19,29 @@ public struct AnchoredOverlayPlacement: Equatable {
         desiredMaxHeight: CGFloat,
         preferredSide: AnchoredOverlaySide,
         gap: CGFloat,
-        bottomInset: CGFloat
+        bottomInset: CGFloat,
+        protectedCaret: CGRect? = nil
     ) -> AnchoredOverlayPlacement {
-        let anchorTop = CGFloat(anchorRow) * cellHeight
-        let anchorBottom = anchorTop + cellHeight
-        let availableAbove = max(anchorTop - gap, 0)
-        let availableBelow = max(viewportHeight - bottomInset - anchorBottom - gap, 0)
+        var anchorTop = CGFloat(anchorRow) * cellHeight
+        var anchorBottom = anchorTop + cellHeight
+        var topBoundary: CGFloat = 0
+        var bottomBoundary = viewportHeight - bottomInset
+        if let caret = protectedCaret {
+            if caret.maxY <= anchorTop {
+                topBoundary = max(0, caret.maxY)
+            } else if caret.minY >= anchorBottom {
+                bottomBoundary = min(bottomBoundary, caret.minY)
+            } else {
+                anchorTop = min(anchorTop, caret.minY)
+                anchorBottom = max(anchorBottom, caret.maxY)
+            }
+        }
+        let availableAbove = max(anchorTop - topBoundary - gap, 0)
+        let availableBelow = max(bottomBoundary - anchorBottom - gap, 0)
         let candidateHeight = measuredHeight > 0 ? min(measuredHeight, desiredMaxHeight) : desiredMaxHeight
         let side = resolveSide(preferredSide: preferredSide, candidateHeight: candidateHeight, availableAbove: availableAbove, availableBelow: availableBelow)
         let availableOnSide = side == .above ? availableAbove : availableBelow
-        let maxHeight = min(desiredMaxHeight, max(availableOnSide, 1))
+        let maxHeight = min(desiredMaxHeight, availableOnSide)
         let renderedHeight = min(measuredHeight > 0 ? measuredHeight : maxHeight, maxHeight)
         let offsetY = side == .above ? max(anchorTop - gap - renderedHeight, 0) : anchorBottom + gap
 
@@ -193,7 +206,7 @@ private struct ActMenuEditorBoundsKey: PreferenceKey {
 }
 
 private enum EditorOverlayAction: Equatable, Sendable {
-    case openHover
+    case openHover(offer: UInt64, action: UInt16)
     case selectCompletion(generation: UInt32, itemID: String)
 }
 
@@ -218,9 +231,16 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
             }
 
             if let content = input.hoverPopupState.content {
-                anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 300) { _ in
-                    HoverPopupOverlay(state: input.hoverPopupState, sendAction: translatedAction { _ in .openHover })
-                        .allowsHitTesting(true)
+                GeometryReader { viewport in
+                    anchoredOverlay(row: content.anchorRow, col: content.anchorCol, preferredSide: .above, maxHeight: 300, viewportSize: viewport.size, protectedCaret: geometry.presentedCaret, anchorCellHeight: geometry.actMenuGridCellSize?.height) { placement in
+                        if placement.maxHeight > 0 {
+                            HoverPopupOverlay(state: input.hoverPopupState, maxWidth: max(0, viewport.size.width - Spacing.md), sendAction: translatedAction {
+                                switch $0 {
+                                case .activate(let offer, let action): .openHover(offer: offer, action: action)
+                                }
+                            })
+                        }
+                    }
                 }
                 .zIndex(20)
             }
@@ -267,19 +287,23 @@ private struct EditorOverlayHost<ExtensionContent: View>: View {
         preferredSide: AnchoredOverlaySide,
         maxHeight: CGFloat,
         gap: CGFloat = 4,
+        viewportSize: CGSize? = nil,
+        protectedCaret: CGRect? = nil,
+        anchorCellHeight: CGFloat? = nil,
         @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
     ) -> some View {
         AnchoredEditorOverlay(
             anchorRow: row,
             anchorCol: col,
             cellWidth: geometry.cellWidth,
-            cellHeight: geometry.cellHeight,
-            viewportHeight: viewportHeight,
-            viewportWidth: geometry.viewportWidth,
+            cellHeight: anchorCellHeight ?? geometry.cellHeight,
+            viewportHeight: viewportSize?.height ?? viewportHeight,
+            viewportWidth: viewportSize?.width ?? geometry.viewportWidth,
             gutterPad: anchoredOverlayGutterPad(col: col),
             desiredMaxHeight: maxHeight,
             preferredSide: preferredSide,
             gap: gap,
+            protectedCaret: protectedCaret,
             content: content
         )
     }
@@ -305,6 +329,7 @@ private struct AnchoredEditorOverlay<Content: View>: View {
     let preferredSide: AnchoredOverlaySide
     let gap: CGFloat
     let bottomInset: CGFloat
+    let protectedCaret: CGRect?
     let content: (AnchoredOverlayPlacement) -> Content
 
     @State private var measuredHeight: CGFloat = 0
@@ -323,6 +348,7 @@ private struct AnchoredEditorOverlay<Content: View>: View {
         preferredSide: AnchoredOverlaySide,
         gap: CGFloat,
         bottomInset: CGFloat = 8,
+        protectedCaret: CGRect? = nil,
         @ViewBuilder content: @escaping (AnchoredOverlayPlacement) -> Content
     ) {
         self.anchorRow = anchorRow
@@ -336,11 +362,12 @@ private struct AnchoredEditorOverlay<Content: View>: View {
         self.preferredSide = preferredSide
         self.gap = gap
         self.bottomInset = bottomInset
+        self.protectedCaret = protectedCaret
         self.content = content
     }
 
     private var placement: AnchoredOverlayPlacement {
-        AnchoredOverlayPlacement.resolve(anchorRow: anchorRow, cellHeight: cellHeight, measuredHeight: measuredHeight, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: preferredSide, gap: gap, bottomInset: bottomInset)
+        AnchoredOverlayPlacement.resolve(anchorRow: anchorRow, cellHeight: cellHeight, measuredHeight: measuredHeight, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: preferredSide, gap: gap, bottomInset: bottomInset, protectedCaret: protectedCaret)
     }
 
     private var offsetX: CGFloat {
@@ -351,7 +378,7 @@ private struct AnchoredEditorOverlay<Content: View>: View {
         let placement = placement
         content(placement)
             .environment(\.anchoredOverlayContext, AnchoredOverlayContext(side: placement.side, maxHeight: placement.maxHeight))
-            .frame(maxHeight: placement.maxHeight)
+            .frame(maxHeight: placement.maxHeight, alignment: .topLeading)
             .background(
                 GeometryReader { geo in
                     Color.clear
@@ -367,7 +394,7 @@ private struct AnchoredEditorOverlay<Content: View>: View {
 
     private func transition(for side: AnchoredOverlaySide) -> AnyTransition {
         if reduceMotion {
-            return .opacity.animation(.easeInOut(duration: 0.08))
+            return .identity
         }
 
         let anchor: UnitPoint = side == .above ? .bottomLeading : .topLeading
@@ -944,7 +971,7 @@ public struct ContentView<EditorSurface: View>: View {
                 viewportHeight: rightPaneHeight,
                 sendAction: translatedAction { (action: EditorOverlayAction) in
                     switch action {
-                    case .openHover: .hoverOpen
+                    case .openHover(let offer, let action): .hoverOpen(offer: offer, action: action)
                     case .selectCompletion(let generation, let itemID): .semanticItemActivate(surface: .completion, intent: 1, generation: generation, itemID: Data(itemID.utf8))
                     }
                 },

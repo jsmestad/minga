@@ -1,0 +1,307 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "greet(name)\n"
+  },
+  {
+   "frame": [
+    110,
+    92,
+    147,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Unused argument name"
+  },
+  {
+   "frame": [
+    118,
+    120,
+    77,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u250c\u2500 elixir "
+  },
+  {
+   "frame": [
+    193,
+    120,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    118,
+    141,
+    292,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "greet(name :: String.t()) :: String.t()"
+  },
+  {
+   "frame": [
+    118,
+    162,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2514"
+  },
+  {
+   "frame": [
+    126,
+    162,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    110,
+    189,
+    234,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Returns a greeting for the given name."
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    341,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    132,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "code.diagnostics.hover"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    443,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    471,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    99,
+    85,
+    500,
+    129
+   ],
+   "part": "hover.document",
+   "text": "Hover documentation"
+  },
+  {
+   "frame": [
+    99,
+    85,
+    500,
+    157
+   ],
+   "part": "hover.panel"
+  },
+  {
+   "baseline": 230.5,
+   "frame": [
+    512,
+    219,
+    75,
+    15
+   ],
+   "part": "hover.actions",
+   "text": "g. actions"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    156,
+    904,
+    22,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "warnings: 1"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    689.5,
+    909,
+    185,
+    14
+   ],
+   "part": "notice.message",
+   "text": "\u26a0 Unused argument name [Expert]"
+  }
+ ],
+ "scenario": "code.diagnostics.hover",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

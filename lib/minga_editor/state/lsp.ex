@@ -18,7 +18,6 @@ defmodule MingaEditor.State.LSP do
   @type current_origin_response_kind ::
           :definition
           | :peek_definition
-          | :hover
           | :document_highlight
           | :code_action
           | :prepare_rename
@@ -307,40 +306,10 @@ defmodule MingaEditor.State.LSP do
     )
   end
 
-  @doc "Tracks an Editor-global mouse hover request."
-  @spec track_hover_mouse_request(
-          t(),
-          reference(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: t()
-  def track_hover_mouse_request(
-        %__MODULE__{} = lsp,
-        ref,
-        row,
-        col,
-        buffer,
-        buffer_line,
-        buffer_col,
-        version
-      ) do
-    {:ok, pending_requests} =
-      PendingRequests.track_hover_mouse(
-        lsp.pending_requests,
-        ref,
-        row,
-        col,
-        buffer,
-        buffer_line,
-        buffer_col,
-        version
-      )
-
-    %{lsp | pending_requests: pending_requests}
+  @doc "Tracks a hover reply for the popup workflow to admit using its actual request ref."
+  @spec track_hover_request(t(), reference(), pid()) :: t()
+  def track_hover_request(%__MODULE__{} = lsp, ref, client) do
+    accept_pending(lsp, PendingRequests.track_hover(lsp.pending_requests, ref, client))
   end
 
   @spec track_semantic_tokens_request(

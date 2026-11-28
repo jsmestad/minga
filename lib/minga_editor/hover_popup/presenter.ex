@@ -4,6 +4,7 @@ defmodule MingaEditor.HoverPopup.Presenter do
   alias MingaAgent.Markdown
   alias MingaEditor.FloatingWindow
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Terminal
 
   @max_width 60
   @max_height 20
@@ -15,46 +16,71 @@ defmodule MingaEditor.HoverPopup.Presenter do
   def box(%HoverPopup{content_lines: []}, _viewport), do: nil
 
   def box(%HoverPopup{} = popup, viewport) do
-    popup
-    |> spec(viewport)
-    |> FloatingWindow.box()
+    case spec(popup, viewport) do
+      nil -> nil
+      spec -> FloatingWindow.box(spec)
+    end
   end
 
-  @spec spec(HoverPopup.t(), {pos_integer(), pos_integer()}) :: FloatingWindow.Spec.t()
+  @doc "Fits the terminal code hover to its wrapped content and excludes the anchor and caret."
+  @spec terminal_box(HoverPopup.t(), {pos_integer(), pos_integer()}) ::
+          MingaEditor.Layout.rect() | nil
+  def terminal_box(%HoverPopup{terminal: %Terminal{} = terminal} = popup, viewport) do
+    height = min(tuple_size(terminal.rows), 10) + 2
+
+    case anchored_spec(popup, viewport, terminal.width, height) do
+      nil -> nil
+      spec -> FloatingWindow.box(spec)
+    end
+  end
+
+  def terminal_box(%HoverPopup{}, _viewport), do: nil
+
+  @spec spec(HoverPopup.t(), {pos_integer(), pos_integer()}) :: FloatingWindow.Spec.t() | nil
   defp spec(%HoverPopup{} = popup, viewport) do
-    {viewport_rows, viewport_cols} = viewport
-    {content_width, content_height} = content_dimensions(popup.content_lines, popup.scroll_offset)
+    {_viewport_rows, viewport_cols} = viewport
 
-    width = content_width |> max(@min_width) |> min(@max_width) |> min(viewport_cols - 2)
-    desired_inner_height = content_height |> min(@max_height) |> min(viewport_rows - 4)
-    desired_total_height = desired_inner_height + 2
+    {content_width, content_height} = content_dimensions(HoverPopup.display_lines(popup))
 
-    {side, total_height} =
-      place_without_anchor_overlap(desired_total_height, popup.anchor_row, viewport_rows)
-
-    %FloatingWindow.Spec{
-      width: {:cols, width + 2},
-      height: {:rows, total_height},
-      position: {:anchor, popup.anchor_row, popup.anchor_col, side},
-      viewport: viewport
-    }
+    width = content_width |> max(@min_width) |> min(@max_width) |> min(max(viewport_cols - 2, 1))
+    desired_height = min(content_height, @max_height) + 2
+    anchored_spec(popup, viewport, width + 2, desired_height)
   end
 
-  @spec place_without_anchor_overlap(pos_integer(), non_neg_integer(), pos_integer()) ::
-          {:above | :below, pos_integer()}
-  defp place_without_anchor_overlap(desired_height, anchor_row, viewport_rows) do
-    rows_above = anchor_row
-    rows_below = max(viewport_rows - anchor_row - 1, 0)
+  @spec anchored_spec(
+          HoverPopup.t(),
+          {pos_integer(), pos_integer()},
+          pos_integer(),
+          pos_integer()
+        ) ::
+          FloatingWindow.Spec.t() | nil
+  defp anchored_spec(popup, {viewport_rows, _cols} = viewport, width, desired_height) do
+    anchor_row = min(popup.anchor_row, viewport_rows - 1)
+    caret_row = popup.code_source && Map.get(popup.code_source, :terminal_caret_row)
+    {rows_above, rows_below} = available_rows(anchor_row, viewport_rows, caret_row)
     side = choose_hover_side(desired_height, rows_above, rows_below)
+    height = min(desired_height, if(side == :above, do: rows_above, else: rows_below))
 
-    available_rows =
-      case side do
-        :above -> rows_above
-        :below -> rows_below
-      end
-
-    {side, min(desired_height, max(available_rows, 1))}
+    if height > 0 do
+      %FloatingWindow.Spec{
+        width: {:cols, width},
+        height: {:rows, height},
+        position: {:anchor, anchor_row, popup.anchor_col, side},
+        viewport: viewport
+      }
+    end
   end
+
+  @spec available_rows(non_neg_integer(), pos_integer(), non_neg_integer() | nil) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp available_rows(anchor, rows, caret) when is_integer(caret) and caret < anchor,
+    do: {anchor - caret - 1, rows - anchor - 1}
+
+  defp available_rows(anchor, rows, caret)
+       when is_integer(caret) and caret > anchor and caret < rows,
+       do: {anchor, caret - anchor - 1}
+
+  defp available_rows(anchor, rows, _caret), do: {anchor, rows - anchor - 1}
 
   @spec choose_hover_side(pos_integer(), non_neg_integer(), non_neg_integer()) :: :above | :below
   defp choose_hover_side(desired_height, rows_above, _rows_below)
@@ -70,16 +96,11 @@ defmodule MingaEditor.HoverPopup.Presenter do
 
   defp choose_hover_side(_desired_height, _rows_above, _rows_below), do: :below
 
-  @spec content_dimensions([Markdown.parsed_line()], non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp content_dimensions(lines, scroll_offset) do
-    lines
-    |> Enum.drop(scroll_offset)
-    |> Enum.reduce({0, 0}, fn {segments, _line_type}, {max_width, height} ->
+  @spec content_dimensions([Markdown.parsed_line()]) :: {non_neg_integer(), non_neg_integer()}
+  defp content_dimensions(lines) do
+    Enum.reduce(lines, {0, 0}, fn {segments, _line_type}, {max_width, height} ->
       line_width =
-        segments
-        |> Enum.map(fn {text, _style} -> String.length(text) end)
-        |> Enum.sum()
+        Enum.reduce(segments, 0, fn {text, _style}, width -> width + String.length(text) end)
 
       {max(max_width, line_width), height + 1}
     end)

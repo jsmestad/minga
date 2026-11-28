@@ -20,7 +20,8 @@ extension EditorGeometry {
                 gutterCol: Int(v.dispatcher.committedEditorSnapshot?.gutterCol ?? 0),
                 gutterLeftMargin: CoreTextMetalRenderer.gutterLeftMarginPt,
                 gutterRightGap: CoreTextMetalRenderer.gutterRightGapPt,
-                actMenuGridCellSize: presented?.cellSize
+                actMenuGridCellSize: presented?.cellSize,
+                presentedCaret: presented?.caret
             )
         } else {
             self.init(

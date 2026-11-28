@@ -29,7 +29,6 @@ const (
 	zonePrefixTimelineEntry    = "timeline:entry:"
 	zonePrefixTimelineReview   = "timeline:review:"
 	zonePrefixEmptyStateItem   = "empty-state:item:"
-	zoneIDHoverAction          = "hover:action"
 	zoneIDGitRetry             = "git:retry"
 	reviewModelineCommand      = "next_minga_change_at:"
 	bottomPanelWheelLines      = 3
@@ -373,9 +372,6 @@ func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.completionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.hoverActionMousePacket(msg); ok {
-		return packet, true
-	}
 	if packet, ok := m.floatPopupMousePacket(msg); ok {
 		return packet, true
 	}
@@ -695,7 +691,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 	queue := m.presentedAgentQueueHandler(layers)
 	peek := m.presentedSubagentPeekHandler(layers)
 	review := m.presentedReviewModelineHandler(layers)
-	if git == nil && agent == nil && queue == nil && peek == nil && review == nil && actTarget == nil {
+	hover, hoverStamp := m.presentedHoverHandler()
+	if git == nil && agent == nil && queue == nil && peek == nil && review == nil && actTarget == nil && hover == nil {
 		return nil, 0
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -708,7 +705,10 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 			}
 		}
 		if ok && click.Button == tea.MouseLeft {
-			if git != nil {
+			if hover != nil {
+				hover(click)
+			}
+			if !claim.claimed && git != nil {
 				git(click)
 			}
 			if !claim.claimed && queue != nil {
@@ -725,7 +725,7 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 			}
 		}
 		return nil
-	}, targetStamp
+	}, targetStamp ^ hoverStamp
 }
 
 type gutterActHit struct {
@@ -977,16 +977,70 @@ func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
-func (m Model) hoverActionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+type hoverActionHit struct {
+	box    uiRect
+	action uint16
+}
+
+var hoverHitSeed = maphash.MakeSeed()
+
+func (m Model) presentedHoverHandler() (func(tea.MouseClickMsg), uint64) {
+	if m.pickerVisible() || m.whichKeyVisible() {
+		return nil, 0
+	}
+	winner, visible := m.overlayWinner()
 	action, ok := m.hoverAction()
-	if !ok || !action.Visible {
-		return nil, false
+	if !visible || winner.surfaceID != surfaceIDHoverPopup || !ok || action.Offer == 0 {
+		return nil, 0
 	}
-	zoneInfo := m.zones.Get(zoneIDHoverAction)
-	if zoneInfo != nil && zoneInfo.InBounds(msg) {
-		return protocol.EncodeGUIHoverOpenAction(), true
+	var hits []hoverActionHit
+	appendHit := func(id uint16, zone *zoneInfo) {
+		if zone != nil {
+			hits = append(hits, hoverActionHit{box: actMenuZoneRect(zone), action: id})
+		}
 	}
-	return nil, false
+	if action.OpenLabel != "" {
+		appendHit(0, m.zones.Get(zoneIDHoverAction(action.Offer, 0)))
+	}
+	if action.Actions {
+		appendHit(1, m.zones.Get(zoneIDHoverAction(action.Offer, 1)))
+	}
+	hover, _ := m.hoverPopup()
+	offset := min(int(hover.ScrollOffset), len(hover.Lines))
+	for row, line := range hover.Lines[offset:] {
+		for _, segment := range line.Segments {
+			if segment.LinkID >= 2 {
+				appendHit(segment.LinkID, m.zones.Get(zoneIDHoverLink(action.Offer, segment.LinkID, offset+row)))
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return nil, 0
+	}
+	var stamp maphash.Hash
+	stamp.SetSeed(hoverHitSeed)
+	maphash.WriteComparable(&stamp, action.Offer)
+	for _, hit := range hits {
+		maphash.WriteComparable(&stamp, hit)
+	}
+	offer, claim := action.Offer, m.presentedClick
+	return func(click tea.MouseClickMsg) {
+		for _, hit := range hits {
+			if hit.box.Contains(click.X, click.Y) {
+				claim.claimed = true
+				claim.packet = protocol.EncodeGUIHoverOpenAction(offer, hit.action)
+				return
+			}
+		}
+	}, stamp.Sum64()
+}
+
+func zoneIDHoverAction(offer uint64, action uint16) string {
+	return fmt.Sprintf("hover:%d:%d", offer, action)
+}
+
+func zoneIDHoverLink(offer uint64, action uint16, row int) string {
+	return fmt.Sprintf("hover:%d:%d:%d", offer, action, row)
 }
 
 func reviewModelineTarget(status protocol.StatusBar) (string, int) {

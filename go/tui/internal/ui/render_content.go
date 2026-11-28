@@ -283,6 +283,13 @@ func (m Model) renderWindowRowsWithHits(window protocol.WindowContent, x, y int,
 		}
 		key, cacheable := m.lineCacheKeyFor(window, row, sourceRowIndex)
 		key.twist = twist.ink
+		hover := hoverHighlightAt(window.Highlights, contentRowIndex)
+		if len(hover) == 1 {
+			key.hover = [2]uint16{hover[0].StartCol, hover[0].EndCol}
+		} else if len(hover) > 1 {
+			// Inlays can split one source range. Retain the other rows' cache entries.
+			cacheable = false
+		}
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -302,7 +309,7 @@ func (m Model) renderWindowRowsWithHits(window protocol.WindowContent, x, y int,
 
 		var content string
 		if hasRow {
-			content = m.renderRowAt(window, row, sourceRowIndex, contentRowIndex, contentWidth, cursorline, cursorlineBG)
+			content = m.renderRowAt(window, row, sourceRowIndex, contentRowIndex, contentWidth, cursorline, cursorlineBG, hover)
 		} else {
 			content = m.renderTildeRow(contentWidth, cursorline, cursorlineBG)
 		}
@@ -605,10 +612,10 @@ func (m Model) renderTildeRow(width int, cursorline bool, cursorlineBG uint32) s
 }
 
 func (m Model) renderRow(window protocol.WindowContent, row protocol.WindowRow, rowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
-	return m.renderRowAt(window, row, rowIndex, rowIndex, width, cursorline, cursorlineBG)
+	return m.renderRowAt(window, row, rowIndex, rowIndex, width, cursorline, cursorlineBG, hoverHighlightAt(window.Highlights, rowIndex))
 }
 
-func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow, sourceRowIndex int, contentRowIndex int, width int, cursorline bool, cursorlineBG uint32) string {
+func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow, sourceRowIndex int, contentRowIndex int, width int, cursorline bool, cursorlineBG uint32, hover []protocol.DocumentHighlight) string {
 	base := m.editorStyle().Width(width)
 	if window.ID == protocol.AgentPromptWindowID {
 		base = base.Background(m.palette().AgentInputSurface())
@@ -623,7 +630,7 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 	col := 0
 	for graphemes := uniseg.NewGraphemes(row.Text); col < scrollRight && graphemes.Next(); {
 		text := graphemes.Str()
-		spanWidth := max(displayWidth(text), 1)
+		spanWidth := displayWidth(text)
 		end := col + spanWidth
 		if end <= scrollLeft {
 			col = end
@@ -636,6 +643,13 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 		}
 		if cursorline && span.BG == 0 && cursorlineBG != 0 {
 			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", cursorlineBG)))
+		}
+		for len(hover) > 0 && int(hover[0].EndCol) <= col {
+			hover = hover[1:]
+		}
+		if len(hover) > 0 && spanWidth > 0 && int(hover[0].StartCol) <= col {
+			// Invert the existing ink and surface instead of combining syntax ink with a new background.
+			style = style.Reverse(true)
 		}
 		style = m.applyWindowOverlaysAt(style, window, sourceRowIndex, contentRowIndex, col)
 		style, text = m.applyIndentGuide(window, style, sourceRowIndex, contentRowIndex, col, text)
@@ -668,6 +682,24 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 
 func (m Model) applyWindowOverlays(style lipgloss.Style, window protocol.WindowContent, rowIndex int, col int) lipgloss.Style {
 	return m.applyWindowOverlaysAt(style, window, rowIndex, rowIndex, col)
+}
+
+const documentHighlightHover = 4
+
+// Hover segments are single rows in increasing display order after ordinary LSP reference highlights.
+func hoverHighlightAt(highlights []protocol.DocumentHighlight, row int) []protocol.DocumentHighlight {
+	if len(highlights) == 0 || highlights[len(highlights)-1].Kind != documentHighlightHover {
+		return nil
+	}
+	index := sort.Search(len(highlights), func(i int) bool {
+		h := highlights[i]
+		return h.Kind == documentHighlightHover && int(h.StartRow) >= row
+	})
+	end := index
+	for end < len(highlights) && highlights[end].Kind == documentHighlightHover && int(highlights[end].StartRow) == row {
+		end++
+	}
+	return highlights[index:end]
 }
 
 // diagnosticStyle marks text that carries a diagnostic (docs/design/marks.md, "Diagnostics").
@@ -741,6 +773,9 @@ func (m Model) applyWindowOverlaysAt(style lipgloss.Style, window protocol.Windo
 		style = style.Background(m.palette().Selection())
 	}
 	for _, highlight := range window.Highlights {
+		if highlight.Kind == documentHighlightHover {
+			break
+		}
 		if rangeContains(highlight.StartRow, highlight.StartCol, highlight.EndRow, highlight.EndCol, row, column) {
 			style = style.Background(m.palette().DocumentHighlight(highlight.Kind))
 			break

@@ -344,8 +344,9 @@ type HoverPopup struct {
 }
 
 type HoverAction struct {
-	Visible bool
-	Name    string
+	Offer     uint64
+	Actions   bool
+	OpenLabel string
 }
 
 type SignatureHelp struct {
@@ -900,8 +901,9 @@ type RichLine struct {
 }
 
 type RichSegment struct {
-	Style byte
-	FG    uint32
-	Flags byte
-	Text  string
+	Style  byte
+	FG     uint32
+	Flags  byte
+	LinkID uint16
+	Text   string
 }

@@ -7,7 +7,11 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.AgentSessionStart
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.HoverPopup
+  alias MingaEditor.Input.Hover
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -463,26 +467,41 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       assert %EditorState{} = new_state
     end
 
-    test "defers resolving the provenance target until the restored transcript arrives" do
+    test "Return and click open the hover's exact conversation and retain its tool jump" do
       messages = [
         {:user, "add auth"},
         {:thinking, "use middleware", false},
         {:tool_call, MingaAgent.ToolCall.new("tc_auth", "apply_diff")}
       ]
 
-      {:ok, session} = StubServer.start_link(notify: self(), messages: messages)
-      state = base_state(session: session)
+      for input <- [:return, :click] do
+        {:ok, session} = StubServer.start_link(notify: self(), messages: messages)
 
-      new_state =
-        state
-        |> AgentCommands.open_session("sess-42", "tc_auth")
-        |> AgentSessionStart.settle_follow_ups()
+        popup =
+          "Written by Minga"
+          |> HoverPopup.new(0, 3)
+          |> HoverPopup.with_open_action({:open_session, "sess-42", "tc_auth"})
+          |> HoverPopup.focus()
 
-      jump = new_state.workspace.agent_ui.panel.transcript.provenance_jump
-      assert jump != nil
-      assert jump.target == {:tool_call_id, "tc_auth"}
-      refute jump.landed?
-      assert_receive {:stub_loaded_session, "sess-42"}
+        state = HoverPopupWorkflow.show(base_state(session: session), popup)
+
+        activated =
+          case input do
+            :return ->
+              {:handled, activated} = Hover.handle_key(state, 13, 0)
+              activated
+
+            :click ->
+              GuiActionHandler.dispatch(state, {:hover_open_action, popup.offer_id, :open})
+          end
+
+        assert Runtime.state(activated.shell_runtime).hover_popup == nil
+        restored = AgentSessionStart.settle_follow_ups(activated)
+        jump = restored.workspace.agent_ui.panel.transcript.provenance_jump
+        assert jump.target == {:tool_call_id, "tc_auth"}
+        refute jump.landed?
+        assert_receive {:stub_loaded_session, "sess-42"}
+      end
     end
 
     test "without a tool_call_id, arms no jump (plain resume)" do

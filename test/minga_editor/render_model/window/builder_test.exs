@@ -915,6 +915,45 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
       assert model.accessibility_selection_ranges == [{0, 1, 2}]
     end
 
+    test "hover source excludes inline inlays inside its byte range" do
+      state = gui_state(content: "ab")
+      buffer = state.workspace.buffers.active
+      window = SessionState.active_window_struct(state.workspace)
+
+      _virtual_id =
+        BufferProcess.add_virtual_text(buffer, {0, 1},
+          segments: [{"XY", Face.new()}],
+          placement: :inline
+        )
+
+      source = %{
+        trigger: :cursor,
+        tab: nil,
+        window: window.id,
+        viewport: window.viewport,
+        buffer: buffer,
+        version: Buffer.version(buffer),
+        position: {0, 0},
+        anchor: {0, 0},
+        path: nil
+      }
+
+      popup =
+        MingaEditor.HoverPopup.new("Reference", 0, 0)
+        |> MingaEditor.HoverPopup.bind_code(source)
+        |> MingaEditor.HoverPopup.highlight_code({{0, 0}, {0, 2}})
+
+      state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
+      {[wf], _cursor, _state} = build_content(state)
+      assert hd(wf.window_model.rows).text == "aXYb"
+
+      assert [
+               %{kind: :hover, start_col: 0, end_col: 1},
+               %{kind: :hover, start_col: 3, end_col: 4}
+             ] =
+               wf.window_model.document_highlights
+    end
+
     test "accessibility cursor maps source bytes past a tab and inline virtual text" do
       state = gui_state(content: "\tab")
       buffer = state.workspace.buffers.active

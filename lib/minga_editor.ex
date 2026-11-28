@@ -111,12 +111,13 @@ defmodule MingaEditor do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.{TabBar, Workspace}
+  alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
 
-  alias MingaEditor.MouseHoverTooltip
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -934,6 +935,8 @@ defmodule MingaEditor do
 
     new_state = EditorState.resize_frontend(state, vp)
     new_state = resize_all_windows(new_state)
+    new_state = CodeHoverWorkflow.reconcile_source(new_state)
+    new_state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.reflow_terminal(new_state)
     new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end
@@ -1545,10 +1548,21 @@ defmodule MingaEditor do
 
   @toast_duration_ms 3_000
 
-  # Mouse hover timeout: check if the mouse is over a diagnostic or symbol
-  def handle_info(:mouse_hover_timeout, state) do
-    state = MouseHoverTooltip.check_hover(state)
-    {:noreply, Renderer.render_or_async(state)}
+  def handle_info({:timeout, timer, {:mouse_hover_timeout, view}}, state) do
+    case MouseState.dwell_elapsed(state.workspace.mouse, timer) do
+      {:ready, mouse} ->
+        workspace = MingaEditor.Session.State.set_mouse(state.workspace, mouse)
+        state = %{state | workspace: workspace}
+
+        if CodeHoverWorkflow.dwell_current?(state, view) do
+          {:noreply, state |> CodeHoverWorkflow.open_pointer() |> Renderer.render_or_async()}
+        else
+          {:noreply, state}
+        end
+
+      :stale ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(:dismiss_toast, state) do

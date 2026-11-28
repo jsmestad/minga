@@ -25,6 +25,7 @@ defmodule Minga.Buffer.Process do
     Cursor,
     CursorContext,
     Document,
+    DraftOrigins,
     FileMutation,
     GitAuthorship,
     InspectionSnapshot,
@@ -142,8 +143,7 @@ defmodule Minga.Buffer.Process do
            {:delta, Document.t(), EditDelta.t()}
            | {:full, Document.t()}
            | {:batch, Document.t(), [UndoPatch.t()]}
-           | {:changes, Document.t(), nonempty_list(UndoPatch.t())}
-  @typep operation_undo :: :full | :batch | :changes | :force_delta | :force_full
+  @typep operation_undo :: :full | :batch | :force_delta | :force_full
   @typep operation_sync :: :record_delta | :clear
   @typep operation_opts :: {operation_undo(), BufState.edit_source(), operation_sync()}
 
@@ -375,14 +375,15 @@ defmodule Minga.Buffer.Process do
   """
   @spec merge_fork(
           GenServer.server(),
-          String.t(),
-          String.t(),
-          BufState.edit_source(),
+          Document.t(),
+          {Document.t(), DraftOrigins.t()},
+          :agent | Author.key(),
           (String.t() -> :ok | {:conflict, term()} | {:error, term()}) | nil
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
-  def merge_fork(server, ancestor, fork_content, source, staging \\ nil)
-      when is_undo_source(source) and (is_nil(staging) or is_function(staging, 1)) do
-    GenServer.call(server, {:merge_fork, ancestor, fork_content, staging, source}, :infinity)
+  def merge_fork(server, ancestor, {fork, origins}, source, staging \\ nil)
+      when (source == :agent or Author.is_key(source)) and
+             (is_nil(staging) or is_function(staging, 1)) do
+    GenServer.call(server, {:merge_fork, ancestor, fork, origins, staging, source}, :infinity)
   end
 
   @doc """
@@ -393,13 +394,13 @@ defmodule Minga.Buffer.Process do
   @spec install_fork_resolution(
           GenServer.server(),
           non_neg_integer(),
-          String.t(),
+          {String.t(), [FileMutation.splice()], [DraftOrigins.range()]},
           String.t(),
           (String.t() -> :ok | {:conflict, term()} | {:error, term()}),
-          BufState.edit_source()
+          :agent | Author.key()
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
   def install_fork_resolution(server, version, merged, fork_content, staging, source)
-      when is_undo_source(source) do
+      when source == :agent or Author.is_key(source) do
     GenServer.call(
       server,
       {:install_fork_resolution, version, merged, fork_content, staging, source},
@@ -1394,6 +1395,13 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:author_at, position})
   end
 
+  @doc "Reads the actual Minga writer of a document byte at the requested version."
+  @spec attribution_at(GenServer.server(), Document.position(), non_neg_integer()) ::
+          Provenance.attribution() | nil
+  def attribution_at(server, {line, column} = position, version) when line >= 0 and column >= 0 do
+    GenServer.call(server, {:attribution_at, position, version})
+  end
+
   @doc """
   Returns the authors of each line from `first_line`, at most `count` lines, in line order.
 
@@ -1875,10 +1883,9 @@ defmodule Minga.Buffer.Process do
     generation = mutation_generation(identity, state)
 
     case FileMutation.prepare({:ok, content}, generation, identity, expected, operation) do
-      {:ok, new_content} when is_binary(new_content) ->
+      {:ok, new_content, geometry} when is_binary(new_content) ->
         receipt = FileMutation.Receipt.committed({:ok, content}, new_content)
-
-        {:reply, {:ok, receipt}, replace_content_by_changes(state, new_content, source)}
+        {:reply, {:ok, receipt}, replace_content_by_changes(state, new_content, source, geometry)}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -1886,37 +1893,46 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:merge_fork, _ancestor, _fork_content, _staging, _source},
+        {:merge_fork, _ancestor, _fork, _origins, _staging, _source},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:merge_fork, ancestor, fork_content, staging, source}, _from, state) do
+  def handle_call({:merge_fork, ancestor, fork, origins, staging, source}, _from, state) do
+    ancestor_content = Document.content(ancestor)
     parent_content = Document.content(state.document)
+    fork_content = Document.content(fork)
 
-    case Minga.Core.Diff.merge3(
-           String.split(ancestor, "\n"),
-           String.split(fork_content, "\n"),
-           String.split(parent_content, "\n")
-         ) do
-      {:ok, lines} ->
-        case stage_fork_content(staging, fork_content) do
-          :ok ->
-            merged = Enum.join(lines, "\n")
-            new_state = replace_content_by_changes(state, merged, source)
-            {:reply, {:ok, merged}, new_state}
+    merge =
+      if parent_content == ancestor_content do
+        {:ok, :base}
+      else
+        Minga.Core.Diff.merge3_projected(
+          String.split(ancestor_content, "\n"),
+          String.split(fork_content, "\n"),
+          String.split(parent_content, "\n"),
+          DraftOrigins.base_lines(origins, ancestor, fork)
+        )
+      end
 
-          {:error, _} = error ->
-            {:reply, error, state}
+    with {:ok, selected} <- merge,
+         :ok <- stage_fork_content(staging, fork_content) do
+      {merged, geometry, attribution} =
+        fork_publication(
+          selected,
+          {ancestor, ancestor_content},
+          state.document,
+          fork,
+          fork_content,
+          origins
+        )
 
-          {:conflict, _} = conflict ->
-            {:reply, conflict, state}
-        end
-
-      {:conflict, _} = conflict ->
-        {:reply, conflict, state}
+      next = replace_content_by_changes(state, merged, source, geometry, attribution)
+      {:reply, {:ok, merged}, next}
+    else
+      failure -> {:reply, failure, state}
     end
   end
 
@@ -1925,13 +1941,15 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:install_fork_resolution, version, merged, fork_content, staging, source},
+        {:install_fork_resolution, version, {merged, geometry, origins}, fork_content, staging,
+         source},
         _from,
         state
       ) do
     with ^version <- BufState.version(state),
          :ok <- stage_fork_content(staging, fork_content) do
-      {:reply, {:ok, merged}, replace_content_by_changes(state, merged, source)}
+      {:reply, {:ok, merged},
+       replace_content_by_changes(state, merged, source, geometry, origins)}
     else
       {:error, _} = error -> {:reply, error, state}
       {:conflict, _} = conflict -> {:reply, conflict, state}
@@ -2957,20 +2975,26 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:author_at, {line, column}}, _from, state) do
-    document = state.document
-    line_count = Document.line_count(document)
-
+  def handle_call({:author_at, position}, _from, state) do
     author =
-      if line < line_count and
-           Lines.start_of(document, line) + column < line_end(document, line, line_count),
-         do:
-           Provenance.author_at(
-             UndoHistory.provenance(state.undo_history),
-             Lines.start_of(document, line) + column
-           )
+      case byte_on_line(state.document, position) do
+        nil -> nil
+        offset -> Provenance.author_at(UndoHistory.provenance(state.undo_history), offset)
+      end
 
     {:reply, author, state}
+  end
+
+  def handle_call({:attribution_at, position, version}, _from, state) do
+    attribution =
+      with ^version <- BufState.version(state),
+           offset when is_integer(offset) <- byte_on_line(state.document, position) do
+        Provenance.attribution_at(UndoHistory.provenance(state.undo_history), offset)
+      else
+        _stale_or_outside -> nil
+      end
+
+    {:reply, attribution, state}
   end
 
   def handle_call({:line_authors, first_line, count}, _from, state) do
@@ -4583,21 +4607,104 @@ defmodule Minga.Buffer.Process do
   # region, so each change keeps its author and step. The document, cursor, decorations, dirty
   # state, version and change event match `replace_content_preserving_cursor_state/3`, and an
   # unchanged replacement still records one empty patch, as that path does.
-  @spec replace_content_by_changes(state(), String.t(), BufState.edit_source()) :: state()
-  defp replace_content_by_changes(state, new_content, source) do
+  @spec replace_content_by_changes(
+          state(),
+          String.t(),
+          BufState.edit_source(),
+          FileMutation.geometry(),
+          :direct | [DraftOrigins.range()]
+        ) :: state()
+  defp replace_content_by_changes(
+         state,
+         new_content,
+         source,
+         geometry \\ :whole,
+         origins \\ :direct
+       ) do
     new_document =
       new_content
       |> Document.new()
       |> Document.move_to(Document.cursor(state.document))
 
-    patches = region_patches(state.document, new_document)
+    patches = replacement_patches(state.document, new_document, geometry)
 
-    apply_operation(
+    state
+    |> record_replacement(new_document, source, patches, origins, geometry)
+    |> mark_dirty()
+    |> clear_edits(EditSource.from_undo_source(source))
+    |> Map.put(:decorations, Decorations.new())
+  end
+
+  @spec record_replacement(
+          state(),
+          Document.t(),
+          BufState.edit_source(),
+          nonempty_list(UndoPatch.t()),
+          :direct | [DraftOrigins.range()],
+          FileMutation.geometry()
+        ) :: state()
+  defp record_replacement(state, document, source, patches, :direct, _geometry),
+    do: push_undo_batch(state, document, source, patches)
+
+  defp record_replacement(state, document, source, patches, origins, geometry) do
+    version = BufState.version(state)
+    alignment = if geometry == :whole, do: :derived, else: :exact
+
+    install_document(
       state,
-      {:changes, new_document, patches},
-      EditSource.from_undo_source(source),
-      {:changes, source, :clear}
+      document,
+      &UndoHistory.record_publication(&1, version, patches, source, origins, alignment)
     )
+  end
+
+  @spec fork_publication(
+          :base | Minga.Core.Diff.projected_merge(),
+          {Document.t(), binary()},
+          Document.t(),
+          Document.t(),
+          binary(),
+          DraftOrigins.t()
+        ) :: {binary(), FileMutation.geometry(), [DraftOrigins.range()]}
+  defp fork_publication(:base, {_document, ancestor}, _parent, _fork, fork_content, origins) do
+    splices = DraftOrigins.splices_from_base(origins, ancestor, fork_content)
+    {fork_content, splices, DraftOrigins.ranges(origins)}
+  end
+
+  defp fork_publication(
+         {{lines, placements}, alignment},
+         {ancestor, _content},
+         parent,
+         fork,
+         _bytes,
+         origins
+       ) do
+    merged = Enum.join(lines, "\n")
+
+    {geometry, attribution} =
+      DraftOrigins.replay(
+        origins,
+        ancestor,
+        parent,
+        fork,
+        merged,
+        placements,
+        alignment
+      )
+
+    {merged, geometry, attribution}
+  end
+
+  @spec replacement_patches(Document.t(), Document.t(), FileMutation.geometry()) ::
+          nonempty_list(UndoPatch.t())
+  defp replacement_patches(old, new, :whole), do: region_patches(old, new)
+  defp replacement_patches(old, new, []), do: [UndoPatch.from_documents(old, new)]
+
+  defp replacement_patches(old, _new, [_ | _] = splices) do
+    cursor = Document.cursor(old)
+
+    Enum.map(splices, fn {start, removed, inserted} ->
+      UndoPatch.replacement(start, removed, inserted, cursor)
+    end)
   end
 
   @spec replace_content_document_state(state(), Document.t(), BufState.edit_source()) :: state()
@@ -4633,7 +4740,14 @@ defmodule Minga.Buffer.Process do
       state
       |> install_document(
         new_doc,
-        &UndoHistory.record_edit(&1, version, patch, undo_source, now_ms())
+        &UndoHistory.record_edit(
+          &1,
+          version,
+          patch,
+          undo_source,
+          now_ms(),
+          edit_wall_time(undo_source)
+        )
       )
       |> Map.put(:change_log, ChangeLog.record_changes(state.change_log, deltas))
 
@@ -4680,19 +4794,6 @@ defmodule Minga.Buffer.Process do
     |> clear_edits(delta, source)
   end
 
-  defp apply_operation(
-         state,
-         {:changes, new_buf, patches},
-         source,
-         {:changes, undo_source, :clear}
-       ) do
-    state
-    |> push_undo_batch(new_buf, undo_source, patches)
-    |> mark_dirty()
-    |> clear_edits(source)
-    |> Map.put(:decorations, Decorations.new())
-  end
-
   defp apply_operation(state, {:full, new_buf}, source, {:force_full, undo_source, :clear}) do
     state
     |> push_undo_force_full(new_buf, undo_source)
@@ -4719,7 +4820,7 @@ defmodule Minga.Buffer.Process do
     install_document(
       state,
       new_buf,
-      &UndoHistory.record_edit(&1, version, patch, source, now_ms())
+      &UndoHistory.record_edit(&1, version, patch, source, now_ms(), edit_wall_time(source))
     )
   end
 
@@ -4731,7 +4832,7 @@ defmodule Minga.Buffer.Process do
     install_document(
       state,
       new_buf,
-      &UndoHistory.record_edit(&1, version, patches, source, now_ms())
+      &UndoHistory.record_edit(&1, version, patches, source, now_ms(), edit_wall_time(source))
     )
   end
 
@@ -4742,7 +4843,14 @@ defmodule Minga.Buffer.Process do
     install_document(
       state,
       new_buf,
-      &UndoHistory.record_edit_batch(&1, version, patches, source, now_ms())
+      &UndoHistory.record_edit_batch(
+        &1,
+        version,
+        patches,
+        source,
+        now_ms(),
+        edit_wall_time(source)
+      )
     )
   end
 
@@ -4754,7 +4862,7 @@ defmodule Minga.Buffer.Process do
     install_document(
       state,
       new_buf,
-      &UndoHistory.record_edit_force(&1, version, patch, source, now_ms())
+      &UndoHistory.record_edit_force(&1, version, patch, source, now_ms(), edit_wall_time(source))
     )
   end
 
@@ -4766,7 +4874,14 @@ defmodule Minga.Buffer.Process do
     install_document(
       state,
       new_buf,
-      &UndoHistory.record_edit_batch(&1, version, patches, source, now_ms())
+      &UndoHistory.record_edit_batch(
+        &1,
+        version,
+        patches,
+        source,
+        now_ms(),
+        edit_wall_time(source)
+      )
     )
   end
 
@@ -5162,6 +5277,16 @@ defmodule Minga.Buffer.Process do
     authors_by_line(bounds, spans)
   end
 
+  @spec byte_on_line(Document.t(), Document.position()) :: non_neg_integer() | nil
+  defp byte_on_line(document, {line, column}) do
+    line_count = Document.line_count(document)
+
+    if line < line_count do
+      offset = Lines.start_of(document, line) + column
+      if offset < line_end(document, line, line_count), do: offset
+    end
+  end
+
   # A line's bytes run up to the next line's start, so they include its newline.
   @spec line_end(Document.t(), non_neg_integer(), pos_integer()) :: non_neg_integer()
   defp line_end(document, line, line_count) when line + 1 < line_count,
@@ -5518,6 +5643,11 @@ defmodule Minga.Buffer.Process do
   # UndoHistory is clock-free; the process owns the coalescing clock.
   @spec now_ms() :: integer()
   defp now_ms, do: System.monotonic_time(:millisecond)
+
+  @spec edit_wall_time(BufState.edit_source()) :: integer() | nil
+  defp edit_wall_time(:agent), do: System.system_time(:millisecond)
+  defp edit_wall_time(source) when Author.is_key(source), do: System.system_time(:millisecond)
+  defp edit_wall_time(_source), do: nil
 
   # Logs an undo or redo that was refused because its patch no longer applies.
   @spec log_history_failure(:undo | :redo | :undo_agent_session, UndoPatch.apply_error()) :: :ok

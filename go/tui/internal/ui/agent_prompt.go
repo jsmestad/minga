@@ -109,7 +109,7 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		text := ""
 		if committed {
 			if row, ok := m.windowRow(window, start+index); ok {
-				text = m.renderRowAt(window, row, start+index, index, placement.width, false, 0)
+				text = m.renderRowAt(window, row, start+index, index, placement.width, false, 0, nil)
 				if index == 0 && row.Text == "" && chat.Prompt == "" {
 					text = lipgloss.NewStyle().Foreground(p.AgentInputPlaceholder()).Background(bg).Italic(true).Render(fit("Ask Minga to edit, explain, search, or run tools", placement.width))
 				}

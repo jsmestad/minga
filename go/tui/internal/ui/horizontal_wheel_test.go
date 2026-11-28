@@ -315,7 +315,7 @@ func TestHorizontalWheelDragDefersPaintAndHitUntilCommit(t *testing.T) {
 	assertPointer := func(msg tea.MouseMsg, eventType byte, id uint64, offset uint32) {
 		t.Helper()
 		packet := update(msg)
-		if len(packet) != 33 || packet[0] != generated.OPEditorTextEvent ||
+		if len(packet) != 39 || packet[0] != generated.OPEditorTextEvent ||
 			binary.BigEndian.Uint16(packet[1:3]) != 7 || binary.BigEndian.Uint64(packet[3:11]) != id ||
 			binary.BigEndian.Uint64(packet[15:23]) != 1 || binary.BigEndian.Uint32(packet[23:27]) != offset ||
 			packet[29] != eventType {

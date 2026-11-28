@@ -1,0 +1,129 @@
+# minga storyboard frame v1
+# scenario: code.hover.focused
+# frontend: tui
+# theme: catppuccin_latte
+# size: 80x24
+# cursor: 1,6
+## text
+ ▌  storyboard.ex
+   1  greet(name)
+   1  ╭─ j/k scroll · q close ───────────────────────────────────────────────╮
+      │ ┌─ elixir ─                                                          │
+      │ greet(name :: String.t()) :: String.t()                              │
+      │ └─                                                                   │
+      │                                                                      │
+      │ Returns a greeting for the given name.                               │
+      │                                                                      │
+      │ The name is preserved exactly, including whitespace and              │
+      │ punctuation. The return value is a string, not terminal output.      │
+      │                                                                      │
+      │ Examples                                                             │
+      ╰────────────────────────────────────────────────────────── g. actions ╯
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+  NORMAL  storyboard.ex                                              Elixir 1:1
+## styles (row start-end fg bg attrs)
+0 0-0 #4c4f69 #eff1f5 -
+0 1-1 #1e66f5 #eff1f5 bold
+0 2-79 #4c4f69 #eff1f5 -
+1 0-5 #7287fd #ccd0da bold
+1 6-6 #eff1f5 #1e66f5 reverse
+1 7-10 #1e66f5 #eff1f5 -
+1 11-11 #8c8fa1 #eff1f5 -
+1 12-15 #4c4f69 #eff1f5 -
+1 16-16 #8c8fa1 #eff1f5 -
+1 17-79 #4c4f69 #eff1f5 -
+2 0-5 #5c5f77 #eff1f5 -
+2 6-7 #1e66f5 #e6e9ef -
+2 8-29 #4c4f69 #e6e9ef -
+2 30-77 #1e66f5 #e6e9ef -
+2 78-79 #4c4f69 #eff1f5 -
+3 0-5 #5c5f77 #eff1f5 -
+3 6-6 #1e66f5 #e6e9ef -
+3 7-76 #4c4f69 #e6e9ef -
+3 77-77 #1e66f5 #e6e9ef -
+3 78-79 #8c8fa1 #eff1f5 -
+4 0-5 #5c5f77 #eff1f5 -
+4 6-6 #1e66f5 #e6e9ef -
+4 7-76 #4c4f69 #e6e9ef -
+4 77-77 #1e66f5 #e6e9ef -
+4 78-79 #8c8fa1 #eff1f5 -
+5 0-5 #5c5f77 #eff1f5 -
+5 6-6 #1e66f5 #e6e9ef -
+5 7-76 #4c4f69 #e6e9ef -
+5 77-77 #1e66f5 #e6e9ef -
+5 78-79 #8c8fa1 #eff1f5 -
+6 0-5 #5c5f77 #eff1f5 -
+6 6-6 #1e66f5 #e6e9ef -
+6 7-76 #4c4f69 #e6e9ef -
+6 77-77 #1e66f5 #e6e9ef -
+6 78-79 #8c8fa1 #eff1f5 -
+7 0-5 #5c5f77 #eff1f5 -
+7 6-6 #1e66f5 #e6e9ef -
+7 7-76 #4c4f69 #e6e9ef -
+7 77-77 #1e66f5 #e6e9ef -
+7 78-79 #8c8fa1 #eff1f5 -
+8 0-5 #5c5f77 #eff1f5 -
+8 6-6 #1e66f5 #e6e9ef -
+8 7-76 #4c4f69 #e6e9ef -
+8 77-77 #1e66f5 #e6e9ef -
+8 78-79 #8c8fa1 #eff1f5 -
+9 0-5 #5c5f77 #eff1f5 -
+9 6-6 #1e66f5 #e6e9ef -
+9 7-76 #4c4f69 #e6e9ef -
+9 77-77 #1e66f5 #e6e9ef -
+9 78-79 #8c8fa1 #eff1f5 -
+10 0-5 #5c5f77 #eff1f5 -
+10 6-6 #1e66f5 #e6e9ef -
+10 7-76 #4c4f69 #e6e9ef -
+10 77-77 #1e66f5 #e6e9ef -
+10 78-79 #8c8fa1 #eff1f5 -
+11 0-5 #5c5f77 #eff1f5 -
+11 6-6 #1e66f5 #e6e9ef -
+11 7-76 #4c4f69 #e6e9ef -
+11 77-77 #1e66f5 #e6e9ef -
+11 78-79 #8c8fa1 #eff1f5 -
+12 0-5 #5c5f77 #eff1f5 -
+12 6-6 #1e66f5 #e6e9ef -
+12 7-7 #4c4f69 #e6e9ef -
+12 8-15 #4c4f69 #e6e9ef bold
+12 16-76 #4c4f69 #e6e9ef -
+12 77-77 #1e66f5 #e6e9ef -
+12 78-79 #8c8fa1 #eff1f5 -
+13 0-5 #5c5f77 #eff1f5 -
+13 6-64 #1e66f5 #e6e9ef -
+13 65-65 #4c4f69 #e6e9ef -
+13 66-75 #4c4f69 #e6e9ef underline
+13 76-76 #4c4f69 #e6e9ef -
+13 77-77 #1e66f5 #e6e9ef -
+13 78-79 #8c8fa1 #eff1f5 -
+14 0-5 #5c5f77 #eff1f5 -
+14 6-79 #8c8fa1 #eff1f5 -
+15 0-5 #5c5f77 #eff1f5 -
+15 6-79 #8c8fa1 #eff1f5 -
+16 0-5 #5c5f77 #eff1f5 -
+16 6-79 #8c8fa1 #eff1f5 -
+17 0-5 #5c5f77 #eff1f5 -
+17 6-79 #8c8fa1 #eff1f5 -
+18 0-5 #5c5f77 #eff1f5 -
+18 6-79 #8c8fa1 #eff1f5 -
+19 0-5 #5c5f77 #eff1f5 -
+19 6-79 #8c8fa1 #eff1f5 -
+20 0-5 #5c5f77 #eff1f5 -
+20 6-79 #8c8fa1 #eff1f5 -
+21 0-5 #5c5f77 #eff1f5 -
+21 6-79 #8c8fa1 #eff1f5 -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-79 #8c8fa1 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-79 #4c4f69 #e6e9ef -

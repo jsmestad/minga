@@ -408,7 +408,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     assert PendingRequests.fetch_format(pending, format.ref) == {:ok, format}
   end
 
-  test "hover mouse and semantic token requests preserve identity exactly" do
+  test "hover and semantic token requests preserve identity exactly" do
     hover_ref = make_ref()
     semantic_ref = make_ref()
     buffer = spawn_process()
@@ -416,16 +416,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
     legend = {["variable"], []}
 
     assert {:ok, pending} =
-             PendingRequests.track_hover_mouse(
-               PendingRequests.new(),
-               hover_ref,
-               12,
-               34,
-               buffer,
-               3,
-               4,
-               99
-             )
+             PendingRequests.track_hover(PendingRequests.new(), hover_ref, client)
 
     assert {:ok, pending} =
              PendingRequests.track_semantic_tokens(
@@ -438,8 +429,7 @@ defmodule MingaEditor.State.LSP.PendingRequestsTest do
                legend
              )
 
-    assert PendingRequests.fetch(pending, hover_ref) ==
-             {:ok, {:hover_mouse, 12, 34, buffer, 3, 4, 99}}
+    assert PendingRequests.fetch(pending, hover_ref) == {:ok, {:hover, client}}
 
     assert PendingRequests.fetch(pending, semantic_ref) ==
              {:ok, {:semantic_tokens, client, buffer, 7, :utf16, legend}}

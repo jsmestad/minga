@@ -112,7 +112,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0x02` | resize | 5 | Frontend content grid changed size |
 | `0x03` | ready | 29 | Frontend is initialized and ready (capability format 2 plus exact protocol version) |
 | `0x04` | mouse_event | 9 | Legacy non-text pointer events and wheel input |
-| `0x1E` | editor_text_event | 33 | Pointer target in an immutable displayed text row |
+| `0x1E` | editor_text_event | 39 | Pointer target in an immutable displayed text row |
 | `0x1F` | text_presentation_state | 12 | Ordered active/discarded text presentation lifetime |
 | `0x05` | capabilities_updated | 9 or 23 | Updated versioned capabilities after async detection |
 | `0x13` | frontend_foreground | 2 | Whether the frontend is in the foreground: terminal window focus, or the macOS app's active state |
@@ -479,8 +479,11 @@ A frontend-resolved position in an immutable displayed text row. All integers ar
 | click_count | u8 | Native click count |
 | scroll_x | i8 | Drag edge direction: -1, 0, or 1 |
 | scroll_y | i8 | Drag edge direction: -1, 0, or 1 |
+| anchor_row | u16 | Physical grid row for a motion popover, zero otherwise |
+| anchor_col | u16 | Physical grid column for a motion popover, zero otherwise |
+| terminal_caret_row | u16 | Displayed terminal caret row, or 65535 when absent or placed natively |
 
-Total size: 33 bytes. The row index is not viewport-local. A wrapped windowed payload uses its retained payload rank; a resident document uses its document-store rank. The renderer checks the row ID at that rank and resolves the offset through its retained source map. The editor checks the buffer version before applying cursor or selection state. Stale or non-source-backed endpoints do not fall back to current screen geometry. Release always ends the gesture, including a release with zero presentation and row fields.
+Total size: 39 bytes. The row index is not viewport-local. A wrapped windowed payload uses its retained payload rank; a resident document uses its document-store rank. The renderer checks the row ID at that rank and resolves the offset through its retained source map. The anchor and displayed terminal caret position a popover only; they never select the document source. The editor checks the buffer version before acting. Stale or non-source-backed endpoints do not fall back to current screen geometry. Release always ends the gesture, including a release with zero presentation and row fields.
 
 The frontend reports the exact composed boundary, including the exclusive row end for blank space after text. BEAM resolves current modal mouse gestures to characters: a nonempty row-end hit selects that row's final composed grapheme through the source map. This keeps soft-wrap clicks and inclusive drag selections on the displayed row; virtual text retains its source anchor. Exact insertion-boundary mapping remains a separate operation.
 

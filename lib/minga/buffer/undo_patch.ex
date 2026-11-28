@@ -477,7 +477,7 @@ defmodule Minga.Buffer.UndoPatch do
     case trimmed_change(start, old, new) do
       [{at, old_middle, new_middle}] = change ->
         if several_words?(old_middle, new_middle) or
-             (words? and not ascii?(old_middle <> new_middle)),
+             (words? and not (ascii?(old_middle) and ascii?(new_middle))),
            do: word_changes(at, old_middle, new_middle),
            else: change
 
@@ -619,9 +619,9 @@ defmodule Minga.Buffer.UndoPatch do
   defp flush(changes, {start, removed, inserted}),
     do: [{start, :erlang.iolist_to_binary(removed), :erlang.iolist_to_binary(inserted)} | changes]
 
-  # Lines pair one to one only when both sides have the same number of lines, more than one.
+  # Equal nonempty line counts pair directly, including one-line rewrites that cannot have line anchors.
   @spec line_pairs([binary()], [binary()]) :: [{binary(), binary()}]
-  defp line_pairs([_, _ | _] = removed_lines, inserted_lines) do
+  defp line_pairs([_ | _] = removed_lines, inserted_lines) do
     if length(removed_lines) == length(inserted_lines),
       do: Enum.zip(removed_lines, inserted_lines),
       else: []

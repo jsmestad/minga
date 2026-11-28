@@ -954,7 +954,9 @@ struct GUIFrameSwiftUIInvalidationTests {
             ("CompletionState", "Sources/Views/Overlays/CompletionState.swift", [
                 "@ObservationIgnored private let localPresentationStore: LocalPresentationStore",
             ]),
-            ("HoverPopupState", "Sources/Views/Overlays/HoverPopupState.swift", []),
+            ("HoverPopupState", "Sources/Views/Overlays/HoverPopupState.swift", [
+                "@ObservationIgnored private weak var pointerSurface: NSView?",
+            ]),
             ("SignatureHelpState", "Sources/Views/Overlays/SignatureHelpState.swift", []),
             ("MinibufferState", "Sources/Views/Overlays/MinibufferState.swift", []),
             ("PickerState", "Sources/Views/Overlays/PickerState.swift", [
@@ -988,6 +990,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder",
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
             "@ObservationIgnored private let localPresentationStore: LocalPresentationStore": "dependency",
+            "@ObservationIgnored private weak var pointerSurface: NSView?": "dependency",
             "@ObservationIgnored public var announce: @MainActor (String) -> Void = { message in": "callback",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "dependency"]

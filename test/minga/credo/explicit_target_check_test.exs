@@ -241,6 +241,9 @@ defmodule Minga.Credo.ExplicitTargetCheckTest do
     for {opcode, payload, triggers} <- [
           {:gui_action_act_menu_action, "<<offer::64, id::16>>", []},
           {:gui_action_act_menu_action, "<<offer::64, index::16>>", ["index"]},
+          {:gui_action_hover_open_action, "<<offer::64, id::16>>", []},
+          {:gui_action_hover_open_action, "<<offer::64, index::16>>", ["index"]},
+          {:gui_action_hover_open_action, "<<offer::32, id::16>>", ["id"]},
           {:gui_action_review_ribbon_act,
            "<<window::16, revision::64, kind, unit::64, row::32, column::32, y::16, x::16>>", []},
           {:gui_action_review_ribbon_act,

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"strings"
 
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -283,14 +284,15 @@ func decodeHoverAction(payload []byte) (HoverAction, string, int) {
 		return HoverAction{}, "", len(payload)
 	}
 	size := 3 + int(u16(payload, 1))
-	if len(payload) < size || payload[3] == 0 {
+	if size < 15 || len(payload) < size || payload[3] != 1 || payload[12] > 1 {
 		return HoverAction{}, "", min(len(payload), size)
 	}
-	name, _, ok := readString16(payload, 4)
-	if !ok {
-		return HoverAction{Visible: true}, "", size
+	offer := binary.BigEndian.Uint64(payload[4:12])
+	label, end, ok := readString16(payload[:size], 13)
+	if !ok || end != size || offer == 0 {
+		return HoverAction{}, "", size
 	}
-	return HoverAction{Visible: true, Name: name}, name, size
+	return HoverAction{Offer: offer, Actions: payload[12] == 1, OpenLabel: label}, label, size
 }
 
 func decodeSignatureHelp(payload []byte) (SignatureHelp, string, int) {
@@ -387,13 +389,23 @@ func decodeRichLine(payload []byte, offset int, count int) (RichLine, int, bool)
 	for i := 0; i < count && offset < len(payload); i++ {
 		segment := RichSegment{Style: payload[offset]}
 		offset++
-		if segment.Style == 13 {
+		switch segment.Style {
+		case 13:
 			if len(payload) < offset+6 {
 				return line, offset, false
 			}
 			segment.FG = u24(payload, offset)
 			segment.Flags = payload[offset+3]
 			offset += 4
+		case 14, 15:
+			if len(payload) < offset+2 {
+				return line, offset, false
+			}
+			segment.LinkID = u16(payload, offset)
+			if segment.LinkID < 2 {
+				return line, offset, false
+			}
+			offset += 2
 		}
 		text, next, ok := readString16(payload, offset)
 		if !ok {

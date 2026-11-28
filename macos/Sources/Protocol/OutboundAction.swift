@@ -86,7 +86,7 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case applicationQuitDecision(requestID: UInt32, decision: UInt8)
     case fileDialogResult(requestID: UInt32, outcome: UInt8, paths: [String])
     case mouse(row: Int16, column: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
-    case editorText(target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8)
+    case editorText(target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8, anchorRow: UInt16 = 0, anchorCol: UInt16 = 0)
     case textPresentationState(windowID: UInt16, presentationID: UInt64, state: TextPresentationState)
     /// Physical fit observed for the exact retained prompt TextPresentation.
     case agentPromptFit(windowID: UInt16, generation: UInt64, columns: UInt16, maxRows: UInt16)
@@ -110,7 +110,7 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case tabUnpin(id: UInt32)
     case tabMoveLeft(id: UInt32)
     case tabMoveRight(id: UInt32)
-    case hoverOpen
+    case hoverOpen(offer: UInt64, action: UInt16)
     case pickerQueryChanged(generation: UInt32, editSequence: UInt32, text: String)
     case pickerItemActivate(generation: UInt32, activationID: UInt32)
     case actMenuAction(offerID: UInt64, actionID: UInt16)

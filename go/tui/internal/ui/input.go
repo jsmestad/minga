@@ -222,12 +222,8 @@ func (m Model) mousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	case tea.MouseReleaseMsg:
 		eventType = protocol.MouseRelease
 	case tea.MouseMotionMsg:
-		// MouseModeCellMotion (DECSET 1002) delivers motion only while a button
-		// is held (a drag) plus, on some terminals, free motion. Bubble Tea sets
-		// Mouse.Button to the held button during a drag and MouseNone for free
-		// motion. The BEAM only extends a selection on a drag (event_type
-		// :drag), so report a held-button motion as MouseDrag and free motion as
-		// MouseMotion, matching the macOS frontend (EditorNSView.swift:1219/1233).
+		// DECSET 1003 reports both free and held-button motion. Only the
+		// held-button event extends a BEAM selection, as on macOS.
 		if mouse.Button == tea.MouseNone {
 			eventType = protocol.MouseMotion
 		} else {

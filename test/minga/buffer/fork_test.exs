@@ -1,6 +1,7 @@
 defmodule Minga.Buffer.ForkTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Fork
   alias Minga.Buffer.Process, as: BufferProcess
 
@@ -24,6 +25,29 @@ defmodule Minga.Buffer.ForkTest do
     assert {:error, :stale_fork} = Fork.publish_resolution(fork, revision, [:accepted], staging)
     assert BufferProcess.content(parent) == "new human"
     refute Fork.published?(fork)
+  end
+
+  test "selecting an EOF newline keeps its origin after rejecting the other edit" do
+    parent = start_parent!("base\nlast")
+    {:ok, fork} = Fork.create(parent)
+    identity = {:fork, "/eof-origin"}
+    writer = Minga.Buffer.EditSource.minga("writer", "old-step")
+    revision = FileMutation.revision("base\nlast", 0, identity)
+    operation = {:edit, [{"base", "fork"}, {"", "\n"}]}
+    assert {:ok, _} = Fork.conditional_mutate(fork, revision, operation, identity, writer)
+    assert {_, [{0, 4, {^writer, at}}, {9, 1, {^writer, at}}]} = Fork.staged_content(fork)
+
+    BufferProcess.replace_content(parent, "user\nlast")
+    assert {:ok, reviewed, _regions} = Fork.conflict_snapshot(fork)
+    test = self()
+
+    assert {:ok, "user\nlast\n"} =
+             Fork.publish_resolution(fork, reviewed, [:rejected], fn _ancestor, selected ->
+               send(test, {:selected, selected})
+               :ok
+             end)
+
+    assert_receive {:selected, {"base\nlast\n", [{9, 1, {^writer, ^at}}]}}
   end
 
   describe "create/1 and content/1" do
@@ -130,6 +154,64 @@ defmodule Minga.Buffer.ForkTest do
       GenServer.call(fork, {:find_and_replace, "second", "third", nil})
 
       assert Fork.version(fork) == 3
+    end
+
+    test "a later writer replaces only its bytes and undo restores the previous exact origin" do
+      parent = start_parent!("old -- old")
+      {:ok, fork} = Fork.create(parent)
+      identity = {:fork, "/origins"}
+      a = {:minga, "task-a", "step-1"}
+      b = {:minga, "task-b", "step-2"}
+
+      rev = FileMutation.revision("old -- old", 0, identity)
+
+      assert {:ok, _} =
+               Fork.conditional_mutate(fork, rev, {:edit, [{"old --", "αβ --"}]}, identity, a)
+
+      assert {"αβ -- old", [{0, 7, {^a, at_a}}]} = Fork.staged_content(fork)
+      assert is_integer(at_a)
+
+      rev = FileMutation.revision("αβ -- old", 1, identity)
+      assert {:ok, _} = Fork.conditional_mutate(fork, rev, {:edit, [{"β", "B!"}]}, identity, b)
+
+      assert {"αB! -- old", [{0, 2, {^a, ^at_a}}, {2, 2, {^b, at_b}}, {4, 3, {^a, ^at_a}}]} =
+               Fork.staged_content(fork)
+
+      assert is_integer(at_b)
+      assert {:error, :stale_revision} = Fork.conditional_mutate(fork, rev, :delete, identity, b)
+      assert :ok = Fork.undo(fork)
+      assert {"αβ -- old", [{0, 7, {^a, ^at_a}}]} = Fork.staged_content(fork)
+    end
+
+    test "a unique legacy deletion removes the right origin even when the remaining bytes match" do
+      parent = start_parent!("a")
+      {:ok, fork} = Fork.create(parent)
+      identity = {:fork, "/duplicate"}
+      first = Minga.Buffer.EditSource.minga("first", "replace")
+      second = Minga.Buffer.EditSource.minga("second", "append")
+
+      assert {:ok, _} =
+               Fork.conditional_mutate(
+                 fork,
+                 FileMutation.revision("a", 0, identity),
+                 {:edit, [{"a", "x"}]},
+                 identity,
+                 first
+               )
+
+      assert {"x", [{0, 1, {^first, time}}]} = Fork.staged_content(fork)
+
+      assert {:ok, _} =
+               Fork.conditional_mutate(
+                 fork,
+                 FileMutation.revision("x", 1, identity),
+                 {:edit, [{"", "x"}]},
+                 identity,
+                 second
+               )
+
+      assert {:ok, _} = Fork.find_and_replace(fork, "\nx", "")
+      assert {"x", [{0, 1, {^first, ^time}}]} = Fork.staged_content(fork)
     end
   end
 

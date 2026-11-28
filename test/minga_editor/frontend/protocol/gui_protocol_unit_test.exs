@@ -277,8 +277,18 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert {:ok, {:tab_move_right, 42}} == ProtocolGUI.decode_gui_action(0x4C, <<42::32>>)
     end
 
-    test "decodes hover open action" do
-      assert {:ok, :hover_open_action} == ProtocolGUI.decode_gui_action(0x3F, <<>>)
+    test "decodes scoped hover activation and refuses legacy and invalid offer identities" do
+      assert {:ok, {:hover_open_action, 42, :open}} ==
+               ProtocolGUI.decode_gui_action(0x3F, <<42::64, 0::16>>)
+
+      assert {:ok, {:hover_open_action, 42, :actions}} ==
+               ProtocolGUI.decode_gui_action(0x3F, <<42::64, 1::16>>)
+
+      assert {:ok, {:hover_open_action, 42, {:link, 5}}} ==
+               ProtocolGUI.decode_gui_action(0x3F, <<42::64, 5::16>>)
+
+      assert :error == ProtocolGUI.decode_gui_action(0x3F, <<>>)
+      assert :error == ProtocolGUI.decode_gui_action(0x3F, <<0::64, 0::16>>)
     end
   end
 

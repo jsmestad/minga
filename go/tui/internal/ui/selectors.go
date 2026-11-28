@@ -138,12 +138,8 @@ func (m Model) hoverPopup() (protocol.HoverPopup, bool) {
 }
 
 func (m Model) hoverAction() (protocol.HoverAction, bool) {
-	for _, payload := range m.chrome {
-		if payload.HoverAction.Visible {
-			return payload.HoverAction, true
-		}
-	}
-	return protocol.HoverAction{}, false
+	action := m.chrome[generated.OPGuiHoverAction].HoverAction
+	return action, action.Offer != 0
 }
 
 func (m Model) signatureHelp() (protocol.SignatureHelp, bool) {

@@ -49,6 +49,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Buffer.ConflictIndex",
     "Minga.Buffer.Cursor",
     "Minga.Buffer.Document",
+    "Minga.Buffer.DraftOrigins",
     "Minga.Buffer.EditDelta",
     "Minga.Buffer.EditSource",
     "Minga.Buffer.FileMutation",

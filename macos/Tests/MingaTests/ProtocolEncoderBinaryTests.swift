@@ -518,6 +518,47 @@ struct EncoderGUIActionTests {
         }
     }
 
+    @Test("hover activation sends the drawn offer and selected footer action")
+    func hoverOfferActionLayout() {
+        let offer: UInt64 = 0xE102_0304_0506_0708
+        let payload = captureFrame { $0.send(.hoverOpen(offer: offer, action: 1)) }
+        #expect(payload.count == 12)
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_HOVER_OPEN_ACTION)
+        #expect(readU64(payload, 2) == offer)
+        #expect(readU16(payload, 10) == 1)
+    }
+
+    @Test("hover footer decoder preserves offer and keyboard hint independently of a direct action")
+    func hoverOfferLayout() throws {
+        let data = Data([OP_GUI_HOVER_ACTION, 0, 12, 1, 0xE1, 2, 3, 4, 5, 6, 7, 8, 1, 0, 0])
+        let (command, used) = try decodeCommand(data: data, offset: 0)
+        #expect(used == data.count)
+        guard case .guiHoverAction(let offer) = command else {
+            Issue.record("Expected hover offer")
+            return
+        }
+        #expect(offer == .init(id: 0xE102_0304_0506_0708, showsActions: true, openLabel: ""))
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: Data(data.dropLast()), offset: 0)
+        }
+    }
+
+    @Test("hover links carry a selected style and action ID without sending the URL")
+    func hoverLinkLayout() throws {
+        let data = Data([OP_GUI_HOVER_POPUP, 1, 0, 1, 0, 2, 1, 0, 0, 0, 1, 0, 0, 1, 15, 0, 9, 0, 1, 76])
+        let (command, used) = try decodeCommand(data: data, offset: 0)
+        #expect(used == data.count)
+        guard case .guiHoverPopup(_, _, _, _, _, let lines) = command else {
+            Issue.record("Expected hover content")
+            return
+        }
+        let segment = try #require(lines.first?.segments.first)
+        #expect(segment.style == .selectedLink)
+        #expect(segment.linkID == 9)
+        #expect(segment.text == "L")
+    }
+
     @Test("tab_reorder encodes action type, tab ID, and visible index")
     func tabReorderLayout() {
         let payload = captureFrame { $0.send(.tabReorder(id: 42, newIndex: 3)) }
@@ -1062,16 +1103,16 @@ struct EncoderDisplayedTextTests {
     func targetLayout() {
         let target = EditorTextTarget(windowID: 512, presentationID: 0x0102030405060708, rowIndex: 70_000, rowID: 0x1122334455667788, utf16Offset: 120_000)
         let payload = captureFrame {
-            $0.send(.editorText(target: target, button: 2, modifiers: 7, eventType: 3, clickCount: 2, scrollX: -1, scrollY: 1))
+            $0.send(.editorText(target: target, button: 2, modifiers: 7, eventType: 3, clickCount: 2, scrollX: -1, scrollY: 1, anchorRow: 513, anchorCol: 276))
         }
-        #expect(payload.count == 33)
+        #expect(payload.count == 39)
         #expect(payload[0] == OP_EDITOR_TEXT_EVENT)
         #expect(readU16(payload, 1) == target.windowID)
         #expect(readU64(payload, 3) == target.presentationID)
         #expect(readU32(payload, 11) == target.rowIndex)
         #expect(readU64(payload, 15) == target.rowID)
         #expect(readU32(payload, 23) == target.utf16Offset)
-        #expect(Array(payload[27...]) == [2, 7, 3, 2, 255, 1])
+        #expect(Array(payload[27...]) == [2, 7, 3, 2, 255, 1, 2, 1, 1, 20, 255, 255])
     }
 
     @Test("presentation lifecycle has an ordered explicit state")

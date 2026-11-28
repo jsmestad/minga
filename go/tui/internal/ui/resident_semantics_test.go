@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -123,11 +124,57 @@ func TestResidentRecoveryKeyframeAcceptsPositiveRowRevisionAndPointDiagnostic(t 
 func TestResidentTextSpansRemainSearchAndDocumentHighlightAuthority(t *testing.T) {
 	model, window := residentSemanticFixture(t)
 	row, _ := model.residentRows[7].get(4)
-	withBakedSpan := model.renderRowAt(window, row, 4, 1, 12, false, 0)
+	withBakedSpan := model.renderRowAt(window, row, 4, 1, 12, false, 0, nil)
 	row.Spans = nil
-	withoutBakedSpan := model.renderRowAt(window, row, 4, 1, 12, false, 0)
+	withoutBakedSpan := model.renderRowAt(window, row, 4, 1, 12, false, 0, nil)
 	if withBakedSpan == withoutBakedSpan || xansi.Strip(withBakedSpan) != xansi.Strip(withoutBakedSpan) {
 		t.Fatal("resident rendering must preserve baked search/document span styling without duplicate viewport overlays")
+	}
+}
+
+func TestHoverSourceSkipsInlaysAndZeroWidthPrefix(t *testing.T) {
+	model := New(12, 8, nil)
+	row := protocol.WindowRow{Text: "\u200baXYb"}
+	window := protocol.WindowContent{Highlights: []protocol.DocumentHighlight{
+		{StartRow: 0, StartCol: 0, EndRow: 0, EndCol: 1, Kind: documentHighlightHover},
+		{StartRow: 0, StartCol: 3, EndRow: 0, EndCol: 4, Kind: documentHighlightHover},
+	}}
+	line := model.renderRow(window, row, 0, 12, false, 0)
+	canvas := lipgloss.NewCanvas(12, 1).Compose(lipgloss.NewLayer(line))
+	plain := lipgloss.NewCanvas(12, 1).Compose(lipgloss.NewLayer(model.renderRow(protocol.WindowContent{}, row, 0, 12, false, 0)))
+	for col, glyph := range []string{"a", "X", "Y", "b"} {
+		cell := canvas.CellAt(col, 0)
+		if cell == nil || cell.Content != glyph {
+			t.Fatalf("cell %d = %+v, want %q", col, cell, glyph)
+		}
+		marked := cell.Style.Attrs&uv.AttrReverse != 0
+		base := plain.CellAt(col, 0)
+		if cell.Style.Fg != base.Style.Fg || cell.Style.Bg != base.Style.Bg {
+			t.Fatalf("hover changed the underlying colors of %q", glyph)
+		}
+		if marked != (col == 0 || col == 3) {
+			t.Fatalf("source highlight at %q = %v", glyph, marked)
+		}
+	}
+}
+
+func TestResidentHoverOverlayFollowsLocalScrollAndClearsWithRowsRetained(t *testing.T) {
+	model, window := residentSemanticFixture(t)
+	model.localPresentation.scrolls[7] = presentationScroll{contentEpoch: 9, layoutGeneration: 1, rowOffset: 1}
+	before := model.renderWindowRows(window)
+
+	delta := protocol.WindowContent{ID: 7, ContentEpoch: 9, CursorShape: 1, HighlightsSet: true,
+		Highlights: []protocol.DocumentHighlight{{StartRow: 2, StartCol: 2, EndRow: 2, EndCol: 5, Kind: documentHighlightHover}}}
+	window = mergeWindowDelta(window, delta)
+	withHover := model.renderWindowRows(window)
+	if withHover[0] != before[0] || withHover[2] != before[2] ||
+		withHover[1] == before[1] || xansi.Strip(withHover[1]) != xansi.Strip(before[1]) {
+		t.Fatalf("hover should mark only the source on local row 1: before %q, after %q", before, withHover)
+	}
+
+	window = mergeWindowDelta(window, protocol.WindowContent{ID: 7, ContentEpoch: 9, CursorShape: 1})
+	if after := model.renderWindowRows(window); !reflect.DeepEqual(after, before) {
+		t.Fatalf("empty overlay left stale source paint: before %q, after %q", before, after)
 	}
 }
 
