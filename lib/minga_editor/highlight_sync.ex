@@ -343,13 +343,19 @@ defmodule MingaEditor.HighlightSync do
         parser: %{highlighting: highlighting},
         workspace: %{buffers: %{active: buf}}
       }) do
-    Map.get(highlighting.highlights, buf, Highlight.new())
+    Map.get_lazy(highlighting.highlights, buf, &Highlight.new/0)
   end
 
   @doc "Returns the highlight data for a specific buffer PID."
   @spec get_highlight(EditorState.t(), pid()) :: Highlight.t()
   def get_highlight(%EditorState{parser: %{highlighting: highlighting}}, buf_pid) do
-    Map.get(highlighting.highlights, buf_pid, Highlight.new())
+    Map.get_lazy(highlighting.highlights, buf_pid, &Highlight.new/0)
+  end
+
+  @doc "Fetches an installed highlight without constructing a default."
+  @spec fetch_highlight(EditorState.t(), pid()) :: {:ok, Highlight.t()} | :error
+  def fetch_highlight(%EditorState{parser: %{highlighting: highlighting}}, buf_pid) do
+    Map.fetch(highlighting.highlights, buf_pid)
   end
 
   @doc "Stores highlight data for the active buffer."

@@ -71,13 +71,13 @@ defmodule Minga.CLI do
   @spec main([String.t()]) :: :ok
   def main(args) do
     case parse_args(args) do
-      {:open, file, flags} ->
-        file = expand_target(file)
-        store_startup_flags(flags, file)
+      {:open, path, flags} ->
+        target = classify_target(path)
+        store_startup_flags(flags, target)
 
         with :ok <- maybe_start_debug_log(flags),
              :ok <- maybe_start_distribution(flags) do
-          launch(flags, file)
+          launch(flags, target)
         else
           {:error, message} -> abort_startup(message)
         end
@@ -184,7 +184,7 @@ defmodule Minga.CLI do
     Application.put_env(:minga, :cli_launch, launch)
 
     case parse_args(args) do
-      {:open, file, flags} -> store_startup_flags(flags, expand_target(file))
+      {:open, path, flags} -> store_startup_flags(flags, classify_target(path))
       {:attach, _url, flags} -> store_startup_flags(flags, nil)
       {:sessions, _url, flags} -> store_startup_flags(flags, nil)
       {:detach, flags} -> store_startup_flags(flags, nil)
@@ -386,9 +386,15 @@ defmodule Minga.CLI do
   @spec expand_argument(String.t()) :: String.t()
   defp expand_argument(path), do: Path.expand(path, launch_directory(launch()))
 
-  @spec expand_target(String.t() | nil) :: String.t() | nil
-  defp expand_target(nil), do: nil
-  defp expand_target(path), do: expand_argument(path)
+  @typep startup_target :: {:file | :directory, String.t()} | nil
+
+  @spec classify_target(String.t() | nil) :: startup_target()
+  defp classify_target(nil), do: nil
+
+  defp classify_target(path) do
+    path = expand_argument(path)
+    if File.dir?(path), do: {:directory, path}, else: {:file, path}
+  end
 
   # A start by the app passes absolute paths. A relative one can only mean the VM's own directory.
   @spec launch_directory(launch()) :: String.t()
@@ -398,9 +404,10 @@ defmodule Minga.CLI do
   @doc "Returns the marked project root at or above `directory`, if any."
   @spec directory_startup_project_root(String.t()) :: String.t() | nil
   def directory_startup_project_root(directory) when is_binary(directory) do
-    directory
-    |> Path.expand()
-    |> detect_marked_project_root_from_dir()
+    case Minga.Project.Detector.detect_from_directory(directory) do
+      {:ok, root, _type} -> root
+      :none -> nil
+    end
   end
 
   # A start without a file or folder argument opens the project of the terminal's directory.
@@ -424,7 +431,7 @@ defmodule Minga.CLI do
   @spec startup_project_root_from_args([String.t()]) :: String.t() | nil
   def startup_project_root_from_args(args) when is_list(args) do
     case parse_args(args) do
-      {:open, file, _flags} -> detect_startup_project_root(expand_target(file))
+      {:open, path, _flags} -> path |> classify_target() |> detect_startup_project_root()
       {:error, _message} -> nil
     end
   end
@@ -632,8 +639,8 @@ defmodule Minga.CLI do
 
   # ── Launch helpers ──────────────────────────────────────────────────────────
 
-  @spec launch(flags(), String.t() | nil) :: :ok
-  defp launch(%{headless: true} = flags, _file) do
+  @spec launch(flags(), startup_target()) :: :ok
+  defp launch(%{headless: true} = flags, _target) do
     auth_token = gateway_auth_token()
 
     with {:ok, port} <- gateway_port(flags),
@@ -644,26 +651,21 @@ defmodule Minga.CLI do
     end
   end
 
-  defp launch(%{headless: false}, file) do
+  defp launch(%{headless: false}, target) do
     case publish_local_control_endpoint() do
       :ok ->
-        log_startup(file)
+        log_startup(target)
 
       {:error, message} ->
         abort_startup(message)
     end
   end
 
-  @spec log_startup(String.t() | nil) :: :ok
+  @spec log_startup(startup_target()) :: :ok
   defp log_startup(nil), do: Minga.Log.debug(:editor, "Starting with empty buffer")
 
-  defp log_startup(path) do
-    if File.dir?(path) do
-      Minga.Log.debug(:editor, "Opening project: #{path}")
-    else
-      Minga.Log.debug(:editor, "Opening file: #{path}")
-    end
-  end
+  defp log_startup({:directory, path}), do: Minga.Log.debug(:editor, "Opening project: #{path}")
+  defp log_startup({:file, path}), do: Minga.Log.debug(:editor, "Opening file: #{path}")
 
   @spec start_headless_gateway(pos_integer(), :inet.ip_address(), String.t() | nil) :: :ok
   defp start_headless_gateway(port, ip, auth_token) do
@@ -1075,88 +1077,56 @@ defmodule Minga.CLI do
   # Every start is in the editor: no argument and a directory open the project, a file opens in its project.
   def apply_flag_implications(flags, _file), do: %{flags | view_mode: :editor}
 
-  @spec store_startup_flags(flags(), String.t() | nil) :: :ok
-  defp store_startup_flags(flags, file) do
-    effective = apply_flag_implications(flags, file)
+  @spec store_startup_flags(flags(), startup_target()) :: :ok
+  defp store_startup_flags(flags, target) do
+    effective = apply_flag_implications(flags)
     Application.put_env(:minga, :cli_startup_flags, effective)
-    store_startup_project_root(file)
-    store_startup_file(file)
+    store_startup_project_root(target)
+    store_startup_target(target)
     store_debug_log_path(effective.debug_log)
     Minga.SafeMode.put(effective.safe_mode)
     if effective.minimal, do: Application.put_env(:minga, :minimal_mode, true)
     :ok
   end
 
-  # A regular file argument opens that file, not the project's saved session.
-  @spec store_startup_file(String.t() | nil) :: :ok
-  defp store_startup_file(path) when is_binary(path) do
-    if File.dir?(path) do
-      Application.delete_env(:minga, :cli_startup_file)
-      Application.put_env(:minga, :cli_startup_directory, Path.expand(path))
-    else
-      Application.put_env(:minga, :cli_startup_file, Path.expand(path))
-      Application.delete_env(:minga, :cli_startup_directory)
-    end
-
-    :ok
+  @spec store_startup_target(startup_target()) :: :ok
+  defp store_startup_target({:directory, path}) do
+    Application.delete_env(:minga, :cli_startup_file)
+    Application.put_env(:minga, :cli_startup_directory, path)
   end
 
-  defp store_startup_file(nil) do
+  defp store_startup_target({:file, path}) do
+    Application.put_env(:minga, :cli_startup_file, path)
+    Application.delete_env(:minga, :cli_startup_directory)
+  end
+
+  defp store_startup_target(nil) do
     Application.delete_env(:minga, :cli_startup_file)
     Application.delete_env(:minga, :cli_startup_directory)
     :ok
   end
 
-  @spec store_startup_project_root(String.t() | nil) :: :ok
-  defp store_startup_project_root(nil) do
-    case launch_startup_project_root(launch()) do
+  @spec store_startup_project_root(startup_target()) :: :ok
+  defp store_startup_project_root(target) do
+    root =
+      case target do
+        nil -> launch_startup_project_root(launch())
+        explicit -> detect_startup_project_root(explicit)
+      end
+
+    case root do
       root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
       nil -> Application.delete_env(:minga, :cli_startup_project_root)
     end
-
-    :ok
   end
 
-  defp store_startup_project_root(path) when is_binary(path) do
-    case detect_startup_project_root(path) do
-      root when is_binary(root) -> Application.put_env(:minga, :cli_startup_project_root, root)
-      nil -> Application.delete_env(:minga, :cli_startup_project_root)
-    end
-
-    :ok
-  end
-
-  @spec detect_startup_project_root(String.t() | nil) :: String.t() | nil
+  @spec detect_startup_project_root(startup_target()) :: String.t() | nil
   defp detect_startup_project_root(nil), do: nil
 
-  defp detect_startup_project_root(path) do
-    path
-    |> Path.expand()
-    |> detect_expanded_startup_project_root()
-  end
+  defp detect_startup_project_root({:directory, path}),
+    do: directory_startup_project_root(path) || path
 
-  @spec detect_expanded_startup_project_root(String.t()) :: String.t() | nil
-  defp detect_expanded_startup_project_root(path) do
-    if File.dir?(path) do
-      detect_directory_project_root(path)
-    else
-      detect_file_project_root(path)
-    end
-  end
-
-  @spec detect_directory_project_root(String.t()) :: String.t()
-  defp detect_directory_project_root(path) do
-    case detect_marked_project_root_from_dir(path) do
-      root when is_binary(root) -> root
-      nil -> path
-    end
-  end
-
-  # The detector the editor uses everywhere else decides, so a marker means the same thing here.
-  # It walks up from a file's folder, so it is asked about a file name inside the directory.
-  @spec detect_marked_project_root_from_dir(String.t()) :: String.t() | nil
-  defp detect_marked_project_root_from_dir(dir),
-    do: detect_file_project_root(Path.join(dir, ".minga-startup-probe"))
+  defp detect_startup_project_root({:file, path}), do: detect_file_project_root(path)
 
   @spec detect_file_project_root(String.t()) :: String.t() | nil
   defp detect_file_project_root(path) do

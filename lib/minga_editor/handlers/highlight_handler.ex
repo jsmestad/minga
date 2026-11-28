@@ -18,12 +18,12 @@ defmodule MingaEditor.Handlers.HighlightHandler do
   alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias Minga.Core.Unicode
-  alias Minga.Language.Highlight.Span
   alias Minga.Parser.EventCorrelation
   alias MingaEditor.HighlightSync
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.PrettifySymbolsEffect
   alias MingaEditor.Window
   alias Minga.Editing.Fold.Range, as: FoldRange
@@ -67,42 +67,20 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   # ── correlated buffer events ─────────────────────────────────────────────
 
-  # The parser's last message for a parse. Its results (spans, fold ranges, conceals, symbols) are all applied.
-  def handle(
-        state,
-        {:minga_highlight,
-         {:buffer_event, buffer_pid, %EventCorrelation{} = correlation, :parse_complete}}
-      )
-      when is_pid(buffer_pid) do
-    highlight = HighlightSync.get_highlight(state, buffer_pid)
-
-    if MingaEditor.UI.Highlight.accepts_correlation?(highlight, correlation) do
-      completed = MingaEditor.UI.Highlight.complete_parse(highlight, correlation)
-      {HighlightSync.put_highlight(state, buffer_pid, completed), []}
-    else
-      {state, []}
-    end
-  end
-
   def handle(
         state,
         {:minga_highlight,
          {:buffer_event, buffer_pid, %EventCorrelation{} = correlation, payload}}
       )
       when is_pid(buffer_pid) do
-    highlight = HighlightSync.get_highlight(state, buffer_pid)
+    case HighlightSync.fetch_highlight(state, buffer_pid) do
+      {:ok, highlight} ->
+        if Highlight.accepts_correlation?(highlight, correlation),
+          do: apply_correlated(state, buffer_pid, highlight, correlation, payload),
+          else: {state, []}
 
-    if MingaEditor.UI.Highlight.accepts_correlation?(highlight, correlation) do
-      {state, effects} = handle(state, {:minga_highlight, attach_buffer(payload, buffer_pid)})
-
-      updated =
-        state
-        |> HighlightSync.get_highlight(buffer_pid)
-        |> MingaEditor.UI.Highlight.accept_correlation(correlation)
-
-      {HighlightSync.put_highlight(state, buffer_pid, updated), effects}
-    else
-      {state, []}
+      :error ->
+        {state, []}
     end
   end
 
@@ -124,8 +102,14 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   def handle(state, {:minga_highlight, {:highlight_spans, buffer_pid, spans}})
       when is_pid(buffer_pid) do
-    presentation_version = HighlightSync.get_highlight(state, buffer_pid).version + 1
-    handle_highlight_spans(state, buffer_pid, presentation_version, spans)
+    case HighlightSync.fetch_highlight(state, buffer_pid) do
+      {:ok, highlight} ->
+        updated = Highlight.put_spans(highlight, highlight.version + 1, spans)
+        install_spans(state, buffer_pid, updated)
+
+      :error ->
+        {state, []}
+    end
   end
 
   # ── conceal_spans ────────────────────────────────────────────────────────
@@ -273,7 +257,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec attach_buffer(term(), pid()) :: term()
   defp attach_buffer({:highlight_names, names}, pid), do: {:highlight_names, pid, names}
-  defp attach_buffer({:highlight_spans, spans}, pid), do: {:highlight_spans, pid, spans}
   defp attach_buffer({:injection_ranges, ranges}, pid), do: {:injection_ranges, pid, ranges}
   defp attach_buffer({:conceal_spans, spans}, pid), do: {:conceal_spans, pid, spans}
   defp attach_buffer({:fold_ranges, ranges}, pid), do: {:fold_ranges, pid, ranges}
@@ -296,7 +279,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   defp handle_highlight_names(state, pid, names) do
     existing = HighlightSync.get_highlight(state, pid)
-    updated = MingaEditor.UI.Highlight.put_names(existing, names)
+    updated = Highlight.put_names(existing, names)
     new_state = HighlightSync.put_highlight(state, pid, updated)
     {new_state, []}
   end
@@ -325,25 +308,38 @@ defmodule MingaEditor.Handlers.HighlightHandler do
     {new_state, []}
   end
 
-  @spec handle_highlight_spans(EditorState.t(), pid(), non_neg_integer(), [Span.t()]) ::
+  @spec apply_correlated(EditorState.t(), pid(), Highlight.t(), EventCorrelation.t(), term()) ::
           {EditorState.t(), [highlight_effect()]}
-  defp handle_highlight_spans(
-         %{parser: %{highlighting: %{highlights: highlights}}} = state,
-         pid,
-         _version,
-         _spans
-       )
-       when not is_map_key(highlights, pid),
-       do: {state, []}
+  defp apply_correlated(state, pid, highlight, correlation, :parse_complete) do
+    completed = Highlight.complete_parse(highlight, correlation)
+    {HighlightSync.put_highlight(state, pid, completed), []}
+  end
 
-  defp handle_highlight_spans(state, pid, version, spans) do
-    existing = HighlightSync.get_highlight(state, pid)
-    updated = MingaEditor.UI.Highlight.put_spans(existing, version, spans)
-    state_with_hl = HighlightSync.put_highlight(state, pid, updated)
+  defp apply_correlated(state, pid, highlight, correlation, {:highlight_spans, spans}) do
+    updated =
+      highlight
+      |> Highlight.put_spans(highlight.version + 1, spans)
+      |> Highlight.accept_correlation(correlation)
 
-    effects = highlight_span_effects(state_with_hl, pid)
+    install_spans(state, pid, updated)
+  end
 
-    {state_with_hl, effects}
+  defp apply_correlated(state, pid, _highlight, correlation, payload) do
+    {state, effects} = handle(state, {:minga_highlight, attach_buffer(payload, pid)})
+
+    updated =
+      state
+      |> HighlightSync.get_highlight(pid)
+      |> Highlight.accept_correlation(correlation)
+
+    {HighlightSync.put_highlight(state, pid, updated), effects}
+  end
+
+  @spec install_spans(EditorState.t(), pid(), Highlight.t()) ::
+          {EditorState.t(), [highlight_effect()]}
+  defp install_spans(state, pid, updated) do
+    state = HighlightSync.put_highlight(state, pid, updated)
+    {state, highlight_span_effects(state, pid)}
   end
 
   @spec highlight_span_effects(EditorState.t(), pid()) :: [highlight_effect()]
@@ -504,7 +500,7 @@ defmodule MingaEditor.Handlers.HighlightHandler do
         reset =
           buffer_highlight
           |> Map.put(:version, 0)
-          |> MingaEditor.UI.Highlight.reset_parser_version()
+          |> Highlight.reset_parser_version()
 
         {pid, reset}
       end)

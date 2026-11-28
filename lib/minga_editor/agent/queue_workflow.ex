@@ -213,12 +213,9 @@ defmodule MingaEditor.Agent.QueueWorkflow do
        do: recalled(state)
 
   defp apply_click(state, %{focus: {:focused, _}} = queue, action, identity, source) do
-    case QueueSurface.select(queue, identity) do
-      {:ok, selected} ->
-        click_row(state, selected, action, QueueSurface.selected(selected), source)
-
-      :stale_row ->
-        state
+    case QueueSurface.pending_row(queue, identity) do
+      %QueuedInputSummary{} = row -> click_row(state, queue, action, row, source)
+      nil -> state
     end
   end
 

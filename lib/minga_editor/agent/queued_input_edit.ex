@@ -122,8 +122,7 @@ defmodule MingaEditor.Agent.QueuedInputEdit do
 
   @spec save_text(State.t(), pid(), origin(), identity(), request()) :: State.t()
   defp save_text(state, buffer, origin, identity, request) do
-    version = Buffer.version(buffer)
-    text = Buffer.content(buffer)
+    {text, version} = Buffer.content_with_version(buffer)
 
     if String.trim(text) == "" do
       report(state, "Use Withdraw to remove an input. The queue was not changed.")

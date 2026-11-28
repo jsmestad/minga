@@ -112,12 +112,20 @@ defmodule MingaEditor.Agent.QueueSurface do
 
   def selected(%__MODULE__{}), do: nil
 
+  @doc "Finds the exact displayed pending row without changing the selection."
+  @spec pending_row(t(), QueuedInputSummary.identity() | nil) :: QueuedInputSummary.t() | nil
+  def pending_row(%__MODULE__{contents: %{pending: pending}}, {_, _} = identity),
+    do: Enum.find(pending, &(&1.identity == identity))
+
+  def pending_row(%__MODULE__{}, _identity), do: nil
+
   @doc "Selects the exact displayed revision. A delayed click on a superseded row changes nothing."
   @spec select(t(), QueuedInputSummary.identity()) :: {:ok, t()} | :stale_row
-  def select(%__MODULE__{contents: %{pending: pending}} = surface, {id, _} = identity) do
-    if Enum.any?(pending, &(&1.identity == identity)),
-      do: {:ok, %{surface | selected_id: id}},
-      else: :stale_row
+  def select(%__MODULE__{} = surface, {id, _} = identity) do
+    case pending_row(surface, identity) do
+      %QueuedInputSummary{} -> {:ok, %{surface | selected_id: id}}
+      nil -> :stale_row
+    end
   end
 
   def select(%__MODULE__{}, _identity), do: :stale_row

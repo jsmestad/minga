@@ -300,7 +300,7 @@ defmodule MingaEditor.State.Launchpad do
   defp place_of(nil), do: :outside
 
   defp place_of(root) do
-    case Detector.detect(Path.join(root, "*home*")) do
+    case Detector.detect_at_directory(root) do
       {:ok, ^root, _type} -> :project
       _other -> :folder
     end

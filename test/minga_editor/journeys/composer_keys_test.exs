@@ -202,12 +202,18 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
     await_working(ctx)
     queue(ctx, "first")
     queue(ctx, "second")
+    queue(ctx, "third")
     send_keys_sync(ctx, "<Esc><Esc><SPC>aqq")
 
-    state = await_queue(ctx, ["first", "second"], [])
+    state = await_queue(ctx, ["first", "second", "third"], [])
 
-    %{origin: {workspace, ^session, record}, contents: %{pending: [_, second]}} =
-      state.workspace.agent_ui.queue
+    %{
+      origin: {workspace, ^session, record},
+      contents: %{pending: [first, second, _third]}
+    } = state.workspace.agent_ui.queue
+
+    {first_id, _revision} = first.identity
+    assert state.workspace.agent_ui.queue.selected_id == first_id
 
     {id, revision} = second.identity
 
@@ -221,11 +227,12 @@ defmodule MingaEditor.Journeys.ComposerKeysTest do
       {:agent_queue_action, {workspace, record}, :remove, {id, revision + 1}, nil}
     )
 
-    assert Session.get_queued_messages(session) == {[], ["first", "second"]}
+    assert Session.get_queued_messages(session) == {[], ["first", "second", "third"]}
 
     send_gui_action(ctx, {:agent_queue_action, {workspace, record}, :remove, {id, revision}, nil})
-    await_queue(ctx, ["first"], ["second"])
-    assert Session.get_queued_messages(session) == {[], ["first"]}
+    state = await_queue(ctx, ["first", "third"], ["second"])
+    assert state.workspace.agent_ui.queue.selected_id == first_id
+    assert Session.get_queued_messages(session) == {[], ["first", "third"]}
   end
 
   test "keyboard and pointer put a message back into its empty queue from the other queue", %{

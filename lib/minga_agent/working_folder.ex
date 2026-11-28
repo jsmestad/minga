@@ -170,7 +170,7 @@ defmodule MingaAgent.WorkingFolder do
 
     cond do
       Detector.version_controlled?(expanded) -> :version_control
-      match?({:ok, ^expanded, _type}, Detector.detect(Path.join(expanded, "probe"))) -> :marker
+      match?({:ok, ^expanded, _type}, Detector.detect_at_directory(expanded)) -> :marker
       true -> :none
     end
   end

@@ -625,29 +625,34 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_directory)
     end
 
-    test "a file argument is remembered so the editor opens it instead of the project session" do
-      path =
-        Path.join(
-          System.tmp_dir!(),
-          "minga_cli_startup_file_#{System.unique_integer([:positive])}.ex"
-        )
+    test "startup records a missing file or directory link, then clears both for an app launch" do
+      root = tmp_dir("cli-startup-target")
+      nested = Path.join(root, "lib")
+      link = Path.join(root, "link")
+      missing = Path.join(root, "missing.ex")
+      File.mkdir_p!(nested)
+      File.write!(Path.join(root, ".minga"), "")
+      File.ln_s!(nested, link)
 
-      File.write!(path, "")
-      on_exit(fn -> File.rm(path) end)
+      assert :ok = CLI.prepare_startup(["missing.ex"], {:terminal, root})
 
-      assert :ok = CLI.prepare_startup([path], CLI.terminal_launch())
-      assert CLI.startup_file() == Path.expand(path)
+      assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
+               {missing, nil, root}
 
-      # A directory argument clears a file remembered by an earlier start.
-      assert :ok = CLI.prepare_startup([System.tmp_dir!()], CLI.terminal_launch())
-      assert Application.get_env(:minga, :cli_startup_file) == nil
+      assert :ok = CLI.prepare_startup(["link"], {:terminal, root})
 
-      assert CLI.startup_file() == nil
-      assert CLI.startup_directory() == Path.expand(System.tmp_dir!())
+      assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
+               {nil, link, root}
 
-      # A file argument clears a directory remembered by an earlier start.
-      assert :ok = CLI.prepare_startup([path], CLI.terminal_launch())
-      assert CLI.startup_directory() == nil
+      assert :ok = CLI.prepare_startup(["missing.ex"], {:terminal, root})
+
+      assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
+               {missing, nil, root}
+
+      assert :ok = CLI.prepare_startup([], :app)
+
+      assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
+               {nil, nil, nil}
     after
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_flags)
@@ -657,6 +662,8 @@ defmodule Minga.CLITest do
       Application.delete_env(:minga, :cli_startup_file)
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.delete_env(:minga, :cli_startup_directory)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.delete_env(:minga, :cli_launch)
     end
 
     test "directory argument stores editor startup mode and startup project root" do

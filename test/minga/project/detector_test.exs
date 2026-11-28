@@ -8,6 +8,21 @@ defmodule Minga.Project.DetectorTest do
   # The home directory of a test and everything above it, so the walk never reads the real one.
   defp at_or_above(home), do: fn dir -> not String.starts_with?(dir, home <> "/") end
 
+  test "a directory search starts there; an exact check does not inherit markers", %{tmp_dir: tmp} do
+    workspace = Path.join(tmp, "workspace")
+    app = Path.join(workspace, "app")
+    child = Path.join(app, "lib")
+    File.mkdir_p!(child)
+    File.write!(Path.join(workspace, ".git"), "gitdir: /unused")
+    File.write!(Path.join(workspace, ".minga"), "")
+    File.write!(Path.join(app, ".minga"), "")
+
+    assert Detector.detect_from_directory(child) == {:ok, app, :minga}
+    assert Detector.detect_at_directory(child) == :none
+    assert Detector.detect_at_directory(app) == {:ok, app, :minga}
+    assert Detector.detect_at_directory(workspace) == {:ok, workspace, :git}
+  end
+
   describe "detect/1 with default markers" do
     test "detects git project from nested file", %{tmp_dir: tmp} do
       project = Path.join(tmp, "myproject")
