@@ -1,0 +1,60 @@
+name: Native tooltip capability probe
+
+on:
+  push:
+    branches: [diag/4053-native-tooltip]
+    paths: [.github/workflows/native-tooltip-probe.yml, macos/Sources/PreviewRegistry+Storyboard.swift]
+
+jobs:
+  tooltip:
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MINGA_REQUIRE_METAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+      - uses: actions/download-artifact@v4
+        with:
+          name: storyboard-tui
+          github-token: ${{ github.token }}
+          run-id: 46141055312
+          path: ${{ runner.temp }}/storyboard
+      - run: mix deps.get
+      - name: Install pinned XcodeGen
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
+      - name: Build PreviewHost as in storyboard CI
+        run: |
+          mix protocol.gen
+          (cd macos && xcodegen generate --quiet)
+          xcodebuild build -project macos/Minga.xcodeproj -scheme PreviewHost -configuration Debug -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Verify the production modeline tooltip on the isolated display
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          transcript = root / "storyboard/transcripts/edit.working/macos-catppuccin_latte-1280.json"
+          jobs = root / "tooltip-jobs.json"
+          jobs.write_text(json.dumps([{"transcript": str(transcript), "output": str(root / "tooltip-frames/edit.working")}]))
+          app = root / "derived/Build/Products/Debug/PreviewHost.app/Contents/MacOS/PreviewHost"
+          env = dict(os.environ, PREVIEW_VIEW="Storyboard", PREVIEW_STORYBOARD_JOBS=str(jobs), MINGA_STORYBOARD_TOOLTIP_PROBE="1", LC_ALL="en_US.UTF-8", TZ="UTC")
+          subprocess.run([str(app)], env=env, check=True, timeout=30)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owned-tooltip-frames
+          path: ${{ runner.temp }}/tooltip-frames
+          if-no-files-found: ignore
+          retention-days: 1

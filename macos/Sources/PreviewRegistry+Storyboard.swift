@@ -14,6 +14,7 @@ import MingaProtocol
 import ScreenCaptureKit
 import MingaUI
 import SwiftUI
+import Vision
 
 @MainActor
 enum StoryboardCapture {
@@ -88,7 +89,6 @@ enum StoryboardCapture {
         for job in jobs {
             do {
                 try await capture(job)
-                print(job.output + ".png")
             } catch {
                 failures.append("\(job.transcript): \(error)")
             }
@@ -105,6 +105,15 @@ enum StoryboardCapture {
         }
         guard transcript.version == 1, transcript.frontend == "macos", let size = transcript.window else {
             throw Failure.malformed("\(job.transcript) is not a macOS storyboard transcript")
+        }
+
+        let env = ProcessInfo.processInfo.environment
+        let tooltipProbe = env["MINGA_STORYBOARD_TOOLTIP_PROBE"] == "1"
+        if tooltipProbe {
+            guard env["CI"] == "true", env["RUNNER_ENVIRONMENT"] == "github-hosted",
+                  transcript.scenario == "edit.working" else {
+                throw Failure.rejected("tooltip probe requires a GitHub-hosted runner and the real edit.working fixture")
+            }
         }
 
         let recorder = AnatomyPartRecorder()
@@ -131,7 +140,7 @@ enum StoryboardCapture {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = !tooltipProbe
 
         var editor: EditorNSView?
         let dispatcher = CommandDispatcher(
@@ -183,7 +192,14 @@ enum StoryboardCapture {
                 })
         window.contentView = host
         window.setContentSize(NSSize(width: size.width, height: size.height))
-        window.orderFrontRegardless()
+        if tooltipProbe, let screen = NSScreen.main {
+            window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 20, y: screen.visibleFrame.minY + 80))
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.orderFrontRegardless()
+        }
 
         let presented = try await waitForPresentation(
             of: dispatcher, view: view, host: host, scenario: transcript.scenario,
@@ -219,6 +235,11 @@ enum StoryboardCapture {
             }
         }
 
+        if tooltipProbe {
+            try await probeTooltip(window: window, host: host, recorder: recorder, output: URL(fileURLWithPath: job.output))
+            return
+        }
+
         let png = try await settledPNG(window: window, host: host)
         let export = exportJSON(transcript: transcript, window: window, host: host, parts: recorder.frames,
                                 pixels: StoryboardPixels(png: png, scale: window.backingScaleFactor),
@@ -228,6 +249,103 @@ enum StoryboardCapture {
         try FileManager.default.createDirectory(at: base.deletingLastPathComponent(), withIntermediateDirectories: true)
         try png.write(to: base.appendingPathExtension("png"), options: .atomic)
         try export.write(to: base.appendingPathExtension("json"), options: .atomic)
+        print(job.output + ".png")
+    }
+
+    private static func probeTooltip(window: NSWindow, host: NSView, recorder: AnatomyPartRecorder, output: URL) async throws {
+        let mayPost = CGPreflightPostEventAccess()
+        print("TOOLTIP_PROBE post_event_access=\(mayPost) app_active=\(NSApp.isActive) key_window=\(window.isKeyWindow) window=\(window.frame) screen=\(String(describing: window.screen?.frame))")
+        guard mayPost else { throw Failure.rejected("the hosted PreviewHost launch cannot post a session event") }
+        guard let screen = window.screen, screen.frame.origin == .zero,
+              let target = recorder.frames.first(where: { $0.name == "modeline.segment" && $0.text == "needs_you: Needs you" }) else {
+            throw Failure.notPresented("no needs-you modeline anchor on the main display")
+        }
+
+        let targetPoint = CGPoint(x: window.frame.minX + target.frame.midX, y: window.frame.maxY - target.frame.midY)
+        let away = CGPoint(x: targetPoint.x, y: targetPoint.y + 64)
+        let original = NSEvent.mouseLocation
+        let editorID = CGWindowID(window.windowNumber)
+        guard screen.visibleFrame.contains(targetPoint), screen.visibleFrame.contains(away) else {
+            throw Failure.notPresented("the needs-you anchor or control point is offscreen: target=\(targetPoint) away=\(away)")
+        }
+        func quartz(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: point.x, y: screen.frame.maxY - point.y)
+        }
+        func move(_ point: CGPoint) {
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: quartz(point), mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+        }
+        func requirePointer(_ point: CGPoint) throws {
+            let observed = NSEvent.mouseLocation
+            guard hypot(observed.x - point.x, observed.y - point.y) < 2, window.isKeyWindow else {
+                throw Failure.notPresented("hosted pointer or window did not accept motion: expected=\(point) observed=\(observed) key=\(window.isKeyWindow)")
+            }
+        }
+        func verify(_ point: CGPoint) async throws {
+            move(point)
+            try await Task.sleep(for: .milliseconds(200))
+            try requirePointer(point)
+            print("TOOLTIP_PROBE pointer=\(NSEvent.mouseLocation)")
+        }
+        func onScreen() throws -> [[String: Any]] {
+            guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+                  windows.compactMap(id).contains(editorID) else {
+                throw Failure.notPresented("the on-screen window list could not confirm the probe's editor window \(editorID)")
+            }
+            return windows
+        }
+        func id(_ info: [String: Any]) -> CGWindowID? {
+            info[kCGWindowNumber as String] as? CGWindowID
+        }
+
+        defer { move(original) }
+        try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try await verify(away)
+        let before = try Set(onScreen().compactMap(id))
+        try await settledPNG(window: window, host: host).write(to: output.appendingPathExtension("before.png"))
+        try await verify(targetPoint)
+        for _ in 0..<24 {
+            let owned = try await SCShareableContent.currentProcess
+            let visible = try Set(onScreen().compactMap(id))
+            for popup in owned.windows where popup.windowID != editorID && !before.contains(popup.windowID) && visible.contains(popup.windowID) {
+                let bounds = popup.frame
+                guard bounds.width > 1, bounds.height > 1, bounds.width <= 400, bounds.height <= 100,
+                      bounds.insetBy(dx: -100, dy: -100).contains(quartz(targetPoint)) else { continue }
+                let scale = window.backingScaleFactor
+                let image = try await captureWindow(windowID: popup.windowID, width: Int(bounds.width * scale), height: Int(bounds.height * scale))
+                let request = VNRecognizeTextRequest()
+                try VNImageRequestHandler(cgImage: image).perform([request])
+                let words = request.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
+                print("TOOLTIP_PROBE candidate=\(popup.windowID) bounds=\(bounds) ocr=\(words)")
+                guard words.contains("1 task needs you"), words.contains("SPC a a") else { continue }
+                guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+                    throw Failure.rejected("the verified help window could not be encoded")
+                }
+                guard try onScreen().compactMap(id).contains(popup.windowID) else { continue }
+                try requirePointer(targetPoint)
+                try await verify(away)
+                try png.write(to: output.appendingPathExtension("dwell.png"))
+                for _ in 0..<12 {
+                    guard try onScreen().compactMap(id).contains(popup.windowID) else {
+                        try await settledPNG(window: window, host: host).write(to: output.appendingPathExtension("after.png"))
+                        print("TOOLTIP_PROBE result=verified_owned_detached_help")
+                        return
+                    }
+                    try await Task.sleep(for: .milliseconds(150))
+                }
+                throw Failure.notPresented("the verified help did not dismiss when the pointer left")
+            }
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        for entry in try onScreen() {
+            guard let number = id(entry), !before.contains(number),
+                  let bounds = entry[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let origin = CGPoint(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0)
+            let pointer = quartz(targetPoint)
+            guard hypot(origin.x - pointer.x, origin.y - pointer.y) < 150 else { continue }
+            print("TOOLTIP_PROBE nearby_new_window=\(number) owner=\(String(describing: entry[kCGWindowOwnerPID as String])) bounds=\(bounds)")
+        }
+        throw Failure.notPresented("verified pointer dwell did not produce an OCR-positive, own-process shareable help window")
     }
 
     /// The application effects a real app applies from the same packets; the rest have no visible effect in a still.
