@@ -17,6 +17,7 @@ defmodule MingaEditor.FileTree.Refresh do
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.FileTree.Freshness
+  alias MingaEditor.FileTree.Refresh.FilesystemScanner
   alias MingaEditor.State, as: EditorState
 
   @enforce_keys [:root, :tree, :events_registry, :scanner, :scanner_context]
@@ -55,12 +56,13 @@ defmodule MingaEditor.FileTree.Refresh do
   @spec request(FileTree.t(), Minga.Events.registry(), keyword()) :: Request.t()
   def request(%FileTree{root: root} = tree, events_registry, opts \\ []) when is_binary(root) do
     expanded_root = Path.expand(root)
+    scanner = Keyword.get(opts, :scanner, FilesystemScanner)
 
     effect = %__MODULE__{
       root: expanded_root,
-      tree: tree,
+      tree: if(scanner == FilesystemScanner, do: FileTree.invalidate_entries(tree), else: tree),
       events_registry: events_registry,
-      scanner: Keyword.get(opts, :scanner, MingaEditor.FileTree.Refresh.FilesystemScanner),
+      scanner: scanner,
       scanner_context: Keyword.get(opts, :scanner_context),
       previous_root: expanded_optional_root(Keyword.get(opts, :previous_root)),
       selection_path: Keyword.get(opts, :selection_path),

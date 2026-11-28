@@ -1158,6 +1158,32 @@ defmodule MingaEditor.PickerUITest do
       assert Map.get(result, :action_item_id) == {:delete, :first}
     end
 
+    test "default action selects the captured item after offered rows move" do
+      first = %Item{id: :first, label: "first"}
+      second = %Item{id: :second, label: "second"}
+      picker = Picker.new([first, second], title: "Test")
+
+      picker_state =
+        %PickerState{picker: picker, source: LargePreviewSource, restore: 0}
+        |> PickerState.begin_query_session()
+
+      state =
+        TestHelpers.base_state(content: "initial")
+        |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
+        |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
+        |> PickerUI.update_picker(fn ps ->
+          picker = ps.picker |> Picker.replace_items([second, first]) |> Picker.select_index(0)
+          PickerState.update_picker(ps, picker)
+        end)
+
+      model = state |> ActMenuWorkflow.current() |> ActMenu.model()
+      [%{id: choose_id, label: "Choose this item"}] = model.rows
+      result = GuiActionHandler.dispatch(state, {:act_menu_action, model.id, choose_id})
+
+      assert result.shell_runtime.state.modal == :none
+      assert Map.get(result, :previewed_id) == :first
+    end
+
     test "action activation preserves the source's existing visible failure behavior" do
       item = %Item{id: :first, label: "first"}
       picker = Picker.new([item], title: "Test")

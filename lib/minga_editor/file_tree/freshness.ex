@@ -402,58 +402,44 @@ defmodule MingaEditor.FileTree.Freshness do
   defp finish_failed_refresh(state, effect, request_token, reason) do
     case FileTreeState.finish_refresh(file_tree_state(state), effect.root, request_token) do
       {:current, file_tree} ->
-        file_tree = failed_file_tree(file_tree, effect, reason)
-        file_tree = prepare_failed_watcher_cleanup(file_tree, effect)
-        state = state |> set_file_tree(file_tree) |> arm_trailing_refresh()
-        state = maybe_synchronize_failed_watchers(state, effect)
-        state = maybe_sync_failed_root(state, file_tree, effect)
-        MingaEditor.schedule_render(state, 16)
+        state
+        |> apply_current_refresh_failure(file_tree, effect, reason)
+        |> MingaEditor.schedule_render(16)
 
       {_status, file_tree} ->
         set_file_tree(state, file_tree)
     end
   end
 
-  @spec maybe_synchronize_failed_watchers(state(), Refresh.t()) :: state()
-  defp maybe_synchronize_failed_watchers(
+  @spec apply_current_refresh_failure(state(), FileTreeState.t(), Refresh.t(), term()) :: state()
+  defp apply_current_refresh_failure(
          state,
-         %Refresh{previous_root: previous_root} = effect
+         file_tree,
+         %Refresh{previous_root: previous_root} = effect,
+         reason
        )
-       when is_binary(previous_root),
-       do: maybe_synchronize_watchers(state, effect)
-
-  defp maybe_synchronize_failed_watchers(state, %Refresh{}), do: state
-
-  @spec prepare_failed_watcher_cleanup(FileTreeState.t(), Refresh.t()) :: FileTreeState.t()
-  defp prepare_failed_watcher_cleanup(
-         %FileTreeState{} = file_tree,
-         %Refresh{previous_root: previous_root}
-       )
-       when is_binary(previous_root),
-       do: FileTreeState.cleanup_watchers(file_tree)
-
-  defp prepare_failed_watcher_cleanup(%FileTreeState{} = file_tree, %Refresh{}), do: file_tree
-
-  @spec failed_file_tree(FileTreeState.t(), Refresh.t(), term()) :: FileTreeState.t()
-  defp failed_file_tree(file_tree, %Refresh{previous_root: previous_root}, reason)
-       when is_binary(previous_root),
-       do: FileTreeState.root_scan_failed(file_tree, reason)
-
-  defp failed_file_tree(file_tree, %Refresh{}, reason),
-    do: FileTreeState.refresh_failed(file_tree, reason)
-
-  @spec maybe_sync_failed_root(state(), FileTreeState.t(), Refresh.t()) :: state()
-  defp maybe_sync_failed_root(state, %FileTreeState{} = file_tree, %Refresh{
-         previous_root: previous_root
-       })
        when is_binary(previous_root) do
+    file_tree =
+      file_tree
+      |> FileTreeState.root_scan_failed(reason)
+      |> FileTreeState.cleanup_watchers()
+
+    state =
+      state
+      |> set_file_tree(file_tree)
+      |> arm_trailing_refresh()
+      |> maybe_synchronize_watchers(effect)
+
     case FileTreeState.tree(file_tree) do
       %FileTree{} = tree -> sync_buffer(state, tree)
       nil -> state
     end
   end
 
-  defp maybe_sync_failed_root(state, %FileTreeState{}, %Refresh{}), do: state
+  defp apply_current_refresh_failure(state, file_tree, %Refresh{previous_root: nil}, reason) do
+    file_tree = FileTreeState.refresh_failed(file_tree, reason)
+    state |> set_file_tree(file_tree) |> arm_trailing_refresh()
+  end
 
   @doc "Updates tree git badges from an already-fetched git status event."
   @spec refresh_git_status(state(), Minga.Events.GitStatusEvent.t()) :: state()

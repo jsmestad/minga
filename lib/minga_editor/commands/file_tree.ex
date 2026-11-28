@@ -536,10 +536,9 @@ defmodule MingaEditor.Commands.FileTree do
     end
   end
 
-  @spec confirm_new_file(state(), map()) :: state()
-  defp confirm_new_file(state, editing) do
-    parent_dir = editing_parent_dir(state)
-    full_path = Path.join(parent_dir, editing.text)
+  @spec confirm_new_file(state(), FileTreeState.editing()) :: state()
+  defp confirm_new_file(state, %{parent_path: parent, text: name}) when is_binary(parent) do
+    full_path = Path.join(parent, name)
     backend = state.interaction.file_tree_new_file_backend
 
     case backend.mkdir_p(Path.dirname(full_path)) do
@@ -624,14 +623,13 @@ defmodule MingaEditor.Commands.FileTree do
   defp readable_file_error("unknown POSIX error", reason), do: inspect(reason)
   defp readable_file_error(message, _reason), do: message
 
-  @spec confirm_new_folder(state(), map()) :: state()
-  defp confirm_new_folder(state, editing) do
-    parent_dir = editing_parent_dir(state)
-    full_path = Path.join(parent_dir, editing.text)
+  @spec confirm_new_folder(state(), FileTreeState.editing()) :: state()
+  defp confirm_new_folder(state, %{parent_path: parent, text: name}) when is_binary(parent) do
+    full_path = Path.join(parent, name)
 
     case File.mkdir_p(full_path) do
       :ok ->
-        Log.info(:editor, "[file-tree] Created folder: #{editing.text}")
+        Log.info(:editor, "[file-tree] Created folder: #{name}")
         clear_editing_and_refresh(state)
 
       {:error, reason} ->
@@ -975,26 +973,6 @@ defmodule MingaEditor.Commands.FileTree do
     case file_tree_state(state).buffer do
       buf when is_pid(buf) -> BufferSync.sync(buf, tree)
       _ -> :ok
-    end
-  end
-
-  # Determines the parent directory path for the current editing operation.
-  @spec editing_parent_dir(state()) :: String.t()
-  defp editing_parent_dir(state) do
-    tree = FileTreeState.tree(file_tree_state(state))
-    editing = FileTreeState.editing(file_tree_state(state))
-    entries = FileTree.visible_entries(tree)
-
-    case editing do
-      %{type: type, parent_path: parent_path}
-      when type in [:new_file, :new_folder] and is_binary(parent_path) ->
-        parent_path
-
-      %{type: :rename} ->
-        case Enum.at(entries, editing.index) do
-          %{path: path} -> Path.dirname(path)
-          nil -> tree.root
-        end
     end
   end
 

@@ -192,8 +192,10 @@ defmodule Minga.Core.LazyRowTree do
   def summary(nil), do: nil
   def summary(%__MODULE__{summary: summary}), do: summary
 
-  defp count(nil), do: 0
-  defp count(%__MODULE__{count: count}), do: count
+  @doc "Returns the cached node count, or zero for an empty tree."
+  @spec count(t(term(), term())) :: non_neg_integer()
+  def count(nil), do: 0
+  def count(%__MODULE__{count: count}), do: count
 
   # Open nodes are deepest first. A node's right subtree is complete when a
   # smaller priority arrives or the input ends.

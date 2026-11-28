@@ -1132,12 +1132,7 @@ defmodule MingaEditor.PickerUI do
               modal:
                 {:picker,
                  %{
-                   picker_ui:
-                     %PickerState{
-                       picker: %Picker{} = picker,
-                       source: source,
-                       callback_source: callback_source
-                     } = picker_state
+                   picker_ui: %PickerState{picker: %Picker{}} = picker_state
                  }}
             }
           }
@@ -1147,9 +1142,7 @@ defmodule MingaEditor.PickerUI do
       ) do
     case PickerState.resolve_item_activation(picker_state, generation, activation_id) do
       {:ok, index, item} ->
-        selected_picker = Picker.select_index(picker, index)
-        state = install_picker(state, PickerState.update_picker(picker_state, selected_picker))
-        select_item(state, selected_picker, item, source, callback_source)
+        select_resolved_item(state, picker_state, index, item)
 
       :error ->
         stale_activation(state)
@@ -1157,6 +1150,14 @@ defmodule MingaEditor.PickerUI do
   end
 
   def activate_item(state, _generation, _activation_id), do: stale_activation(state)
+
+  @spec select_resolved_item(state(), PickerState.t(), non_neg_integer(), Item.t()) ::
+          state() | {state(), action()}
+  defp select_resolved_item(state, picker_state, index, item) do
+    selected_picker = Picker.select_index(picker_state.picker, index)
+    state = install_picker(state, PickerState.update_picker(picker_state, selected_picker))
+    select_item(state, selected_picker, item, picker_state.source, picker_state.callback_source)
+  end
 
   @type act_source :: {non_neg_integer(), pos_integer(), non_neg_integer(), Item.t()}
 
@@ -1197,8 +1198,8 @@ defmodule MingaEditor.PickerUI do
 
     with {:ok, {:picker_item, ^generation, ^id}} <- MingaEditor.Target.resolve(state, target),
          %PickerState{acknowledged_query_edit_seq: ^query_edit_seq} = ps <- picker_state(state),
-         {:ok, _index, ^item} <- PickerState.resolve_item_activation(ps, generation, id) do
-      perform_menu_action(state, ps, {generation, id}, item, action)
+         {:ok, index, ^item} <- PickerState.resolve_item_activation(ps, generation, id) do
+      perform_menu_action(state, ps, index, item, action)
     else
       _stale -> {:error, :choice_not_found}
     end
@@ -1207,18 +1208,18 @@ defmodule MingaEditor.PickerUI do
   @spec perform_menu_action(
           state(),
           PickerState.t(),
-          {non_neg_integer(), pos_integer()},
+          non_neg_integer(),
           Item.t(),
           :default | {:source, term()}
         ) :: {:ok, state()} | {:error, :choice_not_found}
-  defp perform_menu_action(state, _ps, {generation, id}, _item, :default) do
-    case activate_item(state, generation, id) do
+  defp perform_menu_action(state, ps, index, item, :default) do
+    case select_resolved_item(state, ps, index, item) do
       {next, {:execute_command, command}} -> {:ok, MingaEditor.dispatch_command(next, command)}
       next -> {:ok, next}
     end
   end
 
-  defp perform_menu_action(state, ps, _identity, item, {:source, action}) do
+  defp perform_menu_action(state, ps, _index, item, {:source, action}) do
     actions = current_item_actions(state, ps.source, ps.picker, item, ps.callback_source)
 
     case Enum.find(actions, fn {_label, id} -> id == action end) do
