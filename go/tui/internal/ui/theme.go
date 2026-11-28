@@ -500,6 +500,11 @@ func (p palette) slot(slot byte) color.Color {
 	return lipgloss.NoColor{}
 }
 
+// packedRGB converts an opaque foreground received from the editor.
+func packedRGB(rgb uint32) color.RGBA {
+	return color.RGBA{R: byte(rgb >> 16), G: byte(rgb >> 8), B: byte(rgb), A: 255}
+}
+
 func (p palette) slotOr(slot byte, fallback byte) color.Color {
 	if _, ok := p.colors[slot]; ok {
 		return p.slot(slot)

@@ -362,8 +362,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .applicationQuitDecision(let requestID, let decision): _ = encodeApplicationQuitDecision(requestID: requestID, decision: decision)
         case .fileDialogResult(let requestID, let outcome, let paths): _ = encodeFileDialogResult(requestID: requestID, outcome: outcome, paths: paths)
         case .mouse(let row, let column, let button, let modifiers, let eventType, let clickCount): encodeMouseEvent(row: row, col: column, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)
-        case .editorText(let target, let button, let modifiers, let eventType, let clickCount, let scrollX, let scrollY):
-            encodeEditorText(target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: scrollX, scrollY: scrollY)
+        case .editorText(let target, let button, let modifiers, let eventType, let clickCount, let scrollX, let scrollY, let anchorRow, let anchorCol):
+            encodeEditorText(target, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount, scrollX: scrollX, scrollY: scrollY, anchorRow: anchorRow, anchorCol: anchorCol)
         case .textPresentationState(let windowID, let presentationID, let state):
             var buf = Data(count: 12)
             buf[0] = OP_TEXT_PRESENTATION_STATE
@@ -392,7 +392,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .tabUnpin(let id): encodeTabUnpin(id: id)
         case .tabMoveLeft(let id): encodeTabMoveLeft(id: id)
         case .tabMoveRight(let id): encodeTabMoveRight(id: id)
-        case .hoverOpen: encodeHoverOpenAction()
+        case .hoverOpen(let offer, let action): encodeHoverOpenAction(offer: offer, action: action)
         case .pickerQueryChanged(let generation, let editSequence, let text): encodePickerQueryChanged(generation: generation, editSeq: editSequence, text: text)
         case .pickerItemActivate(let generation, let activationID): encodePickerItemActivate(generation: generation, activationID: activationID)
         case .actMenuAction(let offerID, let actionID):
@@ -853,8 +853,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    private func encodeEditorText(_ target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8) {
-        var buf = Data(count: 33)
+    private func encodeEditorText(_ target: EditorTextTarget, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8, scrollX: Int8, scrollY: Int8, anchorRow: UInt16, anchorCol: UInt16) {
+        var buf = Data(count: 39)
         buf[0] = OP_EDITOR_TEXT_EVENT
         writeU16(&buf, 1, target.windowID)
         writeU64(&buf, 3, target.presentationID)
@@ -867,6 +867,9 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         buf[30] = clickCount
         buf[31] = UInt8(bitPattern: scrollX)
         buf[32] = UInt8(bitPattern: scrollY)
+        writeU16(&buf, 33, anchorRow)
+        writeU16(&buf, 35, anchorCol)
+        writeU16(&buf, 37, UInt16.max) // Native hover protects the displayed caret in points.
         writeFrame(buf)
     }
 
@@ -1010,11 +1013,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: hover_open_action. Layout: opcode(1) + action_type(1).
-    private func encodeHoverOpenAction() {
-        var buf = Data(count: 2)
+    /// Activate the exact action from the hover offer the frontend drew.
+    private func encodeHoverOpenAction(offer: UInt64, action: UInt16) {
+        var buf = Data(count: 12)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_HOVER_OPEN_ACTION
+        writeU64(&buf, 2, offer)
+        writeU16(&buf, 10, action)
         writeFrame(buf)
     }
 

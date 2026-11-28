@@ -152,11 +152,21 @@ defmodule Minga.Buffer.ProvenanceTest do
       prov = Provenance.edit(prov, step, 0, "a", "A")
       prov = Provenance.edit(prov, step, 3, "d", "")
 
-      {:provenance_v4, next_group, next_change, groups, runs, changes, drafts, marks, faulted} =
+      {:provenance_v5, next_group, next_change, groups, runs, changes, drafts, marks, faulted} =
         Provenance.snapshot(prov)
 
-      v3_runs = Enum.map(runs, &(&1 |> Tuple.delete_at(13) |> Tuple.delete_at(12)))
+      v4_runs = Enum.map(runs, &Tuple.delete_at(&1, 14))
+      v3_runs = Enum.map(v4_runs, &(&1 |> Tuple.delete_at(13) |> Tuple.delete_at(12)))
       v2_runs = Enum.map(v3_runs, &Tuple.delete_at(&1, 11))
+
+      assert {:ok, restored_v4} =
+               Provenance.restore_snapshot(
+                 {:provenance_v4, next_group, next_change, groups, v4_runs, changes, drafts,
+                  marks, faulted},
+                 3
+               )
+
+      assert Provenance.attribution_at(restored_v4, 0) == {@task, nil, nil, :unreviewed}
 
       assert {:ok, restored_v3} =
                Provenance.restore_snapshot(
@@ -181,6 +191,22 @@ defmodule Minga.Buffer.ProvenanceTest do
 
       assert {:ok, recovered} = Provenance.restore_snapshot(old, 3)
       assert Provenance.review_sites(recovered, 0, 3) == [{step, 0, 1}, {step, 3, 3}]
+    end
+
+    test "adjacent writes keep their own times through Keep and checkpoint recovery" do
+      for mode <- [:each, :batch] do
+        {group, prov} = Provenance.open_group(Provenance.new(2), @task, @step_one)
+        prov = Provenance.edit_all(prov, group, [{0, "a", "A"}], mode, {@step_one, 1_000})
+        prov = Provenance.edit_all(prov, group, [{1, "b", "B"}], mode, {@step_one, 2_000})
+        assert Provenance.attribution_at(prov, 0) == {@task, @step_one, 1_000, :unreviewed}
+        assert Provenance.attribution_at(prov, 1) == {@task, @step_one, 2_000, :unreviewed}
+
+        kept = Provenance.keep_groups(prov, [group], [group])
+        assert {:ok, restored} = Provenance.restore_snapshot(Provenance.snapshot(kept), 2)
+        assert Provenance.attribution_at(restored, 0) == {@task, @step_one, 1_000, :kept}
+        assert Provenance.attribution_at(restored, 1) == {@task, @step_one, 2_000, :kept}
+        assert Provenance.attribution_at(restored, 2) == nil
+      end
     end
 
     test "only explicit Keep survives as a mark across checkpoint restore and a later rejected edit" do

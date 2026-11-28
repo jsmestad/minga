@@ -2006,3 +2006,224 @@ theme = "catppuccin_latte"
 pairs = ["#1e66f5 on #ccd0da", "#8c8fa1 on #ccd0da", "#c678dd on #ccd0da"]
 reason = "The pre-existing workspace row and inactive Agent tab use their existing chrome and tint colours."
 issue = 4063
+
+# Hover fixtures expose these editor and chrome inks. The card is sampled on its own surface; none of its text is exempt.
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#71747c on #101317"]
+reason = "The existing muted breadcrumb ink remains visible above the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#8991ad on #2a2d3c"]
+reason = "The existing muted breadcrumb ink remains visible above the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8e9f on #e6e9ef"]
+reason = "The existing muted breadcrumb ink remains visible above the card."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#2f7ddc on #1a1d24"]
+reason = "The editor sampler picks up the blended block cursor edge on the diagnostic source."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#4778d7 on #303446"]
+reason = "The editor sampler picks up the blended block cursor edge on the diagnostic source."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eebf7a on #eff1f6"]
+reason = "The existing diagnostic underline appears in the editor sample outside the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#6280e5 on #eff1f6"]
+reason = "The editor sampler picks up the same blended blue ink seen on the hosted editor scenes."
+issue = 4137
+
+[[exception]]
+scenario = "minga.hover.attribution"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#40a02b on #eff1f6", "#afa3d1 on #eff1f6", "#df8d1d on #eff1f6"]
+reason = "The green and amber syntax colours and tinted review pixels appear in the code outside the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1f66f5"]
+reason = "The existing Latte Normal pill appears below the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1f66f5"]
+reason = "The existing Latte Normal pill appears below the card."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#eff1f5 on #1f66f5"]
+reason = "The existing Latte Normal pill appears below the card."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#a86d11 on #e6e9ef"]
+reason = "The warning count uses its existing modeline ink; it measures the same with the card hidden."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "macos"
+part = "notice.message"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#7b7e92 on #e6e9ef"]
+reason = "The existing notice uses muted ink on the modeline surface."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#3a3e47 on #1a1d23", "#595c66 on #1a1d23"]
+reason = "The existing breadcrumb separators and empty-line marks stay visible outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = ["#595c66 on #1a1d23"]
+reason = "The terminal also uses muted editor ink for text outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#838ba7 on #303446"]
+reason = "Muted text outside the popup uses its existing editor ink."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#8c8fa1 on #eff1f5"]
+reason = "The existing muted editor marks remain visible outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#7287fd on #ccd0da", "#8c8fa1 on #eff1f5", "#eff1f5 on #1e66f5"]
+reason = "The existing chrome, gutter numerals and Normal label use the same inks outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = "code.diagnostics.hover"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#a86d10 on #e6e9ef", "#eff1f5 on #a86d10"]
+reason = "The warning count uses its existing ink. The source mark reverses the warning text's existing colour pair without changing its contrast."
+issue = 4137
+
+[[exception]]
+scenario = ["code.diagnostics.hover", "minga.hover.attribution"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#a86d10 on #eff1f5"]
+reason = "The existing amber text remains visible outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = ["code.hover", "code.hover.focused", "minga.hover.attribution"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#1e66f5 on #eff1f5"]
+reason = "The existing blue text remains visible outside the popup."
+issue = 4137
+
+[[exception]]
+scenario = "minga.hover.attribution"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#40a02b on #eff1f5", "#df8e1d on #eff1f5", "#eff1f5 on #40a02b"]
+reason = "Existing green and amber syntax remains visible. Reversing the green source ink preserves its existing contrast ratio."
+issue = 4137

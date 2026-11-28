@@ -181,6 +181,15 @@ defmodule MingaEditor.Agent.Tasks do
     end
   end
 
+  @doc "Returns the known goal for this conversation, without consulting the selected session."
+  @spec title_for(t(), String.t()) :: String.t() | nil
+  def title_for(%__MODULE__{entries: entries}, task_id) when is_binary(task_id) do
+    Enum.find_value(entries, fn
+      {_pid, %Entry{task_id: ^task_id, title: title}} -> title
+      _another_task -> nil
+    end)
+  end
+
   @doc """
   Every session with a turn that can be stopped now, with that turn, whichever workspace shows it.
   """

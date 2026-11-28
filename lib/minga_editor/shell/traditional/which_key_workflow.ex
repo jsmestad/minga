@@ -38,6 +38,19 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
   @spec sync_mode_prefix(EditorState.t(), Minga.Mode.state(), Minga.Mode.state()) ::
           EditorState.t()
   def sync_mode_prefix(
+        %{
+          shell_runtime: %{
+            state: %ShellState{hover_popup: %MingaEditor.HoverPopup{code_source: source}}
+          }
+        } =
+          state,
+        _previous,
+        %ModeState{prefix_keys: ["g"]}
+      )
+      when source != nil,
+      do: update_shell_state(state, &ShellState.capture_hover_act/1)
+
+  def sync_mode_prefix(
         %{shell_runtime: %{state: %ShellState{}}} = state,
         %ModeState{prefix_keys: previous},
         %ModeState{prefix_node: node, prefix_keys: keys}

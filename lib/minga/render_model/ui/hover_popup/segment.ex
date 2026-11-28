@@ -20,6 +20,7 @@ defmodule Minga.RenderModel.UI.HoverPopup.Segment do
           | :list_bullet
           | :rule
           | {:syntax, Minga.Core.Face.t()}
+          | {:link, action :: pos_integer(), selected? :: boolean()}
 
   @type t :: %__MODULE__{
           text: String.t(),

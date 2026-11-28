@@ -43,7 +43,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Layout
-  alias MingaEditor.LspActions
   alias MingaEditor.Input.Observatory
   alias MingaEditor.Mouse.BufferScroll
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
@@ -388,9 +387,8 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end)
   end
 
-  defp dispatch_action(state, :hover_open_action) do
-    accept_hover_open_action(state)
-  end
+  defp dispatch_action(state, {:hover_open_action, offer, action}),
+    do: MingaEditor.Shell.Traditional.HoverPopupWorkflow.activate_offer(state, offer, action)
 
   defp dispatch_action(state, {:close_tab, id}) do
     with_target(state, {:tab, id}, fn {:tab, tab} ->
@@ -1322,32 +1320,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       |> State.set_keymap_scope(:editor)
 
     %{state | workspace: workspace}
-  end
-
-  # ── Hover open action ──────────────────────────────────────────────
-
-  @spec accept_hover_open_action(state()) :: state()
-  defp accept_hover_open_action(state) do
-    case state.shell_runtime.state.hover_popup do
-      %MingaEditor.HoverPopup{open_action: action} when action != nil ->
-        state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
-        execute_hover_open_action(state, action)
-
-      _ ->
-        state
-    end
-  end
-
-  @spec execute_hover_open_action(state(), MingaEditor.HoverPopup.open_action()) :: state()
-  defp execute_hover_open_action(state, {:goto_location, uri, line, col}) do
-    LspActions.open_location(state, uri, line, col)
-  end
-
-  defp execute_hover_open_action(state, action) when is_atom(action) do
-    case Commands.execute(state, action) do
-      {new_state, _action} -> new_state
-      new_state -> new_state
-    end
   end
 
   @spec handle_shell_gui_action(EditorState.t(), term()) :: EditorState.t()

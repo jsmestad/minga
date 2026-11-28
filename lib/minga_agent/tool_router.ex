@@ -138,7 +138,7 @@ defmodule MingaAgent.ToolRouter do
         )
 
       {:ok, {:changeset, changeset}} ->
-        conditional_mutate_changeset(changeset, path, expected, operation)
+        conditional_mutate_changeset(changeset, path, expected, operation, context.edit_source)
 
       :not_found ->
         conditional_mutate_without_fork(context, path, expected, operation)
@@ -159,9 +159,14 @@ defmodule MingaAgent.ToolRouter do
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
-  defp conditional_mutate_without_fork(%Context{changeset: changeset}, path, expected, operation)
+  defp conditional_mutate_without_fork(
+         %Context{changeset: changeset, edit_source: source},
+         path,
+         expected,
+         operation
+       )
        when is_pid(changeset) do
-    conditional_mutate_changeset(changeset, path, expected, operation)
+    conditional_mutate_changeset(changeset, path, expected, operation, source)
   end
 
   defp conditional_mutate_without_fork(%Context{} = context, path, expected, operation) do
@@ -186,11 +191,19 @@ defmodule MingaAgent.ToolRouter do
           pid(),
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
-          Minga.Buffer.FileMutation.operation()
+          Minga.Buffer.FileMutation.operation(),
+          Minga.Buffer.EditSource.undo_source()
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
-  defp conditional_mutate_changeset(changeset, path, expected, operation) do
+  defp conditional_mutate_changeset(changeset, path, expected, operation, source) do
     with {:ok, relative} <- normalize_changeset_path(changeset, path, false) do
-      Changeset.conditional_mutate(changeset, relative, expected, operation, {:changeset, path})
+      Changeset.conditional_mutate(
+        changeset,
+        relative,
+        expected,
+        operation,
+        {:changeset, path},
+        source
+      )
     end
   catch
     :exit, reason -> {:error, {:changeset_unavailable, reason}}

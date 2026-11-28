@@ -239,6 +239,8 @@ The message uses `body`; keys use `Typography.monospacedSmall` in the accent col
 
 The section order is diagnostic, signature, docs, attribution, as in [surfaces.md](surfaces.md#hover). Headings use `body` semibold, prose `body`, code `Typography.monospacedSmall`, attribution `caption` in the secondary colour. Pointer tooltips in the TUI go to the echo line instead of a popover.
 
+The macOS card uses a border without a shadow, so it does not darken the text outside the card. Documentation and footer actions use the popup's text colour; links and actions are underlined.
+
 ## The layout audit
 
 `design/tools/storyboard/audit.py` measures every rendered storyboard scenario against this file and fails CI on a violation (the **Storyboard renders** job). It reads each expected value from the token scales (`ChromeTokens.swift`, `chrome_tokens.go`), the row pitch from this file and the contrast targets from [themes.md](themes.md), so it carries no numbers of its own.

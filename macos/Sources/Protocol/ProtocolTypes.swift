@@ -1156,6 +1156,21 @@ public enum Wire {
 
     // MARK: - Hover popup
 
+    /// Exact semantic actions from one BEAM hover offer. ID zero clears the footer.
+    public struct HoverOffer: Sendable, Equatable {
+        public let id: UInt64
+        public let showsActions: Bool
+        public let openLabel: String
+
+        public init(id: UInt64, showsActions: Bool, openLabel: String) {
+            self.id = id
+            self.showsActions = showsActions
+            self.openLabel = openLabel
+        }
+
+        public static let hidden = HoverOffer(id: 0, showsActions: false, openLabel: "")
+    }
+
     /// Markdown style for a hover text segment.
     public enum HoverStyle: UInt8, Sendable {
         case plain = 0
@@ -1172,6 +1187,8 @@ public enum Wire {
         case listBullet = 11
         case rule = 12
         case syntaxHighlighted = 13
+        case link = 14
+        case selectedLink = 15
     }
 
     /// Line type for hover content (block context).
@@ -1191,12 +1208,14 @@ public enum Wire {
         public let style: HoverStyle
         public let fgColor: UInt32?
         public let flags: UInt8
+        public let linkID: UInt16?
         public let text: String
 
-        public init(style: HoverStyle, fgColor: UInt32?, flags: UInt8, text: String) {
+        public init(style: HoverStyle, fgColor: UInt32?, flags: UInt8, text: String, linkID: UInt16? = nil) {
             self.style = style
             self.fgColor = fgColor
             self.flags = flags
+            self.linkID = linkID
             self.text = text
         }
     }

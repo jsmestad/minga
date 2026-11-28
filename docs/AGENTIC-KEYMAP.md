@@ -263,7 +263,7 @@ These work in Normal mode without the leader.
 | `gy` | Go to type definition |
 | `g.` | Open the act menu at the cursor, including actions for a Minga change or code actions |
 | `gc` | Comment or uncomment, followed by a motion |
-| `K` | Hover documentation |
+| `K` / `K K` | Show / focus hover for code, diagnostics, and Minga’s edits |
 | `gj` / `gk` | Down / up one line of the file when a long line is wrapped |
 | `g0` / `g$` | Start / end of the line of the file when it is wrapped |
 | `za` | Toggle the fold at the cursor |
@@ -272,6 +272,8 @@ These work in Normal mode without the leader.
 | `zM` / `zR` | Close / open every fold |
 | `zz` / `zt` / `zb` | Scroll so the cursor is in the middle / at the top / at the bottom |
 | `⌃O` / `⌃I` | Back / forward in the jump list |
+
+In a focused hover, `j` / `k` and `⌃D` / `⌃U` scroll. `Tab` / `Shift-Tab` select documentation links, `↩` opens the selected link, `y` copies the full hover, and `q` or `esc` returns to the editor. `g.` opens the normal Act menu for the hovered source. On a Minga edit, `↩` without a selected link opens the original conversation.
 
 ### Any time
 

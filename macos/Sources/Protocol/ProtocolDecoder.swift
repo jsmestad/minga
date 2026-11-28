@@ -143,7 +143,7 @@ enum RenderCommand: Sendable {
     case guiResidentSemantics(data: GUIResidentSemanticsUpdate)
     case guiMinibuffer(visible: Bool, mode: MinibufferMode, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate], generation: UInt32)
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
-    case guiHoverAction(visible: Bool, actionName: String)
+    case guiHoverAction(Wire.HoverOffer)
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case clipboardWrite(target: UInt8, text: String)
@@ -2407,28 +2407,32 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let cursorRow = try readU16(data, rest + 7)
         let cursorCol = try readU16(data, rest + 9)
         let cursorShape = CursorShape(rawValue: data[rest + 11]) ?? .block
-        let hasCursorline = flags & 0x02 != 0
-        let cursorVisible = flags & 0x01 != 0
-
-        if hasCursorline {
-            guard data.count >= rest + 21 else { throw ProtocolDecodeError.malformed }
-            let cursorline = GUICursorline(row: try readU16(data, rest + 12), bg: try readU24(data, rest + 14))
-            let cursorUTF16 = try readU32(data, rest + 17)
-            let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
-                                             cursorVisible: cursorVisible, cursorRow: cursorRow,
-                                             cursorCol: cursorCol, cursorShape: cursorShape,
-                                             cursorline: cursorline,
-                                             accessibilityCursorUTF16: cursorUTF16 == UInt32.max ? nil : cursorUTF16)
-            return (.guiWindowOverlayDelta(data: delta), 22)
+        var pos = rest + 12
+        let cursorline: GUICursorline?
+        if flags & 0x02 != 0 {
+            guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
+            cursorline = GUICursorline(row: try readU16(data, pos), bg: try readU24(data, pos + 2))
+            pos += 5
         } else {
-            let cursorUTF16 = try readU32(data, rest + 12)
-            let delta = GUIWindowOverlayDelta(windowId: windowId, contentEpoch: contentEpoch,
-                                             cursorVisible: cursorVisible, cursorRow: cursorRow,
-                                             cursorCol: cursorCol, cursorShape: cursorShape,
-                                             cursorline: nil,
-                                             accessibilityCursorUTF16: cursorUTF16 == UInt32.max ? nil : cursorUTF16)
-            return (.guiWindowOverlayDelta(data: delta), 17)
+            cursorline = nil
         }
+        let cursorUTF16 = try readU32(data, pos)
+        pos += 4
+        var overlays = DecodedOverlaySections()
+        if flags & 0x04 != 0 {
+            let length = 2 + 9 * Int(try readU16(data, pos))
+            let end = pos + length
+            guard end <= data.count else { throw ProtocolDecodeError.malformed }
+            _ = try decodeOverlaySection(id: 0x06, data: data, start: pos, length: length, end: end, into: &overlays)
+            pos = end
+        }
+        let delta = GUIWindowOverlayDelta(
+            windowId: windowId, contentEpoch: contentEpoch, cursorVisible: flags & 0x01 != 0,
+            cursorRow: cursorRow, cursorCol: cursorCol, cursorShape: cursorShape,
+            cursorline: cursorline, accessibilityCursorUTF16: cursorUTF16 == UInt32.max ? nil : cursorUTF16,
+            documentHighlights: overlays.documentHighlights
+        )
+        return (.guiWindowOverlayDelta(data: delta), pos - offset)
 
     case .guiWindowViewportDelta:
         let (delta, consumed) = try decodeWindowRowsDelta(data: data, offset: offset, allowsRowSplices: false)
@@ -2565,9 +2569,17 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             for _ in 0..<segCount {
                 // standard: style(1) + text_len(2) + text
                 // syntaxHighlighted: style(1=13) + fg_rgb(3) + flags(1) + text_len(2) + text
+                // link: style(1=14/15) + action_id(2) + text_len(2) + text
                 guard data.count >= hPos + 1 else { throw ProtocolDecodeError.malformed }
                 let style = Wire.HoverStyle(rawValue: data[hPos]) ?? .plain
                 hPos += 1
+                var linkID: UInt16?
+                if style == .link || style == .selectedLink {
+                    let id = try readU16(data, hPos)
+                    guard id >= 2 else { throw ProtocolDecodeError.malformed }
+                    linkID = id
+                    hPos += 2
+                }
                 let fgColor: UInt32?
                 let flags: UInt8
                 let textLen: Int
@@ -2588,7 +2600,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 let text = try decodeUTF8(data[hPos..<(hPos + textLen)]) ?? ""
                 hPos += textLen
                 try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-                segments.append(Wire.HoverSegment(style: style, fgColor: fgColor, flags: flags, text: text))
+                segments.append(Wire.HoverSegment(style: style, fgColor: fgColor, flags: flags, text: text, linkID: linkID))
             }
             try FrameDecodeAccounting.reserve(.arrayEntries, 1)
             hLines.append(Wire.HoverLine(lineType: lineType, segments: segments))
@@ -2600,17 +2612,21 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
     case .guiHoverAction:
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let payloadLen = Int(try readU16(data, rest))
-        guard data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
+        guard payloadLen > 0, data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
         let payloadStart = rest + 2
-        let visible = data[payloadStart] != 0
-        guard visible else { return (.guiHoverAction(visible: false, actionName: ""), 3 + payloadLen) }
-        guard payloadLen >= 3 else { throw ProtocolDecodeError.malformed }
-        let actionLen = Int(try readU16(data, payloadStart + 1))
-        guard payloadLen >= 3 + actionLen else { throw ProtocolDecodeError.malformed }
-        let actionStart = payloadStart + 3
-        let actionData = data[actionStart..<(actionStart + actionLen)]
-        let actionName = try decodeUTF8(actionData) ?? ""
-        return (.guiHoverAction(visible: true, actionName: actionName), 3 + payloadLen)
+        let size = 3 + payloadLen
+        if data[payloadStart] == 0 {
+            guard payloadLen == 1 else { throw ProtocolDecodeError.malformed }
+            return (.guiHoverAction(.hidden), size)
+        }
+        guard data[payloadStart] == 1, payloadLen >= 12 else { throw ProtocolDecodeError.malformed }
+        let offer = try readU64(data, payloadStart + 1)
+        let actions = data[payloadStart + 9]
+        let labelLength = Int(try readU16(data, payloadStart + 10))
+        guard offer != 0, actions <= 1, payloadLen == 12 + labelLength else { throw ProtocolDecodeError.malformed }
+        let labelStart = payloadStart + 12
+        let label = try decodeUTF8(data[labelStart..<(labelStart + labelLength)]) ?? ""
+        return (.guiHoverAction(.init(id: offer, showsActions: actions == 1, openLabel: label)), size)
 
     case .guiSignatureHelp:
         // visible(1)

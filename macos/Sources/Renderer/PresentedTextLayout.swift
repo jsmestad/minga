@@ -1,4 +1,5 @@
 import Foundation
+import MingaProtocol
 import MingaUI
 import CoreText
 
@@ -19,6 +20,17 @@ final class PresentedTextLayout {
         func x(at utf16: UInt32) -> CGFloat {
             let offset = min(max(Int(utf16) - composedUTF16Start, 0), CTLineGetStringRange(line).length)
             return origin.x + CTLineGetOffsetForStringIndex(line, offset, nil)
+        }
+
+        /// Resolves full-row display columns against the shaped, horizontally clipped row.
+        func xRange(columns: Range<Int>, columnMap: GUIDisplayColumnMap, startColumn: Int) -> ClosedRange<CGFloat>? {
+            let first = columnMap.utf16Offset(at: columns.lowerBound - startColumn)
+            let last = columnMap.utf16Offset(at: columns.upperBound - startColumn)
+            guard last > first else { return nil }
+            let left = x(at: UInt32(composedUTF16Start + first))
+            let right = x(at: UInt32(composedUTF16Start + last))
+            guard left != right else { return nil }
+            return min(left, right)...max(left, right)
         }
 
         func utf16(at x: CGFloat) -> UInt32 {

@@ -119,6 +119,26 @@ defmodule Minga.Buffer.AuthorshipTest do
     assert BufferProcess.line_authors(buffer, 1, 1) == [[@task, :unattributed]]
   end
 
+  test "live edit attribution belongs to the exact byte and observed document revision" do
+    buffer = start("prefix old\nnext")
+    old_version = BufferProcess.version(buffer)
+    minga_replace(buffer, "prefix NEW\nnext")
+    version = BufferProcess.version(buffer)
+    assert BufferProcess.attribution_at(buffer, {0, 0}, version) == nil
+    assert BufferProcess.attribution_at(buffer, {0, 7}, old_version) == nil
+    assert BufferProcess.attribution_at(buffer, {0, 11}, version) == nil
+
+    assert {@task, {:minga, "task-1", "call-1"}, at, :unreviewed} =
+             BufferProcess.attribution_at(buffer, {0, 7}, version)
+
+    assert is_integer(at)
+    replace_at(buffer, {0, 7}, 1, "x")
+    assert BufferProcess.attribution_at(buffer, {0, 7}, BufferProcess.version(buffer)) == nil
+
+    assert BufferProcess.attribution_at(buffer, {0, 8}, BufferProcess.version(buffer)) ==
+             {@task, {:minga, "task-1", "call-1"}, at, :unreviewed}
+  end
+
   test "Minga edits line 10 and you edit line 12: undo and reject each touch only their own text" do
     buffer = start(Enum.map_join(1..14, fn n -> "line #{n}\n" end))
     minga_replace(buffer, String.replace(BufferProcess.content(buffer), "line 10\n", "LINE 10\n"))
@@ -679,26 +699,18 @@ defmodule Minga.Buffer.AuthorshipTest do
       assert BufferProcess.content(buffer) == before
     end
 
-    # Round 5, R1's documented limit: one line past the word budget has no alignment inside it, so Minga's edit of its
-    # ends takes the whole line, your word included. Your undo is then blocked, and the reject is exact.
-    test "a line past the word budget is one change: your word in it goes to Minga, and the reject brings it back" do
+    # Without observed splice points, a whole-file replacement can exceed the word alignment budget.
+    test "a whole-file replacement past the word budget still rejects the complete inferred region" do
       words = Enum.map_join(1..700, " ", &"word#{&1}")
       buffer = start("# Title\n" <> words <> "\n")
       middle = byte_size(Enum.map_join(1..350, " ", &"word#{&1}"))
       replace_at(buffer, {1, middle}, 0, " MINE")
       mine = BufferProcess.content(buffer)
-      identity = {:buffer, "/long"}
-      expected = Minga.Buffer.FileMutation.revision(mine, BufferProcess.version(buffer), identity)
-      pairs = [{"word1 ", "WORD1 "}, {"word700\n", "WORD700\n"}]
 
-      assert {:ok, _receipt} =
-               BufferProcess.conditional_mutate(
-                 buffer,
-                 expected,
-                 {:edit, pairs},
-                 identity,
-                 step("t", "c1")
-               )
+      replacement =
+        mine |> String.replace("word1 ", "WORD1 ") |> String.replace("word700\n", "WORD700\n")
+
+      minga_replace(buffer, replacement, step("t", "c1"))
 
       assert BufferProcess.author_at(buffer, {1, middle + 2}) == {:minga, "t"}
       assert {:blocked, _reason} = BufferProcess.undo(buffer)
@@ -707,8 +719,8 @@ defmodule Minga.Buffer.AuthorshipTest do
     end
 
     # Round 3's L1: a long prose line where Minga edits the first and last words around a word of yours.
-    test "your word in a long line keeps its author and its undo when Minga edits the line's ends" do
-      for count <- [60, 100] do
+    test "an exact edit keeps your word and undo, even past the inferred alignment budget" do
+      for count <- [60, 100, 700] do
         words = Enum.map_join(1..count, " ", &"word#{&1}")
         buffer = start("# Title\n" <> words <> "\n")
         middle = byte_size(Enum.map_join(1..div(count, 2), " ", &"word#{&1}"))
@@ -733,6 +745,8 @@ defmodule Minga.Buffer.AuthorshipTest do
         assert BufferProcess.author_at(buffer, {1, middle + 2}) == :you
         assert :ok = BufferProcess.undo(buffer)
         refute BufferProcess.content(buffer) =~ "MINE"
+        assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+        assert BufferProcess.content(buffer) == "# Title\n" <> words <> "\n"
       end
     end
 

@@ -24,18 +24,35 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
       anchor_col: popup.anchor_col,
       focused?: popup.focused,
       scroll_offset: popup.scroll_offset,
-      content_lines: Enum.map(popup.content_lines, &line_model/1),
-      open_action_name: open_action_name(popup.open_action)
+      content_lines: line_models(popup),
+      offer_id: popup.offer_id,
+      actions?: popup.code_source != nil,
+      open_label: EditorHoverPopup.open_action_label(popup.open_action)
     }
   end
 
-  @spec line_model(tuple()) :: Line.t()
-  defp line_model({segments, line_type}) do
-    %Line{segments: Enum.map(segments, &segment_model/1), line_type: line_type(line_type)}
+  @spec line_models(EditorHoverPopup.t()) :: [Line.t()]
+  defp line_models(popup) do
+    last_link = tuple_size(popup.links) + 1
+
+    {lines, _next} =
+      Enum.map_reduce(EditorHoverPopup.display_lines(popup), 2, fn {segments, type}, id ->
+        {segments, next} =
+          Enum.map_reduce(segments, id, &segment_model(&1, &2, last_link, popup.selected_link))
+
+        {%Line{segments: segments, line_type: line_type(type)}, next}
+      end)
+
+    lines
   end
 
-  @spec segment_model(tuple()) :: Segment.t()
-  defp segment_model({text, style}), do: %Segment{text: text, style: segment_style(style)}
+  @spec segment_model(tuple(), pos_integer(), pos_integer(), pos_integer() | nil) ::
+          {Segment.t(), pos_integer()}
+  defp segment_model({text, {:link, _url}}, id, last_link, selected) when id <= last_link,
+    do: {%Segment{text: text, style: {:link, id, id == selected}}, id + 1}
+
+  defp segment_model({text, style}, id, _last_link, _selected),
+    do: {%Segment{text: text, style: segment_style(style)}, id}
 
   @spec line_type(term()) :: Line.line_type()
   defp line_type(type)
@@ -81,8 +98,4 @@ defmodule MingaEditor.RenderModel.UI.HoverPopupBuilder do
   end
 
   defp normalize_language(_language), do: nil
-
-  @spec open_action_name(EditorHoverPopup.open_action() | nil) :: String.t() | nil
-  defp open_action_name(nil), do: nil
-  defp open_action_name(action), do: EditorHoverPopup.open_action_name(action)
 end

@@ -50,14 +50,14 @@ func TestEncodeInputEventLayouts(t *testing.T) {
 		t.Fatalf("mouse_event layout = %v, want 9 bytes with click count", mouse)
 	}
 
-	text := EncodeEditorTextEvent(0x1234, 0x0102030405060708, 0x11223344, 0x1020304050607080, 0x55667788, 2, 0x09, MouseDrag, 3, -1, 1)
-	if len(text) != 33 || text[0] != generated.OPEditorTextEvent {
-		t.Fatalf("editor_text_event layout = %v, want fixed 33 bytes", text)
+	text := EncodeEditorTextEvent(0x1234, 0x0102030405060708, 0x11223344, 0x1020304050607080, 0x55667788, 2, 0x09, MouseDrag, 3, -1, 1, 513, 276, 515)
+	if len(text) != 39 || text[0] != generated.OPEditorTextEvent {
+		t.Fatalf("editor_text_event layout = %v, want fixed 39 bytes", text)
 	}
 	if binary.BigEndian.Uint16(text[1:3]) != 0x1234 || binary.BigEndian.Uint64(text[3:11]) != 0x0102030405060708 || binary.BigEndian.Uint32(text[11:15]) != 0x11223344 || binary.BigEndian.Uint64(text[15:23]) != 0x1020304050607080 || binary.BigEndian.Uint32(text[23:27]) != 0x55667788 {
 		t.Fatalf("editor_text_event big-endian identity fields = %v", text)
 	}
-	if text[27] != 2 || text[28] != 0x09 || text[29] != MouseDrag || text[30] != 3 || int8(text[31]) != -1 || int8(text[32]) != 1 {
+	if text[27] != 2 || text[28] != 0x09 || text[29] != MouseDrag || text[30] != 3 || int8(text[31]) != -1 || int8(text[32]) != 1 || binary.BigEndian.Uint16(text[33:35]) != 513 || binary.BigEndian.Uint16(text[35:37]) != 276 || binary.BigEndian.Uint16(text[37:39]) != 515 {
 		t.Fatalf("editor_text_event tail = %v", text[27:])
 	}
 
@@ -1528,7 +1528,7 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 }
 
 func TestDecodeTransientOverlayChrome(t *testing.T) {
-	segment := append([]byte{1}, string16("hover text")...)
+	segment := append([]byte{15, 1, 2}, string16("hover text")...)
 	line := append([]byte{0, 0, 1}, segment...)
 	hover := []byte{generated.OPGuiHoverPopup, 1, 0, 4, 0, 8, 1, 0, 0, 0, 1}
 	hover = append(hover, line...)
@@ -1539,14 +1539,17 @@ func TestDecodeTransientOverlayChrome(t *testing.T) {
 	if !command.Chrome.Hover.Visible || command.Chrome.Hover.AnchorRow != 4 || len(command.Chrome.Hover.Lines) != 1 {
 		t.Fatalf("hover decoded incorrectly: %+v", command.Chrome.Hover)
 	}
+	if segment := command.Chrome.Hover.Lines[0].Segments[0]; segment.LinkID != 258 || segment.Text != "hover text" || segment.Style != 15 {
+		t.Fatalf("hover link decoded incorrectly: %+v", segment)
+	}
 
-	actionPayload := append([]byte{1}, string16("Open docs")...)
+	actionPayload := append([]byte{1, 0, 0, 0, 0, 0, 0, 0, 42, 1}, string16("Open docs")...)
 	action := append([]byte{generated.OPGuiHoverAction, 0, byte(len(actionPayload))}, actionPayload...)
 	command, err = DecodeCommand(action)
 	if err != nil {
 		t.Fatalf("DecodeCommand hover action returned error: %v", err)
 	}
-	if !command.Chrome.HoverAction.Visible || command.Chrome.HoverAction.Name != "Open docs" {
+	if command.Chrome.HoverAction != (HoverAction{Offer: 42, Actions: true, OpenLabel: "Open docs"}) {
 		t.Fatalf("hover action decoded incorrectly: %+v", command.Chrome.HoverAction)
 	}
 

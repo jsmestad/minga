@@ -32,6 +32,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Editing
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
+  alias MingaEditor.HoverPopup
   alias MingaEditor.Layout
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.RenderModel.Window.SourceOffsetMap
@@ -332,11 +333,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         resident_build_state
       )
 
-    # Document highlights in display coordinates
     doc_highlights =
-      build_document_highlights(
-        state.workspace.document_highlights,
-        viewport,
+      build_window_highlights(
+        state,
+        scroll,
+        row_store_mode,
         viewport_bottom,
         visual_entries,
         wrapped_coordinates?
@@ -3887,6 +3888,27 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   # ── Document highlights ─────────────────────────────────────────────────
 
+  @spec build_window_highlights(
+          state(),
+          WindowScroll.t(),
+          :windowed | {:resident, non_neg_integer()},
+          non_neg_integer(),
+          [visual_row_entry()],
+          boolean()
+        ) :: [DocumentHighlight.t()]
+  defp build_window_highlights(state, scroll, mode, bottom, entries, wrapped?) do
+    hover = build_hover_highlights(state, scroll, entries)
+
+    case mode do
+      {:resident, _count} ->
+        hover
+
+      :windowed ->
+        highlights = state.workspace.document_highlights
+        build_document_highlights(highlights, scroll.viewport, bottom, entries, wrapped?) ++ hover
+    end
+  end
+
   @spec build_document_highlights(
           [Minga.LSP.DocumentHighlight.t()] | nil,
           Viewport.t(),
@@ -3931,6 +3953,56 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           }
         end
       )
+    end)
+  end
+
+  @spec build_hover_highlights(state(), WindowScroll.t(), [visual_row_entry()]) ::
+          [DocumentHighlight.t()]
+  defp build_hover_highlights(
+         %{
+           intent: %{
+             frame: %{
+               shell_state: %{
+                 hover_popup: %HoverPopup{
+                   code_source: %{window: window, buffer: buffer, version: version},
+                   code_range: {{_, _}, {_, _}} = range,
+                   pending_code: pending
+                 }
+               }
+             }
+           }
+         },
+         %{window: %{id: window, content: {:buffer, buffer}}, snapshot: %{version: version}},
+         entries
+       ) do
+    case pending do
+      {_ref, {[], []}} ->
+        []
+
+      _ ->
+        project_hover_highlights(entries, range)
+    end
+  end
+
+  defp build_hover_highlights(_state, _scroll, _entries), do: []
+
+  @spec project_hover_highlights([visual_row_entry()], HoverPopup.code_range()) ::
+          [DocumentHighlight.t()]
+  defp project_hover_highlights(entries, {{start_line, start_byte}, {end_line, end_byte}}) do
+    entries
+    |> visual_entries_for_line_range(start_line, end_line)
+    |> Enum.flat_map(fn entry ->
+      {first, last} = entry_byte_bounds(entry, start_line, start_byte, end_line, end_byte)
+
+      Enum.map(VisualRow.source_display_ranges(entry, first, last), fn {col, stop} ->
+        %DocumentHighlight{
+          start_row: entry.display_row,
+          end_row: entry.display_row,
+          start_col: col,
+          end_col: stop,
+          kind: :hover
+        }
+      end)
     end)
   end
 
@@ -4195,15 +4267,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           (non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer() -> term())
         ) :: [term()]
   defp project_entry_byte_range(entry, start_line, start_byte, end_line, end_byte, build_range) do
-    range_start =
-      if entry.buf_line == start_line,
-        do: max(start_byte, entry.source_start_byte),
-        else: entry.source_start_byte
-
-    range_end =
-      if entry.buf_line == end_line,
-        do: min(end_byte, entry.source_end_byte),
-        else: entry.source_end_byte
+    {range_start, range_end} =
+      entry_byte_bounds(entry, start_line, start_byte, end_line, end_byte)
 
     if range_end > range_start do
       [
@@ -4217,6 +4282,27 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     else
       []
     end
+  end
+
+  @spec entry_byte_bounds(
+          visual_row_entry(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp entry_byte_bounds(entry, start_line, start_byte, end_line, end_byte) do
+    range_start =
+      if entry.buf_line == start_line,
+        do: max(start_byte, entry.source_start_byte),
+        else: entry.source_start_byte
+
+    range_end =
+      if entry.buf_line == end_line,
+        do: min(end_byte, entry.source_end_byte),
+        else: entry.source_end_byte
+
+    {range_start, range_end}
   end
 
   @spec selection_visual_col(visual_row_entry(), non_neg_integer(), :start | :end) ::

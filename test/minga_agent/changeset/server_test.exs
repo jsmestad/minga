@@ -540,13 +540,13 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert :ok = Changeset.write_file(server, "hello.txt", "changed")
       assert :ok = Changeset.reset(server)
 
-      assert :ok = Changeset.stage_fork_resolution(server, path, "", "")
+      assert :ok = Changeset.stage_fork_resolution(server, path, "", {"", []})
       assert [] = Changeset.summary(server)
 
       assert :ok = Changeset.discard_file(server, path)
 
       assert {:error, :publication_baseline_unavailable} =
-               Changeset.stage_fork_content(server, path, "draft")
+               Changeset.stage_fork_content(server, path, {"draft", []})
     end
 
     test "returns an error when backup cleanup fails before reset clears state", %{

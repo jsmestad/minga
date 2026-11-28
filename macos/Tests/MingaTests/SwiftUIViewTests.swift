@@ -75,6 +75,18 @@ struct AnchoredOverlayPlacementTests {
         #expect(clamped == 192)
     }
 
+    @Test("pointer hover leaves a different displayed caret row uncovered", arguments: [true, false])
+    func pointerHoverProtectsCaret(caretIsAbove: Bool) {
+        let caret = CGRect(x: 80, y: caretIsAbove ? 72 : 160, width: 8, height: cellHeight)
+        let placement = AnchoredOverlayPlacement.resolve(anchorRow: 6, cellHeight: cellHeight, measuredHeight: 260, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: .above, gap: gap, bottomInset: bottomInset, protectedCaret: caret)
+        #expect(placement.showsAbove != caretIsAbove)
+        if caretIsAbove {
+            #expect(placement.offsetY >= 7 * cellHeight + gap)
+        } else {
+            #expect(placement.offsetY + placement.maxHeight <= 6 * cellHeight - gap)
+        }
+    }
+
     private func resolve(anchorRow: Int, measuredHeight: CGFloat) -> AnchoredOverlayPlacement {
         AnchoredOverlayPlacement.resolve(anchorRow: anchorRow, cellHeight: cellHeight, measuredHeight: measuredHeight, viewportHeight: viewportHeight, desiredMaxHeight: desiredMaxHeight, preferredSide: .above, gap: gap, bottomInset: bottomInset)
     }
@@ -243,7 +255,7 @@ struct SemanticPopupViewTests {
                 Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: "Current hover"),
             ]),
         ])
-        state.updateOpenAction(visible: true, name: "Open source")
+        state.updateOpenAction(.init(id: 45, showsActions: true, openLabel: "↩ conversation"))
 
         let strings = try HoverPopupOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -252,7 +264,26 @@ struct SemanticPopupViewTests {
             .compactMap { try? $0.string() }
 
         #expect(strings.contains("Current hover"))
-        #expect(strings.contains("Open"))
+        #expect(strings.contains("↩ conversation"))
+        #expect(strings.contains("g. actions"))
+    }
+
+    @Test("A short review preview fits its content inside a narrow hover")
+    @MainActor func shortReviewPreviewFits() {
+        let state = HoverPopupState()
+        state.update(visible: true, anchorRow: 1, anchorCol: 3, focused: true, scrollOffset: 0, rawLines: [
+            "Minga’s change", "sticky.txt:2", "− gamma", "+ GAMMA",
+        ].map { line in
+            Wire.HoverLine(lineType: .text, segments: [Wire.HoverSegment(style: .plain, fgColor: nil, flags: 0, text: line)])
+        })
+
+        let hover = HoverPopupOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .frame(width: 320)
+            .frame(maxHeight: 300)
+        let size = NSHostingView(rootView: hover).fittingSize
+
+        #expect((50..<160).contains(size.height))
     }
 
     @Test("Signature help renders current signature and parameter documentation")

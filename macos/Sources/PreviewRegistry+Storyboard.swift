@@ -324,8 +324,12 @@ enum StoryboardCapture {
     private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?, covered: [CGRect]) -> [[String: Any]] {
         guard let pixels else { return [] }
         return parts.compactMap { part in
+            // Sample the text aperture without the card's stroke, padding, or scrollbar.
+            let inkFrame = part.name == "hover.document"
+                ? part.frame.insetBy(dx: Spacing.lg, dy: 2 * Spacing.pixel)
+                : part.frame
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : [],
+                  let sample = pixels.sample(inkFrame, excluding: part.name == "breadcrumb.segment" ? covered : [],
                                              singleInk: part.name == "actMenu.key") else { return nil }
             return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
         }
@@ -378,10 +382,10 @@ enum StoryboardCapture {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
         // Sample visible editor and breadcrumb ink, not the overlaid panel's fill or text.
-        // Two interior bars of the rounded Act menu leave its transparent corners and shadow in the sample.
+        // Retain the Act menu's transparent corners and shadow in the editor sample.
         let covered = parts.flatMap { part -> [CGRect] in
             switch part.name {
-            case "picker.panel":
+            case "picker.panel", "hover.panel":
                 [part.frame]
             case "actMenu.panel":
                 [part.frame.insetBy(dx: Radius.lg, dy: 0), part.frame.insetBy(dx: 0, dy: Radius.lg)]

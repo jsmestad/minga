@@ -54,6 +54,7 @@ defmodule Minga.Storyboard.RegistryTest do
     for entry <- Registry.built() do
       @id entry.id
 
+      @tag scenario: entry.id
       test "#{entry.id} is reached by its key path and classified back to itself" do
         entry = Registry.fetch!(@id)
         session = Registry.drive(entry)
@@ -65,6 +66,7 @@ defmodule Minga.Storyboard.RegistryTest do
       end
 
       if entry.checks != [] do
+        @tag scenario: entry.id
         test "#{entry.id} matches its design checks" do
           entry = Registry.fetch!(@id)
           model = entry |> Registry.drive() |> Session.model()

@@ -94,6 +94,8 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:review_task` binds the fixture's task identity and title. Its `:open?` option opens the review with the real leader keys and waits for the generated buffer before another key acts on it.
 
+  `:hover_source` opens the fixture file and supplies an isolated language-server hover response and optional diagnostic. The scenario still drives the editor's real input and render paths.
+
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
@@ -165,7 +167,61 @@ defmodule Minga.Test.Storyboard.Session do
     session = %{session | home_window: window_id(session)}
     session = seed_review_task(session, Keyword.get(opts, :review_task))
     install_minga_status(ctx, file, Keyword.get(opts, :minga))
-    session
+    seed_hover_source(session, Keyword.get(opts, :hover_source))
+  end
+
+  @spec seed_hover_source(t(), keyword() | nil) :: t()
+  defp seed_hover_source(session, nil), do: session
+
+  defp seed_hover_source(session, options) do
+    session = if file_open?(session), do: session, else: open_file(session)
+    buffer = EditorCase.active_window_buffer(session.ctx)
+    uri = Minga.LSP.SyncServer.path_to_uri(session.file)
+
+    if message = options[:diagnostic] do
+      diagnostic = %Minga.Diagnostics.Diagnostic{
+        range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 5},
+        severity: :warning,
+        source: "Expert",
+        message: message
+      }
+
+      Minga.Diagnostics.publish(:storyboard_hover_source, uri, [diagnostic])
+
+      ExUnit.Callbacks.on_exit({:storyboard_hover_source, uri}, fn ->
+        Minga.Diagnostics.clear(:storyboard_hover_source, uri)
+      end)
+    end
+
+    if markdown = options[:markdown] do
+      reply = %{"contents" => %{"kind" => "markdown", "value" => markdown}}
+      child = {:storyboard_hover_provider, make_ref()}
+
+      client =
+        ExUnit.Callbacks.start_supervised!({Task, fn -> reply_to_hover(reply) end}, id: child)
+
+      Minga.LSP.SyncServer.put_clients(buffer, [client])
+      ExUnit.Callbacks.on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(buffer) end)
+      %{session | children: [child | session.children]}
+    else
+      session
+    end
+  end
+
+  @spec reply_to_hover(map()) :: no_return()
+  defp reply_to_hover(reply) do
+    receive do
+      {:"$gen_call", from, :encoding} ->
+        GenServer.reply(from, :utf16)
+
+      {:"$gen_cast", {:async_request, "textDocument/hover", _params, caller, ref}} ->
+        send(caller, {:lsp_response, ref, {:ok, reply}})
+
+      _notification ->
+        :ok
+    end
+
+    reply_to_hover(reply)
   end
 
   @typep review_edit ::

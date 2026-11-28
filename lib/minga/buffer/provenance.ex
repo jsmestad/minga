@@ -145,11 +145,12 @@ defmodule Minga.Buffer.Provenance do
   @typep saved_run ::
            {non_neg_integer(), author(), group_id() | nil, [group_id()], [Run.overlap()],
             binary() | nil, Change.id() | nil, [Change.id()], [group_id()], [group_id()],
-            [group_id()], boolean(), Run.origin() | nil, [{group_id(), Run.origin()}]}
+            [group_id()], boolean(), Run.origin() | nil, [{group_id(), Run.origin()}],
+            Run.attribution() | nil}
   @typep saved_groups :: %{group_id() => {author(), group_key(), boolean()}}
   @typep saved_changes :: %{Change.id() => {Change.owner(), [Change.id()]}}
   @opaque snapshot ::
-            {:provenance_v4, pos_integer(), pos_integer(), saved_groups(), [saved_run()],
+            {:provenance_v5, pos_integer(), pos_integer(), saved_groups(), [saved_run()],
              saved_changes(), [[group_id()]], map(), boolean()}
 
   @doc "Returns provenance for a document of `size` bytes that all predates tracking."
@@ -220,7 +221,7 @@ defmodule Minga.Buffer.Provenance do
 
     runs = Enum.map(RunTree.to_list(prov.tree), &save_run/1)
 
-    {:provenance_v4, prov.next_group, prov.next_change, groups, runs, changes,
+    {:provenance_v5, prov.next_group, prov.next_change, groups, runs, changes,
      DraftLinks.snapshot(prov.witnessed_drafts), prov.group_marks, faulted?(prov)}
   end
 
@@ -230,8 +231,15 @@ defmodule Minga.Buffer.Provenance do
         {version, next_group, next_change, groups, runs, changes, drafts, marks, faulted},
         size
       )
-      when version in [:provenance_v1, :provenance_v2, :provenance_v3, :provenance_v4] do
-    format = if version == :provenance_v4, do: {version, next_change}, else: version
+      when version in [
+             :provenance_v1,
+             :provenance_v2,
+             :provenance_v3,
+             :provenance_v4,
+             :provenance_v5
+           ] do
+    format =
+      if version in [:provenance_v4, :provenance_v5], do: {version, next_change}, else: version
 
     with :ok <-
            validate_saved_shape(
@@ -373,10 +381,13 @@ defmodule Minga.Buffer.Provenance do
     do:
       {run.bytes, run.author, run.group, run.deletions, run.overlaps, run.text, run.made_by,
        run.replaced_by, run.covered_by, run.swept_by, run.direct_gaps, run.kept?, run.origin,
-       run.gap_origins}
+       run.gap_origins, run.attribution}
 
   @typep snapshot_format ::
-           :provenance_v1 | :provenance_v2 | :provenance_v3 | {:provenance_v4, pos_integer()}
+           :provenance_v1
+           | :provenance_v2
+           | :provenance_v3
+           | {:provenance_v4 | :provenance_v5, pos_integer()}
 
   @spec restore_runs(
           list(),
@@ -397,6 +408,7 @@ defmodule Minga.Buffer.Provenance do
       |> Tuple.insert_at(11, false)
       |> Tuple.insert_at(12, nil)
       |> Tuple.insert_at(13, [])
+      |> Tuple.insert_at(14, nil)
 
     restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v1)
   end
@@ -404,18 +416,29 @@ defmodule Minga.Buffer.Provenance do
   defp restore_runs([run | rest], groups, changes, remaining, acc, :provenance_v2)
        when tuple_size(run) == 11 do
     upgraded =
-      run |> Tuple.insert_at(11, false) |> Tuple.insert_at(12, nil) |> Tuple.insert_at(13, [])
+      run
+      |> Tuple.insert_at(11, false)
+      |> Tuple.insert_at(12, nil)
+      |> Tuple.insert_at(13, [])
+      |> Tuple.insert_at(14, nil)
 
     restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v2)
   end
 
   defp restore_runs([run | rest], groups, changes, remaining, acc, :provenance_v3)
        when tuple_size(run) == 12 do
-    upgraded = run |> Tuple.insert_at(12, nil) |> Tuple.insert_at(13, [])
+    upgraded =
+      run |> Tuple.insert_at(12, nil) |> Tuple.insert_at(13, []) |> Tuple.insert_at(14, nil)
+
     restore_run(upgraded, rest, groups, changes, remaining, acc, :provenance_v3)
   end
 
-  defp restore_runs([run | rest], groups, changes, remaining, acc, {:provenance_v4, _} = format),
+  defp restore_runs([run | rest], groups, changes, remaining, acc, {:provenance_v4, _} = format)
+       when tuple_size(run) == 14,
+       do:
+         restore_run(Tuple.insert_at(run, 14, nil), rest, groups, changes, remaining, acc, format)
+
+  defp restore_runs([run | rest], groups, changes, remaining, acc, {:provenance_v5, _} = format),
     do: restore_run(run, rest, groups, changes, remaining, acc, format)
 
   defp restore_runs(_runs, _groups, _changes, _remaining, _acc, _version),
@@ -444,7 +467,7 @@ defmodule Minga.Buffer.Provenance do
           {:ok, [Run.t()]} | {:error, :invalid_provenance}
   defp restore_run(
          {bytes, author, writer, deletions, overlaps, _, _, replaced, covered, swept, gaps, kept?,
-          _, gap_origins} = run,
+          _, gap_origins, _attribution} = run,
          rest,
          groups,
          changes,
@@ -469,14 +492,15 @@ defmodule Minga.Buffer.Provenance do
           {:ok, Run.t(), non_neg_integer()} | {:error, :invalid_provenance}
   defp decode_saved_run(run, groups, written?, remaining, version) do
     {bytes, author, writer, deletions, overlaps, text, made, replaced, covered, swept, gaps,
-     kept?, origin, gap_origins} = run
+     kept?, origin, gap_origins, attribution} = run
 
     live = bytes > 0 and written? and not Enum.any?(deletions, &elem(Map.fetch!(groups, &1), 2))
     used = if live, do: bytes, else: 0
 
     if used <= remaining and valid_run_text?(live, bytes, text) and valid_kept_run?(run) and
          valid_origin?(origin, writer, author, bytes, kept?, version) and
-         valid_gap_origins?(gap_origins, gaps, deletions, bytes, version) do
+         valid_gap_origins?(gap_origins, gaps, deletions, bytes, version) and
+         valid_attribution?(attribution, author, bytes) do
       restored = %Run{
         id: Locator.between(nil, nil),
         bytes: bytes,
@@ -493,7 +517,8 @@ defmodule Minga.Buffer.Provenance do
         direct_gaps: gaps,
         kept?: kept?,
         origin: origin,
-        gap_origins: gap_origins
+        gap_origins: gap_origins,
+        attribution: attribution
       }
 
       {:ok, restored, used}
@@ -502,14 +527,26 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  @spec valid_kept_run?(saved_run()) :: boolean()
-  defp valid_kept_run?({_, _, _, _, _, _, _, _, _, _, _, false, _, _}), do: true
+  @spec valid_attribution?(term(), author(), non_neg_integer()) :: boolean()
+  defp valid_attribution?(nil, _author, _bytes), do: true
 
-  defp valid_kept_run?({0, :unattributed, nil, [], [], _, nil, [], [], [], [], true, _, []}),
+  defp valid_attribution?({nil, at}, {:minga, _review_owner}, bytes),
+    do: bytes > 0 and is_integer(at)
+
+  defp valid_attribution?({{:minga, task, step}, at}, {:minga, _review_owner}, bytes),
+    do: bytes > 0 and is_binary(task) and is_binary(step) and is_integer(at)
+
+  defp valid_attribution?(_fact, _author, _bytes), do: false
+
+  @spec valid_kept_run?(saved_run()) :: boolean()
+  defp valid_kept_run?({_, _, _, _, _, _, _, _, _, _, _, false, _, _, _}), do: true
+
+  defp valid_kept_run?({0, :unattributed, nil, [], [], _, nil, [], [], [], [], true, _, [], nil}),
     do: true
 
-  defp valid_kept_run?({bytes, author, nil, _, _, _, _, _, _, _, _, true, _, _}) when bytes > 0,
-    do: minga?(author)
+  defp valid_kept_run?({bytes, author, nil, _, _, _, _, _, _, _, _, true, _, _, _})
+       when bytes > 0,
+       do: minga?(author)
 
   defp valid_kept_run?(_run), do: false
 
@@ -530,9 +567,10 @@ defmodule Minga.Buffer.Provenance do
          author,
          bytes,
          kept,
-         {:provenance_v4, next}
+         {version, next}
        )
-       when kind in [:insert, :replace] and bytes > 0 and (not is_nil(writer) or kept),
+       when version in [:provenance_v4, :provenance_v5] and kind in [:insert, :replace] and
+              bytes > 0 and (not is_nil(writer) or kept),
        do: valid_source_id?(id, next) and minga?(author) and valid_extent?(offset, bytes, total)
 
   defp valid_origin?(
@@ -541,8 +579,9 @@ defmodule Minga.Buffer.Provenance do
          :unattributed,
          0,
          true,
-         {:provenance_v4, next}
-       ),
+         {version, next}
+       )
+       when version in [:provenance_v4, :provenance_v5],
        do: valid_source_id?(id, next) and valid_extent?(offset, 1, total)
 
   defp valid_origin?(_origin, _writer, _author, _bytes, _kept, _format), do: false
@@ -561,8 +600,8 @@ defmodule Minga.Buffer.Provenance do
           boolean()
   defp valid_gap_origins?([], _gaps, _deletions, _bytes, _format), do: true
 
-  defp valid_gap_origins?(origins, gaps, deletions, bytes, {:provenance_v4, next})
-       when bytes > 0 do
+  defp valid_gap_origins?(origins, gaps, deletions, bytes, {version, next})
+       when version in [:provenance_v4, :provenance_v5] and bytes > 0 do
     Enum.all?(origins, fn
       {group, {:delete, id, offset, total}} ->
         group in gaps and valid_source_id?(id, next) and valid_extent?(offset, bytes, total)
@@ -581,7 +620,7 @@ defmodule Minga.Buffer.Provenance do
           :ok | {:error, :invalid_provenance}
   defp validate_run_references(
          {bytes, _author, _writer, deletions, overlaps, _text, made, replaced, covered, swept,
-          gaps, _kept?, _origin, _gap_origins},
+          gaps, _kept?, _origin, _gap_origins, _attribution},
          groups,
          changes
        ) do
@@ -700,16 +739,30 @@ defmodule Minga.Buffer.Provenance do
 
   Raises `ArgumentError` when the removed range is outside the document.
   """
-  @spec edit(t(), group_id() | :untracked, non_neg_integer(), binary(), binary()) :: t()
-  def edit(%__MODULE__{} = prov, group, start, removed, inserted)
+  @spec edit(
+          t(),
+          group_id() | :untracked,
+          non_neg_integer(),
+          binary(),
+          binary(),
+          Run.attribution() | nil
+        ) :: t()
+  def edit(%__MODULE__{} = prov, group, start, removed, inserted, attribution \\ nil)
       when is_integer(start) and start >= 0 and is_binary(removed) and is_binary(inserted) do
     prov
-    |> apply_edit(group, start, removed, inserted)
+    |> apply_edit(group, start, removed, inserted, attribution)
     |> traced({:edit, group, start, removed, inserted})
   end
 
-  @spec apply_edit(t(), group_id() | :untracked, non_neg_integer(), binary(), binary()) :: t()
-  defp apply_edit(prov, group, start, removed, inserted) do
+  @spec apply_edit(
+          t(),
+          group_id() | :untracked,
+          non_neg_integer(),
+          binary(),
+          binary(),
+          Run.attribution() | nil
+        ) :: t()
+  defp apply_edit(prov, group, start, removed, inserted, attribution) do
     removed_bytes = byte_size(removed)
 
     if start + removed_bytes > size(prov) do
@@ -724,12 +777,12 @@ defmodule Minga.Buffer.Provenance do
       removed_bytes == 0 and inserted_bytes == 0 ->
         prov
 
-      removed_bytes == 0 and inside_own_run?(prov, group_id, author, start) ->
+      removed_bytes == 0 and inside_own_run?(prov, group_id, author, start, attribution) ->
         grow_run_at(prov, start, inserted_bytes)
 
       replacing_inside_run?(prov, group_id, start, removed_bytes) ->
         prov
-        |> replace_inside_run(group_id, author, start, removed, inserted_bytes)
+        |> replace_inside_run(group_id, author, start, removed, inserted_bytes, attribution)
         |> renumber_when_deep()
         |> remember_fresh()
         |> settle_changes()
@@ -760,7 +813,15 @@ defmodule Minga.Buffer.Provenance do
 
         prov
         |> consume(group_id, seeds(killed), fn _change, made -> any_live(made) end)
-        |> insert_between(group_id, author, preceding, following, inserted_bytes, made_by)
+        |> insert_between(
+          group_id,
+          author,
+          preceding,
+          following,
+          inserted_bytes,
+          made_by,
+          attribution
+        )
         |> renumber_when_deep()
         |> remember_fresh()
         |> settle_changes()
@@ -776,10 +837,12 @@ defmodule Minga.Buffer.Provenance do
           t(),
           group_id() | :untracked,
           [{non_neg_integer(), binary(), binary()}],
-          :auto | :batch | :each
+          :auto | :batch | :each,
+          Run.attribution() | nil
         ) ::
           t()
-  def edit_all(%__MODULE__{} = prov, group, changes, mode \\ :auto) when is_list(changes) do
+  def edit_all(%__MODULE__{} = prov, group, changes, mode \\ :auto, attribution \\ nil)
+      when is_list(changes) do
     batch? =
       case mode do
         :auto -> length(changes) * 8 > RunTree.count(prov.tree)
@@ -789,12 +852,12 @@ defmodule Minga.Buffer.Provenance do
 
     edited =
       if batch?,
-        do: edit_in_one_pass(prov, group, changes),
+        do: edit_in_one_pass(prov, group, changes, attribution),
         else:
           changes
           |> Enum.reverse()
           |> Enum.reduce(prov, fn {start, removed, inserted}, acc ->
-            apply_edit(acc, group, start, removed, inserted)
+            apply_edit(acc, group, start, removed, inserted, attribution)
           end)
 
     traced(edited, {:edit_all, group, changes})
@@ -1932,7 +1995,7 @@ defmodule Minga.Buffer.Provenance do
 
   defp compacted_anchor(%Change{replaced: replaced, pulls: pulls}, run) do
     if not :gb_sets.is_empty(replaced) or not :gb_sets.is_empty(pulls),
-      do: %{run | bytes: 0, text: "", origin: nil, gap_origins: []}
+      do: %{run | bytes: 0, text: "", origin: nil, gap_origins: [], attribution: nil}
   end
 
   # First join adjacent pieces of one replacement, then collapse replacements that only cover the next anchor.
@@ -2113,6 +2176,79 @@ defmodule Minga.Buffer.Provenance do
       nil -> nil
     end
   end
+
+  @type attribution ::
+          {author(), Minga.Buffer.Author.key() | nil, integer() | nil,
+           :unreviewed | :kept | :recorded}
+
+  @doc "Returns exact Minga attribution for the live byte, not a nearby review gap."
+  @spec attribution_at(t(), non_neg_integer()) :: attribution() | nil
+  def attribution_at(%__MODULE__{tree: tree}, offset) when is_integer(offset) and offset >= 0 do
+    case RunTree.at_offset(tree, offset) do
+      {%Run{author: {:minga, _} = author} = run, _start} ->
+        review = attribution_review(run)
+
+        case run.attribution do
+          {nil, at} -> {{:minga, :untasked}, nil, at, review}
+          {key, at} -> {Author.author(key), key, at, review}
+          nil -> {author, nil, nil, review}
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc "Attaches original writer facts to newly published runs without changing their review group."
+  @spec attribute_publication(
+          t(),
+          group_id(),
+          [{non_neg_integer(), pos_integer(), Run.attribution()}]
+        ) :: t()
+  def attribute_publication(%__MODULE__{} = prov, _group, []), do: prov
+
+  def attribute_publication(%__MODULE__{} = prov, group, ranges) do
+    ranges
+    |> Enum.reduce(prov, fn {start, count, attribution}, acc ->
+      stop = start + count
+
+      acc =
+        acc
+        |> split_publication_at(group, start)
+        |> split_publication_at(group, stop)
+
+      tree =
+        acc.tree
+        |> RunTree.live_between(start, stop)
+        |> Enum.reduce(acc.tree, fn
+          {%Run{group: ^group} = run, _offset}, tree ->
+            RunTree.update(tree, %{run | attribution: attribution})
+
+          _other, tree ->
+            tree
+        end)
+
+      remember_fresh(%{acc | tree: tree})
+    end)
+    |> renumber_when_deep()
+  end
+
+  @spec split_publication_at(t(), group_id(), non_neg_integer()) :: t()
+  defp split_publication_at(prov, group, offset) do
+    case RunTree.at_offset(prov.tree, offset) do
+      {%Run{group: ^group} = run, start} when start < offset ->
+        {_left, _right, prov} = split_run(prov, run, offset - start)
+        prov
+
+      _other ->
+        prov
+    end
+  end
+
+  @spec attribution_review(Run.t()) :: :unreviewed | :kept | :recorded
+  defp attribution_review(%Run{kept?: true}), do: :kept
+  defp attribution_review(%Run{group: group}) when is_integer(group), do: :unreviewed
+  defp attribution_review(%Run{}), do: :recorded
 
   @doc """
   Returns the authorship of the bytes from `from` up to `to`, in document order.
@@ -2653,10 +2789,16 @@ defmodule Minga.Buffer.Provenance do
   end
 
   # Typing inside your own fresh text grows that run instead of splitting it.
-  @spec inside_own_run?(t(), group_id() | nil, author(), non_neg_integer()) :: boolean()
-  defp inside_own_run?(prov, group_id, author, start) do
+  @spec inside_own_run?(
+          t(),
+          group_id() | nil,
+          author(),
+          non_neg_integer(),
+          Run.attribution() | nil
+        ) :: boolean()
+  defp inside_own_run?(prov, group_id, author, start, attribution) do
     case RunTree.at_offset(prov.tree, start) do
-      {run, run_start} -> run_start < start and extendable?(run, group_id, author)
+      {run, run_start} -> run_start < start and extendable?(run, group_id, author, attribution)
       nil -> false
     end
   end
@@ -2690,10 +2832,11 @@ defmodule Minga.Buffer.Provenance do
           author(),
           non_neg_integer(),
           binary(),
-          non_neg_integer()
+          non_neg_integer(),
+          Run.attribution() | nil
         ) ::
           t()
-  defp replace_inside_run(prov, group_id, author, start, removed, inserted_bytes) do
+  defp replace_inside_run(prov, group_id, author, start, removed, inserted_bytes, attribution) do
     {run, run_start} = RunTree.at_offset(prov.tree, start)
     removed_bytes = byte_size(removed)
     rest = run_start + run.bytes - start - removed_bytes
@@ -2731,7 +2874,7 @@ defmodule Minga.Buffer.Provenance do
       |> replace_run(group_id, change, dead, removed, gap_origin(gap, 0))
 
     {prov, made_by} = open_change(prov, change, replaced, pulled, author)
-    insert_between(prov, group_id, author, left, dead, inserted_bytes, made_by)
+    insert_between(prov, group_id, author, left, dead, inserted_bytes, made_by, attribution)
   end
 
   @spec grow_run_at(t(), non_neg_integer(), pos_integer()) :: t()
@@ -2742,7 +2885,8 @@ defmodule Minga.Buffer.Provenance do
 
   # Only text with no replacement record grows: a replacement's own text stays its own run, so a later deletion can tell
   # whether all of it is gone.
-  @spec extendable?(Run.t() | nil, group_id() | nil, author()) :: boolean()
+  @spec extendable?(Run.t() | nil, group_id() | nil, author(), Run.attribution() | nil) ::
+          boolean()
   defp extendable?(
          %Run{
            live: true,
@@ -2752,15 +2896,17 @@ defmodule Minga.Buffer.Provenance do
            made_by: nil,
            replaced_by: [],
            kept?: false,
-           origin: nil
+           origin: nil,
+           attribution: attribution
          },
          group,
-         author
+         author,
+         attribution
        )
        when author in [:you, :unattributed, {:minga, :untasked}],
        do: true
 
-  defp extendable?(_run, _group_id, _author), do: false
+  defp extendable?(_run, _group_id, _author, _attribution), do: false
 
   # Splits the live run that holds `offset` so a run starts exactly there.
   @spec split_at(t(), non_neg_integer()) :: t()
@@ -3662,12 +3808,23 @@ defmodule Minga.Buffer.Provenance do
           Run.t() | nil,
           Run.t() | nil,
           non_neg_integer(),
-          Change.id() | nil
+          Change.id() | nil,
+          Run.attribution() | nil
         ) :: t()
-  defp insert_between(prov, _group_id, _author, _preceding, _following, 0, _made_by), do: prov
+  defp insert_between(
+         prov,
+         _group_id,
+         _author,
+         _preceding,
+         _following,
+         0,
+         _made_by,
+         _attribution
+       ),
+       do: prov
 
-  defp insert_between(prov, group_id, author, preceding, following, bytes, made_by) do
-    if made_by == nil and extendable?(preceding, group_id, author) do
+  defp insert_between(prov, group_id, author, preceding, following, bytes, made_by, attribution) do
+    if made_by == nil and extendable?(preceding, group_id, author, attribution) do
       %{prov | tree: RunTree.update(prov.tree, %{preceding | bytes: preceding.bytes + bytes})}
     else
       {id, prov} = allocate(prov, preceding, following)
@@ -3681,7 +3838,8 @@ defmodule Minga.Buffer.Provenance do
         author: author,
         group: group_id,
         made_by: made_by,
-        origin: origin
+        origin: origin,
+        attribution: attribution
       }
 
       groups = if group_id, do: add_run(prov.groups, group_id, id), else: prov.groups
@@ -4028,8 +4186,9 @@ defmodule Minga.Buffer.Provenance do
 
   @spec same_permanent_author?(Run.t() | nil, Run.t() | nil) :: boolean()
   defp same_permanent_author?(%Run{} = left, %Run{} = right) do
-    left.author == right.author and left.kept? == right.kept? and permanent?(left) and
-      permanent?(right) and adjacent_origins?(left, right)
+    left.author == right.author and left.kept? == right.kept? and
+      left.attribution == right.attribution and permanent?(left) and permanent?(right) and
+      adjacent_origins?(left, right)
   end
 
   defp same_permanent_author?(_left, _right), do: false
@@ -4071,9 +4230,8 @@ defmodule Minga.Buffer.Provenance do
   # The pass applies every deletion and insertion and numbers the replacements as `edit/5` would. The covers come
   # after the rebuild, one change at a time in the order they were applied, with each replacement's live text taken
   # as of that change: text a change applied later kills was still live.
-  @spec edit_in_one_pass(t(), group_id() | :untracked, [{non_neg_integer(), binary(), binary()}]) ::
-          t()
-  defp edit_in_one_pass(prov, group, changes) do
+  @spec edit_in_one_pass(t(), group_id() | :untracked, [change()], Run.attribution() | nil) :: t()
+  defp edit_in_one_pass(prov, group, changes, attribution) do
     {group_id, author} = writer(prov, group)
 
     pass = %{
@@ -4089,7 +4247,7 @@ defmodule Minga.Buffer.Provenance do
     pass =
       changes
       |> Enum.reverse()
-      |> Enum.reduce(pass, &apply_in_pass(group_id, author, &1, &2))
+      |> Enum.reduce(pass, &apply_in_pass(group_id, author, &1, &2, attribution))
 
     ranges =
       changes
@@ -4357,9 +4515,10 @@ defmodule Minga.Buffer.Provenance do
           group_id() | nil,
           author(),
           {non_neg_integer(), binary(), binary()},
-          pass()
+          pass(),
+          Run.attribution() | nil
         ) :: pass()
-  defp apply_in_pass(group_id, author, {start, removed, inserted}, pass) do
+  defp apply_in_pass(group_id, author, {start, removed, inserted}, pass, attribution) do
     pass = move_right_of(pass, start + byte_size(removed), removed != "")
     {segment, pass} = take_from(pass, start, [])
     change = if inserted != "" and removed != "" and group_id != nil, do: pass.next_change
@@ -4392,7 +4551,7 @@ defmodule Minga.Buffer.Provenance do
             pass.origin_scope
           )
 
-    inserted_runs = inserted_runs(inserted, author, group_id, made_by, origin)
+    inserted_runs = inserted_runs(inserted, author, group_id, made_by, origin, attribution)
 
     %{
       pass
@@ -4462,11 +4621,18 @@ defmodule Minga.Buffer.Provenance do
     if pulled != [] or minga?(author) or Enum.any?(deleted, &(not kept_gap?(&1))), do: change
   end
 
-  @spec inserted_runs(binary(), author(), group_id() | nil, Change.id() | nil, Run.origin() | nil) ::
+  @spec inserted_runs(
+          binary(),
+          author(),
+          group_id() | nil,
+          Change.id() | nil,
+          Run.origin() | nil,
+          Run.attribution() | nil
+        ) ::
           [Run.t()]
-  defp inserted_runs("", _author, _group_id, _made_by, _origin), do: []
+  defp inserted_runs("", _author, _group_id, _made_by, _origin, _attribution), do: []
 
-  defp inserted_runs(inserted, author, group_id, made_by, origin),
+  defp inserted_runs(inserted, author, group_id, made_by, origin, attribution),
     do: [
       %Run{
         id: [0],
@@ -4474,7 +4640,8 @@ defmodule Minga.Buffer.Provenance do
         author: author,
         group: group_id,
         made_by: made_by,
-        origin: origin
+        origin: origin,
+        attribution: attribution
       }
     ]
 
@@ -4528,7 +4695,7 @@ defmodule Minga.Buffer.Provenance do
       [%Run{live: true, deletions: [], overlaps: []} = previous | rest] = acc
       when run.group == previous.group and run.author == previous.author and
              run.made_by == previous.made_by and run.replaced_by == previous.replaced_by and
-             run.kept? == previous.kept? ->
+             run.kept? == previous.kept? and run.attribution == previous.attribution ->
         if adjacent_origins?(previous, run),
           do: [%{previous | bytes: previous.bytes + run.bytes} | rest],
           else: [run | acc]

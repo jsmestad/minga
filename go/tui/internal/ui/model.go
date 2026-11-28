@@ -873,7 +873,7 @@ func (m Model) View() tea.View {
 	view.AltScreen = true
 	// The terminal reports when its window gets or loses the focus (mode 1004), which the BEAM hears as frontend_foreground.
 	view.ReportFocus = true
-	view.MouseMode = tea.MouseModeCellMotion
+	view.MouseMode = tea.MouseModeAllMotion
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
@@ -892,6 +892,23 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) residentCursor() *tea.Cursor {
+	x, y, shape, ok := m.residentCursorPosition()
+	if !ok {
+		return nil
+	}
+	cursor := tea.NewCursor(x, y)
+	switch shape {
+	case 1:
+		cursor.Shape = tea.CursorBar
+	case 2:
+		cursor.Shape = tea.CursorUnderline
+	default:
+		cursor.Shape = tea.CursorBlock
+	}
+	return cursor
+}
+
+func (m Model) residentCursorPosition() (int, int, byte, bool) {
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
 		semantics := m.residentSemanticsFor(window)
@@ -926,18 +943,9 @@ func (m Model) residentCursor() *tea.Cursor {
 		if y < m.layout.body.Y || y >= m.layout.body.Y+m.layout.body.Height {
 			continue
 		}
-		cursor := tea.NewCursor(x, y)
-		switch window.CursorShape {
-		case 1:
-			cursor.Shape = tea.CursorBar
-		case 2:
-			cursor.Shape = tea.CursorUnderline
-		default:
-			cursor.Shape = tea.CursorBlock
-		}
-		return cursor
+		return x, y, window.CursorShape, true
 	}
-	return nil
+	return 0, 0, 0, false
 }
 
 // protocolErrorView renders the blocking full-screen surface shown when a
@@ -1779,9 +1787,10 @@ func mergeWindowDelta(window, delta protocol.WindowContent) protocol.WindowConte
 		window.Diagnostics = delta.Diagnostics
 		window.DiagnosticsSet = true
 	}
-	if delta.HighlightsSet {
+	// On resident windows the highlight section is a snapshot of the transient source.
+	if delta.HighlightsSet || window.SequentialRows || window.WrappedResidentRows {
 		window.Highlights = delta.Highlights
-		window.HighlightsSet = true
+		window.HighlightsSet = delta.HighlightsSet
 	}
 	if delta.AnnotationsSet {
 		window.Annotations = delta.Annotations

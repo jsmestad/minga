@@ -69,6 +69,7 @@ type lineCacheKey struct {
 	hash     uint32
 	twist    uint8
 	rowIndex int
+	hover    [2]uint16
 }
 
 func newLineCache() *lineCache {
@@ -242,6 +243,9 @@ func (m Model) windowContextFingerprint(window protocol.WindowContent, width int
 		writeUint(uint64(window.Selection.EndRow))
 		writeUint(uint64(window.Selection.EndCol))
 		for _, hl := range window.Highlights {
+			if hl.Kind == documentHighlightHover {
+				break // Tracked separately on the row cache key.
+			}
 			writeUint(uint64(hl.Kind))
 			writeUint(uint64(hl.StartRow))
 			writeUint(uint64(hl.StartCol))

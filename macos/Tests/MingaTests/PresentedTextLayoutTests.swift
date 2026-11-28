@@ -80,6 +80,24 @@ struct PresentedTextLayoutTests {
         #expect(layout.hit(at: point, capturedWindowID: 3) == nil)
     }
 
+    @Test("Source marks use the shaped advances of clipped proportional text")
+    func proportionalSourceRange() throws {
+        let text = "iiiiii foo"
+        let font = try #require(NSFont(name: "Helvetica", size: 14))
+        let attributed = NSAttributedString(string: text, attributes: [.font: font])
+        let row = PresentedTextLayout.Row(
+            rowIndex: 9, rowID: 77, presentationRow: 0,
+            composedUTF16Start: 7, composedUTF16End: 7 + text.utf16.count,
+            line: CTLineCreateWithAttributedString(attributed),
+            origin: CGPoint(x: 12, y: 0), rect: CGRect(x: 0, y: 0, width: 200, height: 20)
+        )
+        let columns = GUIDisplayColumnMap(text)
+        let range = try #require(row.xRange(columns: 14..<17, columnMap: columns, startColumn: 7))
+        #expect(range.lowerBound == 12 + CTLineGetOffsetForStringIndex(row.line, 7, nil))
+        #expect(range.upperBound == 12 + CTLineGetOffsetForStringIndex(row.line, 10, nil))
+        #expect(row.xRange(columns: 2..<5, columnMap: columns, startColumn: 7) == nil)
+    }
+
     @Test("empty rows and captured scroll use the displayed geometry")
     func emptyAndScroll() throws {
         let empty = row(text: "", y: 7)

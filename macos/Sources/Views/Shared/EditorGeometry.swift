@@ -12,8 +12,7 @@ import SwiftUI
 
 /// Editor surface geometry the chrome needs to position overlays.
 ///
-/// Most overlays carry their own BEAM anchors. The Act menu's physical caret
-/// and grid metrics are exceptions captured with the visible Metal presentation.
+/// Most overlays carry their own BEAM anchors. The displayed caret and effective cell size come from the visible Metal presentation.
 public struct EditorGeometry: Equatable, Sendable {
     /// Width of one monospaced cell in points.
     public var cellWidth: CGFloat
@@ -28,6 +27,7 @@ public struct EditorGeometry: Equatable, Sendable {
     /// Gap between the gutter and the text column, in points.
     public var gutterRightGap: CGFloat
     public var actMenuGridCellSize: CGSize?
+    public var presentedCaret: CGRect?
 
     public init(
         cellWidth: CGFloat,
@@ -36,7 +36,8 @@ public struct EditorGeometry: Equatable, Sendable {
         gutterCol: Int,
         gutterLeftMargin: CGFloat,
         gutterRightGap: CGFloat,
-        actMenuGridCellSize: CGSize? = nil
+        actMenuGridCellSize: CGSize? = nil,
+        presentedCaret: CGRect? = nil
     ) {
         self.cellWidth = cellWidth
         self.cellHeight = cellHeight
@@ -45,6 +46,7 @@ public struct EditorGeometry: Equatable, Sendable {
         self.gutterLeftMargin = gutterLeftMargin
         self.gutterRightGap = gutterRightGap
         self.actMenuGridCellSize = actMenuGridCellSize
+        self.presentedCaret = presentedCaret
     }
 
     /// Canvas-preview geometry with plausible metrics for a Metal-free preview.

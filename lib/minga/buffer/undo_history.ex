@@ -811,24 +811,43 @@ defmodule Minga.Buffer.UndoHistory do
 
   Your edit joins your newest group when it has the same source, follows it within the coalescing window, and nothing else changed the document since. A Minga step joins its own group.
   """
-  @spec record_edit(t(), version(), UndoPatch.t() | patches(), edit_source(), at()) :: t()
-  def record_edit(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
+  @spec record_edit(
+          t(),
+          version(),
+          UndoPatch.t() | patches(),
+          edit_source(),
+          at(),
+          integer() | nil
+        ) ::
+          t()
+  def record_edit(history, version, patches, source, at, edited_at \\ nil)
+
+  def record_edit(%__MODULE__{} = history, version, [_ | _] = patches, source, at, edited_at)
       when is_undo_source(source) and is_integer(at) do
     if coalesces?(history, source, at),
       do: coalesce(history, patches, at),
-      else: record_edit_batch(history, version, patches, source, at)
+      else: record_edit_batch(history, version, patches, source, at, edited_at)
   end
 
-  def record_edit(%__MODULE__{} = history, version, patch, source, at),
-    do: record_edit(history, version, [patch], source, at)
+  def record_edit(%__MODULE__{} = history, version, patch, source, at, edited_at),
+    do: record_edit(history, version, [patch], source, at, edited_at)
 
   @doc """
   Records one group containing all patches of a batch, stamped at monotonic time `at`.
 
   The patches are in undo order: the last patch in the list was applied to the document first, and each patch's offsets are in the document it was applied to. Your edit replaces your redo stack; a Minga edit leaves it alone.
   """
-  @spec record_edit_batch(t(), version(), patches(), edit_source(), at()) :: t()
-  def record_edit_batch(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
+  @spec record_edit_batch(t(), version(), patches(), edit_source(), at(), integer() | nil) :: t()
+  def record_edit_batch(history, version, patches, source, at, edited_at \\ nil)
+
+  def record_edit_batch(
+        %__MODULE__{} = history,
+        version,
+        [_ | _] = patches,
+        source,
+        at,
+        _edited_at
+      )
       when source in @your_sources and is_integer(at) do
     # Open against the existing frontier. No compaction can happen in the middle of replacing redo.
     {group, provenance} = Provenance.open_group(history.provenance, :you, nil)
@@ -854,14 +873,45 @@ defmodule Minga.Buffer.UndoHistory do
     })
   end
 
-  def record_edit_batch(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
+  def record_edit_batch(
+        %__MODULE__{} = history,
+        version,
+        [_ | _] = patches,
+        source,
+        at,
+        edited_at
+      )
       when is_undo_source(source) and is_integer(at) do
+    record_minga_batch(history, version, patches, source, {:edit, attribution(source, edited_at)})
+  end
+
+  @doc "Installs a staged merge as one review group, keeping its original writing steps and times."
+  @spec record_publication(
+          t(),
+          version(),
+          patches(),
+          edit_source(),
+          [Minga.Buffer.DraftOrigins.range()],
+          :derived | :exact
+        ) :: t()
+  def record_publication(history, version, [_ | _] = patches, source, origins, alignment)
+      when source == :agent or Author.is_key(source) do
+    record_minga_batch(history, version, patches, source, {:publication, origins, alignment})
+  end
+
+  @typep minga_recording ::
+           {:edit, Provenance.Run.attribution() | nil}
+           | {:publication, [Minga.Buffer.DraftOrigins.range()], :derived | :exact}
+
+  @spec record_minga_batch(t(), version(), patches(), edit_source(), minga_recording()) :: t()
+  defp record_minga_batch(history, version, patches, source, recording) do
     task = task_of(source)
     task_run = extend_task_run(history, task, version)
-    {group, history} = minga_group(history, source)
+    {group, history} = recording_group(history, source, recording)
     {tick, history} = advance(history)
     runs_before = Provenance.run_count(history.provenance)
-    provenance = replay(history, history.provenance, group, patches)
+
+    provenance = replay_minga(history, group, patches, recording)
 
     %{
       history
@@ -875,6 +925,33 @@ defmodule Minga.Buffer.UndoHistory do
     |> compact_inline(max(Provenance.run_count(provenance) - runs_before, 0))
     |> want_compaction()
   end
+
+  @spec recording_group(t(), edit_source(), minga_recording()) :: {Provenance.group_id(), t()}
+  defp recording_group(history, source, {:edit, _origin}), do: minga_group(history, source)
+
+  defp recording_group(history, :agent, {:publication, _ranges, _alignment}),
+    do: open_minga_group(history, {:minga, :untasked}, :agent)
+
+  defp recording_group(history, source, {:publication, _ranges, _alignment}),
+    do: open_minga_group(history, Author.author(source), source)
+
+  @spec replay_minga(t(), Provenance.group_id(), patches(), minga_recording()) :: Provenance.t()
+  defp replay_minga(history, group, patches, {:edit, origin}) do
+    replay(history, history.provenance, group, patches, origin)
+  end
+
+  defp replay_minga(history, group, patches, {:publication, origins, alignment}) do
+    history = if alignment == :exact, do: %{history | recording: :coarse}, else: history
+
+    history
+    |> replay(history.provenance, group, patches)
+    |> Provenance.attribute_publication(group, origins)
+  end
+
+  @spec attribution(edit_source(), integer() | nil) :: Provenance.Run.attribution() | nil
+  defp attribution(_source, nil), do: nil
+  defp attribution(:agent, at), do: {nil, at}
+  defp attribution(key, at) when Author.is_key(key), do: {key, at}
 
   # Backpressure for steps that arrive faster than the owner's slices run.
   # Past twice the budget, recording merges drafts until it has removed as many runs as the step added (or reached
@@ -1085,10 +1162,11 @@ defmodule Minga.Buffer.UndoHistory do
   defp include_saved_id(ids, _id, _ceiling), do: ids
 
   @doc "Records an edit's patch as a group of its own, stamped at monotonic time `at`. Later edits may still coalesce into it."
-  @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
-  def record_edit_force(%__MODULE__{} = history, version, patch, source, at)
+  @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source(), at(), integer() | nil) ::
+          t()
+  def record_edit_force(%__MODULE__{} = history, version, patch, source, at, edited_at \\ nil)
       when is_undo_source(source) and is_integer(at) do
-    record_edit_batch(history, version, [patch], source, at)
+    record_edit_batch(history, version, [patch], source, at, edited_at)
   end
 
   @doc """
@@ -2878,18 +2956,26 @@ defmodule Minga.Buffer.UndoHistory do
 
   # Patches are in undo order, so the document saw them last to first.
   # Each patch is recorded as its smallest changes, from the last to the first so their offsets stay valid.
-  @spec replay(t(), Provenance.t(), Provenance.group_id() | :untracked, [UndoPatch.t()]) ::
+  @spec replay(
+          t(),
+          Provenance.t(),
+          Provenance.group_id() | :untracked,
+          [UndoPatch.t()],
+          Provenance.Run.attribution() | nil
+        ) ::
           Provenance.t()
-  defp replay(%__MODULE__{recording: :coarse}, provenance, group, patches) do
+  defp replay(history, provenance, group, patches, attribution \\ nil)
+
+  defp replay(%__MODULE__{recording: :coarse}, provenance, group, patches, attribution) do
     patches
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
       {start, removed, inserted} = UndoPatch.change(patch)
-      Provenance.edit(acc, group, start, removed, inserted)
+      Provenance.edit(acc, group, start, removed, inserted, attribution)
     end)
   end
 
-  defp replay(%__MODULE__{before: before}, provenance, group, patches) do
+  defp replay(%__MODULE__{before: before}, provenance, group, patches, attribution) do
     writer =
       if group == :untracked, do: :unattributed, else: Provenance.group_author(provenance, group)
 
@@ -2902,7 +2988,7 @@ defmodule Minga.Buffer.UndoHistory do
       changes =
         acc |> anchored_changes(writer, patch) |> slide_deletions(patch, acc, writer, context)
 
-      Provenance.edit_all(acc, group, changes)
+      Provenance.edit_all(acc, group, changes, :auto, attribution)
     end)
   end
 

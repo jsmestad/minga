@@ -16,6 +16,7 @@ defmodule MingaEditor.State.Mouse do
   """
 
   alias MingaEditor.WindowTree
+  alias MingaEditor.Mouse.TextEvent
 
   # Double-click timing window (milliseconds)
   @double_click_ms 400
@@ -54,7 +55,8 @@ defmodule MingaEditor.State.Mouse do
                pos: click_position(),
                count: pos_integer()
              }}
-  @type hover :: :idle | {:active, {integer(), integer()}, reference() | nil}
+  @type hover_sample :: {integer(), integer()} | TextEvent.t()
+  @type hover :: :idle | {:active, hover_sample(), reference() | nil}
 
   @type t :: %__MODULE__{
           drag: drag(),
@@ -288,7 +290,7 @@ defmodule MingaEditor.State.Mouse do
   @spec prepare_hover(t(), integer(), integer(), keyword()) :: {t(), reference() | nil, boolean()}
   def prepare_hover(%__MODULE__{} = mouse, row, col, opts \\ []) do
     {
-      %{mouse | hover: {:active, {row, col}, nil}},
+      %{mouse | hover: {:active, Keyword.get(opts, :text_event, {row, col}), nil}},
       hover_timer(mouse),
       Keyword.get(opts, :backend) != :headless
     }
@@ -301,6 +303,14 @@ defmodule MingaEditor.State.Mouse do
 
   def accept_hover_timer(%__MODULE__{} = mouse, timer) when is_reference(timer), do: mouse
 
+  @doc "Consumes only the active dwell timer, retaining the position for response validation."
+  @spec dwell_elapsed(t(), reference()) :: {:ready, t()} | :stale
+  def dwell_elapsed(%__MODULE__{hover: {:active, pos, timer}} = mouse, timer)
+      when is_reference(timer),
+      do: {:ready, %{mouse | hover: {:active, pos, nil}}}
+
+  def dwell_elapsed(%__MODULE__{}, _timer), do: :stale
+
   @spec clear_hover(t()) :: t()
   def clear_hover(%__MODULE__{} = mouse), do: %{mouse | hover: :idle}
 
@@ -309,8 +319,15 @@ defmodule MingaEditor.State.Mouse do
     do: {%{mouse | hover: :idle}, hover_timer(mouse)}
 
   @spec hover_position(t()) :: {integer(), integer()} | nil
+  def hover_position(%__MODULE__{hover: {:active, %TextEvent{anchor: anchor}, _timer}}),
+    do: anchor
+
   def hover_position(%__MODULE__{hover: {:active, pos, _timer}}), do: pos
   def hover_position(%__MODULE__{hover: :idle}), do: nil
+
+  @spec hover_sample(t()) :: hover_sample() | nil
+  def hover_sample(%__MODULE__{hover: {:active, sample, _timer}}), do: sample
+  def hover_sample(%__MODULE__{hover: :idle}), do: nil
 
   @spec hover_timer(t()) :: reference() | nil
   defp hover_timer(%__MODULE__{hover: {:active, _pos, timer}}), do: timer

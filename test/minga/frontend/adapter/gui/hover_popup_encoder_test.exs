@@ -67,7 +67,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
       assert HoverPopupEncoder.encode_command(hover_model()) ==
                <<@op_gui_hover_popup, 1, 5::16, 10::16, 1, 2::16, 1::16, 0, 2::16, 0, 5::16,
                  "hello", 13, 0x11, 0x22, 0x33, 0x01, 5::16, "world", @op_gui_hover_action,
-                 12::16, 1, 9::16, "open_docs">>
+                 23::16, 1, 42::64, 1, 11::16, "Open source">>
     end
 
     test "encodes syntax fallback foreground" do
@@ -103,7 +103,9 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoderTest do
           ]
         }
       ],
-      open_action_name: "open_docs"
+      offer_id: 42,
+      actions?: true,
+      open_label: "Open source"
     }
   end
 end

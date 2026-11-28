@@ -228,16 +228,11 @@ struct PreparedHoverPopupPayload: Sendable {
     let lines: [Wire.HoverLine]
 }
 
-struct PreparedHoverActionUpdate: Sendable {
-    let visible: Bool
-    let name: String
-}
-
 /// One transaction-local hover presentation update. Popup and action commands
 /// are paired here so protocol arrival order cannot create owner state.
 struct PreparedHoverPopupUpdate: Sendable {
     let payload: PreparedHoverPopupPayload?
-    let action: PreparedHoverActionUpdate?
+    let action: Wire.HoverOffer?
 }
 
 struct PreparedOverlayUpdates: Sendable {
@@ -247,7 +242,7 @@ struct PreparedOverlayUpdates: Sendable {
     init(commands: [RenderCommand]) {
         var ordinaryCommands: [RenderCommand] = []
         var hoverPayload: PreparedHoverPopupPayload?
-        var hoverAction: PreparedHoverActionUpdate?
+        var hoverAction: Wire.HoverOffer?
 
         for command in commands {
             switch command {
@@ -260,8 +255,8 @@ struct PreparedOverlayUpdates: Sendable {
                     scrollOffset: scrollOffset,
                     lines: lines
                 )
-            case .guiHoverAction(let visible, let name):
-                hoverAction = PreparedHoverActionUpdate(visible: visible, name: name)
+            case .guiHoverAction(let offer):
+                hoverAction = offer
             default:
                 ordinaryCommands.append(command)
             }

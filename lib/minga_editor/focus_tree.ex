@@ -672,9 +672,10 @@ defmodule MingaEditor.FocusTree do
   defp terminal_viewport(%RenderInput{intent: %{frame: %{terminal_viewport: viewport}}}),
     do: viewport
 
+  @doc "Projects the active editor cursor's screen cell for anchored surfaces."
   @spec cursor_screen_pos(map(), Layout.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp cursor_screen_pos(%{workspace: %{buffers: %{active: buf}}} = state, layout)
-       when is_pid(buf) do
+  def cursor_screen_pos(%{workspace: %{buffers: %{active: buf}}} = state, layout)
+      when is_pid(buf) do
     {line, col} = Buffer.cursor(buf)
     total_lines = Buffer.line_count(buf)
     line_number_style = Buffer.get_option(buf, :line_numbers)
@@ -688,7 +689,7 @@ defmodule MingaEditor.FocusTree do
     :exit, _ -> {0, 0}
   end
 
-  defp cursor_screen_pos(_state, _layout), do: {0, 0}
+  def cursor_screen_pos(_state, _layout), do: {0, 0}
 
   @spec cursor_origin(EditorState.t() | RenderInput.t(), Layout.t()) ::
           {integer(), integer(), non_neg_integer(), non_neg_integer()}

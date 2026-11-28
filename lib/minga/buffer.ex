@@ -699,6 +699,11 @@ defmodule Minga.Buffer do
   @spec author_at(t(), Document.position()) :: Minga.Buffer.Provenance.author() | nil
   defdelegate author_at(server, position), to: BufferProcess
 
+  @doc "The Minga writer, exact step, time and review state of a live byte at the given buffer version."
+  @spec attribution_at(t(), Document.position(), non_neg_integer()) ::
+          Minga.Buffer.Provenance.attribution() | nil
+  defdelegate attribution_at(server, position, version), to: BufferProcess
+
   @doc "The distinct authors of each line from `first_line`, at most `count` lines."
   @spec line_authors(t(), non_neg_integer(), non_neg_integer()) :: [
           [Minga.Buffer.Provenance.author()]

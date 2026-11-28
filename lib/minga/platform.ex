@@ -21,6 +21,10 @@ defmodule Minga.Platform do
   @spec trash(String.t()) :: trash_result()
   def trash(path), do: impl().trash(path)
 
+  @doc "Hands an already validated external URL to the operating system."
+  @spec open_url(String.t()) :: :ok | {:error, String.t()}
+  def open_url(url) when is_binary(url), do: impl().open_url(url)
+
   @doc """
   Permanently deletes the given path from disk.
 

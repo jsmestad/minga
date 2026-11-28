@@ -45,3 +45,24 @@ func TestDecodeOverlayDeltaConsumesMandatoryAccessibilityTrailer(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeOverlayDeltaConsumesHoverSource(t *testing.T) {
+	payload := []byte{generated.OPGuiWindowOverlayDelta, 0, 1, 0, 0, 0, 2, 4, 0, 3, 0, 4, 1,
+		0xff, 0xff, 0xff, 0xff, 0, 1, 0, 2, 0, 3, 0, 2, 0, 9, 4}
+	batch := append(append([]byte(nil), payload...), generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0, 0)
+	command, err := DecodeCommand(batch)
+	if err != nil || command.Kind != CommandWindowDelta || command.Size != len(payload) {
+		t.Fatalf("hover overlay framing: %+v, error %v", command, err)
+	}
+	got := command.Window.Highlights
+	want := DocumentHighlight{StartRow: 2, StartCol: 3, EndRow: 2, EndCol: 9, Kind: 4}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("hover source = %+v, want %+v", got, want)
+	}
+	if next, err := DecodeCommand(batch[command.Size:]); err != nil || next.Kind != CommandCommitFrame || next.FrameSeq != 7 {
+		t.Fatalf("hover source did not preserve next command: %+v, error %v", next, err)
+	}
+	if _, err := DecodeCommand(payload[:len(payload)-1]); err == nil {
+		t.Fatal("accepted a truncated hover source")
+	}
+}

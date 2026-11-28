@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   alias MingaEditor.LspActions
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Workflow
   alias MingaEditor.State, as: EditorState
@@ -197,10 +198,17 @@ defmodule MingaEditor.Handlers.FileEventHandler do
     state = MingaEditor.Agent.DraftWorkflow.edited(state, buffer)
     state = %{state | lsp: LSPState.clear_semantic_tokens(state.lsp, buffer)}
 
-    if redraw_shown_buffer?(state, event) or FileTreeFreshness.buffer_under_tree?(state, buffer) do
-      {state, [{:render, 16}]}
-    else
-      {state, []}
+    case CodeHoverWorkflow.source_edited(state, buffer, event.version) do
+      {:dismissed, state} ->
+        {state, [{:render, 16}]}
+
+      :unchanged ->
+        if redraw_shown_buffer?(state, event) or
+             FileTreeFreshness.buffer_under_tree?(state, buffer) do
+          {state, [{:render, 16}]}
+        else
+          {state, []}
+        end
     end
   end
 

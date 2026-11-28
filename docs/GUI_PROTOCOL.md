@@ -924,7 +924,7 @@ Diagnostic ranges section:
 Document highlights section:
   highlight_count(2)
   Per highlight: start_row(2) + start_col(2) + end_row(2) + end_col(2) + kind(1)
-  Kind: 1=text, 2=read, 3=write
+  Kind: 1=text, 2=read, 3=write, 4=hover source. Hover source segments follow reference highlights, are single-row and ordered by display row, and remain separate from resident text spans.
 
 Line annotations section:
   annotation_count(2)
@@ -993,14 +993,15 @@ When `gui_window_content` is present for a window, the BEAM does not send draw_t
 
 ### 0xA0 - gui_window_overlay_delta
 
-Cursor-only retained rendering update for one GUI window. The BEAM sends this when the durable rows and non-cursor overlays are unchanged but cursor position, cursor visibility, cursor shape, or cursorline changed. It may also send the same minimal payload as a per-frame liveness marker for an unchanged retained window, so the frontend does not prune valid retained content during clear-backed batches.
+Retained update for a window's cursor, cursorline, and transient source highlight. The BEAM can send this without replacing durable rows. It may also send the same minimal payload as a liveness marker for an unchanged window, so the frontend does not prune retained content during clear-backed batches.
 
 ```
-opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + optional_cursorline + accessibility_cursor_utf16(4)
+opcode(1) + window_id(2) + content_epoch(4) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + optional_cursorline + accessibility_cursor_utf16(4) + optional_hover_source
 
 Flags:
   bit 0: cursor_visible
   bit 1: cursorline_present
+  bit 2: hover_source_present
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline
 
@@ -1012,7 +1013,7 @@ accessibility_cursor_utf16 is the BEAM-resolved row-local UTF-16 cursor offset. 
 
 The frontend applies the delta only when it already has `gui_window_content` for the same `window_id` and `content_epoch`. If the epoch is missing or stale, it ignores the delta and waits for the next full 0x80 refresh.
 
-The accessibility cursor trailer is mandatory even for terminal consumers. A0 is exactly 17 bytes without cursorline and 22 bytes with cursorline; a batch decoder must advance past all four trailer bytes before reading the next command. `0xFFFFFFFF` means the accessible cursor is absent, not that the trailer is omitted.
+The accessibility cursor trailer is mandatory even for terminal consumers. Without hover source, A0 is exactly 17 bytes without cursorline and 22 bytes with cursorline. If bit 2 is set, the trailer is followed by the `0x06` document-highlight section payload (without its section header), containing the resident window's hover ranges. Each range is one committed viewport row. An absent payload clears the resident hover source. On windowed content the `0x06` section of the row update carries the source alongside any ordinary document highlights.
 
 ### 0xA1 - gui_window_viewport_delta and 0xA2 - gui_window_rows_delta
 
@@ -1485,7 +1486,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x3B | git_commit_amend | panel_id(8) + msg_len(2) + msg(msg_len) | Scoped amend alias. Frontends use `git_commit` with `amend = 1`. |
 | 0x3C | git_pull_and_retry | toast_id(8) | Pull, then retry the push for the repository captured by that toast |
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
-| 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
+| 0x3F | hover_open_action | offer_id(8) + action_id(2) | Activate an action from the presented hover offer |
 | 0x42 | git_open_diff | panel_id(8) + path_len(2) + path(path_len) + section(1) | Open a diff for the displayed file and section |
 
 `semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, `5 = timeline`, and `6 = review`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item`, `2 = activate action`, and `3 = dismiss`. Dismissal sends the visible picker's activation generation and an empty item ID. A stale dismissal cannot close a replacement picker. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry; intent `2` reviews the exact offered full file path. Review intents are `1 = back to chat` and `2 = review latest`. Review uses the opaque item ID and generation from status section 0x10, bound to the shell registration, workspace/session, tab, pane incarnation and selected source. Refresh is offered only while stale.
@@ -1708,13 +1709,15 @@ Fields:
 
 ### 0x96 — gui_hover_action
 
-Optional action metadata for the currently visible hover popup. The hover content stays in `gui_hover_popup` (0x81); this sidecar tells native frontends whether to render an action button without parsing display text.
+Optional action metadata for the visible hover. The content stays in `gui_hover_popup` (0x81). This sidecar carries the exact offer identity and tells either frontend what to show in its footer.
 
 ```
-opcode(1) + payload_len(2) + visible(1) + action_len(2) + action(action_len)
+opcode(1) + payload_len(2) + valid(1) + offer_id(8) + actions(1) + open_label(string16)
 ```
 
-When `visible` is `0`, the payload is only `visible(1)` and the frontend clears any current hover action. When `visible` is `1`, `action` is stable action metadata that tells the frontend to render an Open control. The frontend sends the generic `hover_open_action` (0x3F), and the BEAM executes the current popup's stored action.
+When `valid` is `0`, the payload is only `valid(1)` and the frontend clears the footer. When `valid` is `1`, `actions` indicates whether the offer has a `g. actions` footer. An empty `open_label` means it has no direct Open action. A click sends the drawn offer ID and action ID: `0` for Open, `1` for the Act menu, or the ID carried by a documentation link. The BEAM refuses an activation for a different offer and resolves link IDs to validated URLs. Frontends never receive those URLs.
+
+Hover segment styles `14` (link) and `15` (selected link) insert `link_action_id(2)` before the segment's text. Link IDs start at `2`.
 
 ### 0xAA: gui_focus_owner
 

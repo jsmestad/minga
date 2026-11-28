@@ -14,6 +14,8 @@ defmodule Minga.Buffer.Provenance.Run do
 
   `origin` identifies an insertion or replacement, its relative source offset, and the full byte length of that side of the operation. Kept deletion anchors use it for the retained preimage identity. Origins survive run splits and locator renumbering independently of their undo group.
 
+  `attribution` records the writing step and mutation time independently of review and undo groups, which can merge or retire. A step is absent for an untasked edit.
+
   `made_by` names the replacement (`Minga.Buffer.Provenance.Change`) that inserted the run, if it has a record, and `replaced_by` every replacement that marked it dead, newest first.
 
   A live run's text is in the document, so the run keeps only its length. A dead run (a tombstone) is not in the document, so it keeps its own text; restoring it puts that text back exactly. A tombstone takes no bytes in the document.
@@ -43,7 +45,8 @@ defmodule Minga.Buffer.Provenance.Run do
     direct_gaps: [],
     gap_origins: [],
     kept?: false,
-    origin: nil
+    origin: nil,
+    attribution: nil
   ]
 
   @typedoc """
@@ -62,6 +65,7 @@ defmodule Minga.Buffer.Provenance.Run do
   @type group_id :: pos_integer()
 
   @type origin :: {:insert | :replace | :delete, pos_integer(), non_neg_integer(), pos_integer()}
+  @type attribution :: {Minga.Buffer.Author.key() | nil, integer()}
 
   @type t :: %__MODULE__{
           id: Locator.t(),
@@ -79,7 +83,8 @@ defmodule Minga.Buffer.Provenance.Run do
           direct_gaps: [group_id()],
           gap_origins: [{group_id(), origin()}],
           kept?: boolean(),
-          origin: origin() | nil
+          origin: origin() | nil,
+          attribution: attribution() | nil
         }
 
   @doc "Returns how many bytes the run takes in the document: its length when live, zero when it is a tombstone."

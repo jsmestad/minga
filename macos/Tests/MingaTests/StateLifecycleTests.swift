@@ -69,20 +69,20 @@ struct HoverPopupStateLifecycleTests {
             focused: false,
             scrollOffset: 0,
             rawLines: [line("composed")],
-            openAction: (visible: true, name: "Open docs")
+            openAction: .init(id: 72, showsActions: true, openLabel: "Open docs")
         )
 
-        #expect(state.content?.openActionName == "Open docs")
+        #expect(state.content?.offer == .init(id: 72, showsActions: true, openLabel: "Open docs"))
         #expect(state.content?.lines.first?.segments.first?.text == "composed")
     }
 
     @Test("action without current content is discarded")
     @MainActor func unmatchedAction() {
         let state = HoverPopupState()
-        state.updateOpenAction(visible: true, name: "Stale action")
+        state.updateOpenAction(.init(id: 82, showsActions: true, openLabel: "Stale action"))
         state.update(visible: true, anchorRow: 4, anchorCol: 5, focused: true, scrollOffset: 0, rawLines: [line("later payload")])
 
-        #expect(state.content?.openActionName == nil)
+        #expect(state.content?.offer == nil)
         #expect(state.content?.lines.first?.segments.first?.text == "later payload")
     }
 
@@ -90,19 +90,19 @@ struct HoverPopupStateLifecycleTests {
     @MainActor func replacementAndHide() {
         let state = HoverPopupState()
         state.update(visible: true, anchorRow: 1, anchorCol: 2, focused: false, scrollOffset: 0, rawLines: [line("old")])
-        state.updateOpenAction(visible: true, name: "Open")
+        state.updateOpenAction(.init(id: 93, showsActions: false, openLabel: "Open"))
         state.update(visible: true, anchorRow: 6, anchorCol: 7, focused: true, scrollOffset: 1, rawLines: [line("skip"), line("replacement")])
 
         #expect(state.content?.anchorRow == 6)
         #expect(state.content?.visibleLines.first?.segments.first?.text == "replacement")
-        #expect(state.content?.openActionName == "Open")
+        #expect(state.content?.offer?.id == 93)
 
         state.update(visible: false, anchorRow: 0, anchorCol: 0, focused: false, scrollOffset: 0, rawLines: [])
         #expect(state.content == nil)
 
         state.update(visible: true, anchorRow: 8, anchorCol: 9, focused: false, scrollOffset: 0, rawLines: [line("fresh")])
         #expect(state.content?.lines.first?.segments.first?.text == "fresh")
-        #expect(state.content?.openActionName == nil)
+        #expect(state.content?.offer == nil)
     }
 }
 

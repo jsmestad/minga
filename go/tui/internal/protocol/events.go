@@ -236,7 +236,9 @@ func EncodeMouseEvent(row, col int16, button, mods, eventType, clickCount byte) 
 	}
 }
 
-func EncodeEditorTextEvent(windowID uint16, presentationID uint64, rowIndex uint32, rowID uint64, utf16Offset uint32, button, mods, eventType, clickCount byte, scrollX, scrollY int8) []byte {
+const NoTerminalCaretRow uint16 = 0xffff
+
+func EncodeEditorTextEvent(windowID uint16, presentationID uint64, rowIndex uint32, rowID uint64, utf16Offset uint32, button, mods, eventType, clickCount byte, scrollX, scrollY int8, anchorRow, anchorCol, terminalCaretRow uint16) []byte {
 	return []byte{
 		generated.OPEditorTextEvent,
 		byte(windowID >> 8), byte(windowID),
@@ -247,6 +249,8 @@ func EncodeEditorTextEvent(windowID uint16, presentationID uint64, rowIndex uint
 		byte(rowID >> 24), byte(rowID >> 16), byte(rowID >> 8), byte(rowID),
 		byte(utf16Offset >> 24), byte(utf16Offset >> 16), byte(utf16Offset >> 8), byte(utf16Offset),
 		button, mods, eventType, clickCount, byte(scrollX), byte(scrollY),
+		byte(anchorRow >> 8), byte(anchorRow), byte(anchorCol >> 8), byte(anchorCol),
+		byte(terminalCaretRow >> 8), byte(terminalCaretRow),
 	}
 }
 
@@ -594,11 +598,13 @@ func EncodeGUISemanticItemActivate(surface, intent byte, generation uint32, item
 	return append(out, itemID...)
 }
 
-// EncodeGUIHoverOpenAction encodes a hover_open_action. Wire format:
-// <gui_action, 0x3F> with an empty payload, matching the GUI accept gesture
-// (HoverPopupOverlay.swift:123).
-func EncodeGUIHoverOpenAction() []byte {
-	return []byte{generated.OPGuiAction, generated.GUIActionHoverOpenAction}
+// EncodeGUIHoverOpenAction names the exact hover offer and action the frontend drew.
+func EncodeGUIHoverOpenAction(offer uint64, action uint16) []byte {
+	out := make([]byte, 12)
+	out[0], out[1] = generated.OPGuiAction, generated.GUIActionHoverOpenAction
+	binary.BigEndian.PutUint64(out[2:10], offer)
+	binary.BigEndian.PutUint16(out[10:12], action)
+	return out
 }
 
 // EncodeGUISidebarAction encodes a sidebar_action. Wire format:

@@ -48,7 +48,7 @@ func (m Model) handleEditorTextMouse(msg tea.MouseMsg) (Model, []byte, bool) {
 	if _, release := msg.(tea.MouseReleaseMsg); release {
 		m.textDrag = nil
 		if !ok && capturedWindowID != 0 {
-			return m, protocol.EncodeEditorTextEvent(capturedWindowID, 0, 0, 0, 0, button, keyModToProtocol(mouse.Mod), eventType, 1, 0, 0), true
+			return m, protocol.EncodeEditorTextEvent(capturedWindowID, 0, 0, 0, 0, button, keyModToProtocol(mouse.Mod), eventType, 1, 0, 0, 0, 0, protocol.NoTerminalCaretRow), true
 		}
 	}
 	if !ok {
@@ -62,7 +62,29 @@ func (m Model) handleEditorTextMouse(msg tea.MouseMsg) (Model, []byte, bool) {
 	if _, press := msg.(tea.MouseClickMsg); press && mouse.Button == tea.MouseLeft {
 		m.textDrag = &editorTextDrag{windowID: target.windowID}
 	}
-	return m, protocol.EncodeEditorTextEvent(target.windowID, target.presentationID, target.rowIndex, target.rowID, target.utf16Offset, button, keyModToProtocol(mouse.Mod), eventType, 1, target.scrollX, target.scrollY), true
+	var anchorRow, anchorCol uint16
+	caretRow := protocol.NoTerminalCaretRow
+	if eventType == protocol.MouseMotion {
+		col, row := m.layout.grid.Translate(mouse.X, mouse.Y)
+		anchorRow, anchorCol = uint16(max(row, 0)), uint16(max(col, 0))
+		if target.windowID != protocol.AgentPromptWindowID {
+			caretRow = m.presentedEditorCaretRow()
+		}
+	}
+	return m, protocol.EncodeEditorTextEvent(target.windowID, target.presentationID, target.rowIndex, target.rowID, target.utf16Offset, button, keyModToProtocol(mouse.Mod), eventType, 1, target.scrollX, target.scrollY, anchorRow, anchorCol, caretRow), true
+}
+
+func (m Model) presentedEditorCaretRow() uint16 {
+	if _, y, _, ok := m.residentCursorPosition(); ok {
+		return uint16(y - m.layout.grid.Y)
+	}
+	for _, id := range m.windowOrder {
+		window := m.windows[id]
+		if window.CursorVisible && m.residentSemanticsFor(window) == nil {
+			return window.Geometry.TextRect.Row + window.CursorRow
+		}
+	}
+	return protocol.NoTerminalCaretRow
 }
 
 func editorTextMouseParts(msg tea.MouseMsg) (button byte, eventType byte, supported bool) {

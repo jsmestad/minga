@@ -578,7 +578,22 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
           end)
         ]
       ),
-      Entry.pending("minga.hover.attribution", 4053, "hover on a line Minga wrote"),
+      Entry.built("minga.hover.attribution",
+        start: review_start(),
+        reach: "g g ] h K",
+        recognize: &attribution_hover?/1,
+        checks: [
+          Check.new(
+            "hover names the writer, exact task, review state and recorded age",
+            fn model ->
+              assert %{actions?: true, open_label: "↩ conversation"} = model.ui.hover_popup
+              assert ["Minga · Clarify the plan limit message", status] = hover_text(model)
+              assert status =~ "Unreviewed · just now"
+              model
+            end
+          )
+        ]
+      ),
       Entry.built("minga.act_menu",
         start: act_menu_start(1),
         reach: "g g ] h g .",
@@ -658,6 +673,18 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       review_task: [open?: open?] ++ @review_task
     ]
   end
+
+  @spec attribution_hover?(Model.t()) :: boolean()
+  defp attribution_hover?(model) do
+    match?(["Minga · " <> _, "Unreviewed · " <> _], hover_text(model))
+  end
+
+  @spec hover_text(Model.t()) :: [String.t()]
+  defp hover_text(%Model{ui: %{hover_popup: %{visible?: true, content_lines: lines}}}) do
+    Enum.map(lines, fn line -> Enum.map_join(line.segments, & &1.text) end)
+  end
+
+  defp hover_text(%Model{}), do: []
 
   @spec inline_review_diff?(Model.t()) :: boolean()
   defp inline_review_diff?(%Model{

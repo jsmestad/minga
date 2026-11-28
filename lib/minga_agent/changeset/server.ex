@@ -13,10 +13,13 @@ defmodule MingaAgent.Changeset.Server do
   use GenServer, restart: :temporary
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.DraftOrigins
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Persistence.LocalWriter
   alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
+  alias Minga.Core.Diff
   alias Minga.Session.StagedDraft
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
@@ -34,8 +37,9 @@ defmodule MingaAgent.Changeset.Server do
           project_root: String.t(),
           overlay: Overlay.t(),
           changes: %{String.t() => pending_change()},
+          origins: %{String.t() => DraftOrigins.t()},
           originals: %{String.t() => binary() | nil},
-          history: %{String.t() => [change()]},
+          history: %{String.t() => [{change(), DraftOrigins.t()}]},
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer(),
           revision: non_neg_integer(),
@@ -64,6 +68,7 @@ defmodule MingaAgent.Changeset.Server do
           project_root: project_root,
           overlay: overlay,
           changes: %{},
+          origins: %{},
           originals: %{},
           history: %{},
           budget: budget,
@@ -139,13 +144,13 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call(
-        {:conditional_mutate, relative_path, expected, operation, identity},
+        {:conditional_mutate, relative_path, expected, operation, identity, edit_source},
         _from,
         state
       ) do
     with {:ok, path} <- normalize_path(state, relative_path),
          source = mutation_source(state, path),
-         {:ok, prepared} <-
+         {:ok, prepared, geometry} <-
            FileMutation.prepare(
              source,
              mutation_generation(state, identity),
@@ -154,11 +159,14 @@ defmodule MingaAgent.Changeset.Server do
              operation
            ),
          :ok <- Overlay.commit_file(state.overlay, path, prepared) do
+      origins =
+        mutation_origins(current_origins(state, path), source, prepared, geometry, edit_source)
+
       state =
         state
         |> remember_original(path, source)
         |> push_history(path)
-        |> install_mutation(path, prepared)
+        |> install_mutation(path, prepared, origins)
         |> bump_revision()
 
       {:reply, {:ok, FileMutation.Receipt.committed(source, prepared)}, state}
@@ -179,14 +187,14 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  def handle_call({:stage_fork_content, relative_path, content}, _from, state) do
+  def handle_call({:stage_fork_content, relative_path, {content, origins}}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
          true <- Map.has_key?(state.originals, path),
          :ok <- Overlay.commit_file(state.overlay, path, content) do
       state =
         state
         |> push_history(path)
-        |> install_mutation(path, content)
+        |> install_mutation(path, content, DraftOrigins.from_sorted(origins))
         |> bump_revision()
 
       {:reply, :ok, state}
@@ -300,7 +308,12 @@ defmodule MingaAgent.Changeset.Server do
       state.changes
       |> Enum.sort_by(fn {path, _change} -> path end)
       |> Enum.map(fn {path, change} ->
-        StagedDraft.new(path, Map.get(state.originals, path), change)
+        StagedDraft.new(
+          path,
+          Map.get(state.originals, path),
+          change,
+          DraftOrigins.ranges(current_origins(state, path))
+        )
       end)
 
     {:reply, {drafts, Map.take(state.originals, baseline_paths)}, state}
@@ -311,7 +324,7 @@ defmodule MingaAgent.Changeset.Server do
          :ok <- Overlay.commit_file(state.overlay, path, draft.content) do
       state =
         %{state | originals: Map.put(state.originals, path, draft.base)}
-        |> install_mutation(path, draft.content)
+        |> install_mutation(path, draft.content, DraftOrigins.from_sorted(draft.origins))
         |> bump_revision()
 
       {:reply, :ok, state}
@@ -691,15 +704,15 @@ defmodule MingaAgent.Changeset.Server do
   defp mutation_generation(_state, {:project_view, _}), do: nil
   defp mutation_generation(state, _identity), do: state.revision
 
-  @spec stage_fork_resolution(state(), String.t(), String.t(), String.t()) ::
+  @spec stage_fork_resolution(state(), String.t(), binary(), {binary(), [DraftOrigins.range()]}) ::
           {:reply, :ok | {:error, term()}, state()}
-  defp stage_fork_resolution(state, path, content, content) do
+  defp stage_fork_resolution(state, path, content, {content, _origins}) do
     {:reply, reconcile_fork_overlay(state, path), state}
   end
 
-  defp stage_fork_resolution(state, path, ancestor, selected) do
+  defp stage_fork_resolution(state, path, ancestor, {selected, origins}) do
     with {:ok, baseline} <- fork_staging_baseline(state, path),
-         {:ok, content} <- resolve_fork_staging(ancestor, selected, baseline) do
+         {:ok, content, placed} <- resolve_fork_staging(ancestor, selected, baseline) do
       case content do
         ^baseline ->
           {:reply, reconcile_fork_overlay(state, path), state}
@@ -707,8 +720,17 @@ defmodule MingaAgent.Changeset.Server do
         content ->
           case Overlay.commit_file(state.overlay, path, content) do
             :ok ->
+              origins =
+                origins
+                |> DraftOrigins.from_sorted()
+                |> DraftOrigins.project(Document.new(selected), content, placed)
+                |> DraftOrigins.from_sorted()
+
               state =
-                state |> push_history(path) |> install_mutation(path, content) |> bump_revision()
+                state
+                |> push_history(path)
+                |> install_mutation(path, content, origins)
+                |> bump_revision()
 
               {:reply, :ok, state}
 
@@ -740,32 +762,46 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec resolve_fork_staging(binary(), binary(), binary() | :missing) ::
-          {:ok, binary() | :missing} | {:conflict, term()}
+          {:ok, binary() | :missing, [Diff.placement()]} | {:conflict, term()}
   defp resolve_fork_staging(ancestor, selected, :missing) do
     # A final newline must not attribute an unchanged human line to the fork.
-    additions =
-      for {:ins, lines} <- List.myers_difference(staging_lines(ancestor), staging_lines(selected)),
-          line <- lines,
-          do: line
+    {_source, _result, additions, placed} =
+      Enum.reduce(
+        List.myers_difference(staging_lines(ancestor), staging_lines(selected)),
+        {0, 0, [], []},
+        fn
+          {:eq, lines}, {source, result, adds, placed} ->
+            {source + length(lines), result, adds, placed}
+
+          {:del, _lines}, acc ->
+            acc
+
+          {:ins, lines}, {source, result, adds, placed} ->
+            count = length(lines)
+
+            {source + count, result + count, Enum.reverse(lines, adds),
+             [{source, result, count} | placed]}
+        end
+      )
 
     case additions do
       [] ->
-        {:ok, :missing}
+        {:ok, :missing, []}
 
       lines ->
         ending = if String.ends_with?(selected, "\n"), do: "\n", else: ""
-        {:ok, Enum.join(lines, "\n") <> ending}
+        {:ok, Enum.join(Enum.reverse(lines), "\n") <> ending, Enum.reverse(placed)}
     end
   end
 
   defp resolve_fork_staging(ancestor, selected, baseline) do
-    with {:ok, lines} <-
-           Minga.Core.Diff.merge3(
+    with {:ok, {{lines, placed}, _parent_alignment}} <-
+           Diff.merge3_projected(
              String.split(ancestor, "\n"),
              String.split(selected, "\n"),
              String.split(baseline, "\n")
            ) do
-      {:ok, Enum.join(lines, "\n")}
+      {:ok, Enum.join(lines, "\n"), placed}
     end
   end
 
@@ -803,23 +839,60 @@ defmodule MingaAgent.Changeset.Server do
     %{state | originals: Map.put_new(state.originals, path, nil)}
   end
 
-  @spec install_mutation(state(), String.t(), change()) :: state()
-  defp install_mutation(state, path, :unmodified) do
-    %{state | changes: Map.delete(state.changes, path)}
+  @spec mutation_origins(
+          DraftOrigins.t(),
+          FileMutation.source(),
+          pending_change(),
+          FileMutation.geometry(),
+          EditSource.undo_source() | nil
+        ) :: DraftOrigins.t()
+  defp mutation_origins(_ranges, _source, :deleted, _geometry, _edit_source),
+    do: DraftOrigins.empty()
+
+  defp mutation_origins(ranges, source, content, geometry, edit_source) do
+    origin = DraftOrigins.at(edit_source, System.system_time(:millisecond))
+
+    case geometry do
+      :whole ->
+        old =
+          case source do
+            {:ok, bytes} -> bytes
+            {:error, :enoent} -> ""
+          end
+
+        DraftOrigins.edited(ranges, Document.new(old), Document.new(content), :whole, origin)
+
+      exact ->
+        DraftOrigins.edited(ranges, nil, nil, exact, origin)
+    end
   end
 
-  defp install_mutation(state, path, change) do
-    %{state | changes: Map.put(state.changes, path, change)}
+  @spec current_origins(state(), String.t()) :: DraftOrigins.t()
+  defp current_origins(state, path), do: Map.get(state.origins, path, DraftOrigins.empty())
+
+  @spec install_mutation(state(), String.t(), change(), DraftOrigins.t()) :: state()
+  defp install_mutation(state, path, change, origins \\ DraftOrigins.empty())
+
+  defp install_mutation(state, path, :unmodified, _origins) do
+    %{state | changes: Map.delete(state.changes, path), origins: Map.delete(state.origins, path)}
+  end
+
+  defp install_mutation(state, path, change, origins) do
+    %{
+      state
+      | changes: Map.put(state.changes, path, change),
+        origins: Map.put(state.origins, path, origins)
+    }
   end
 
   @spec undo_path(String.t(), state()) :: {:reply, :ok | {:error, term()}, state()}
   defp undo_path(path, state) do
     case Map.get(state.history, path) do
-      [previous | rest] ->
+      [{previous, origins} | rest] ->
         case restore_undo_overlay(state, path, previous) do
           :ok ->
             state = put_in(state.history[path], rest)
-            state = install_mutation(state, path, previous)
+            state = install_mutation(state, path, previous, origins)
             {:reply, :ok, bump_revision(state)}
 
           {:error, reason} ->
@@ -945,10 +1018,10 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec push_history(state(), String.t()) :: state()
   defp push_history(state, path) do
-    current = current_change(state, path)
+    previous = {current_change(state, path), current_origins(state, path)}
 
     history = Map.get(state.history, path, [])
-    put_in(state.history[path], [current | history])
+    put_in(state.history[path], [previous | history])
   end
 
   @spec clear_deleted_marker(state(), String.t(), change()) :: :ok | {:error, term()}
@@ -1249,6 +1322,7 @@ defmodule MingaAgent.Changeset.Server do
     %{
       state
       | changes: Map.delete(state.changes, path),
+        origins: Map.delete(state.origins, path),
         originals: Map.delete(state.originals, path),
         history: Map.delete(state.history, path)
     }

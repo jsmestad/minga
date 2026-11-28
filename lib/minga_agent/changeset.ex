@@ -80,13 +80,14 @@ defmodule MingaAgent.Changeset do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation(),
-          Minga.Buffer.FileMutation.identity()
+          Minga.Buffer.FileMutation.identity(),
+          Minga.Buffer.EditSource.undo_source() | nil
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
-  def conditional_mutate(cs, relative_path, expected, operation, identity)
+  def conditional_mutate(cs, relative_path, expected, operation, identity, source \\ nil)
       when is_binary(relative_path) do
     GenServer.call(
       cs,
-      {:conditional_mutate, relative_path, expected, operation, identity},
+      {:conditional_mutate, relative_path, expected, operation, identity, source},
       :infinity
     )
   end
@@ -98,14 +99,24 @@ defmodule MingaAgent.Changeset do
   end
 
   @doc "Stages a sealed fork's raw draft against its retained disk baseline."
-  @spec stage_fork_content(changeset(), String.t(), binary()) :: :ok | {:error, term()}
-  def stage_fork_content(cs, relative_path, content)
+  @spec stage_fork_content(
+          changeset(),
+          String.t(),
+          {binary(), [Minga.Buffer.DraftOrigins.range()]}
+        ) ::
+          :ok | {:error, term()}
+  def stage_fork_content(cs, relative_path, {content, _origins} = draft)
       when is_binary(relative_path) and is_binary(content) do
-    GenServer.call(cs, {:stage_fork_content, relative_path, content}, :infinity)
+    GenServer.call(cs, {:stage_fork_content, relative_path, draft}, :infinity)
   end
 
   @doc "Stages only the accepted fork edits against the current changeset baseline."
-  @spec stage_fork_resolution(changeset(), String.t(), String.t(), String.t()) ::
+  @spec stage_fork_resolution(
+          changeset(),
+          String.t(),
+          String.t(),
+          {binary(), [Minga.Buffer.DraftOrigins.range()]}
+        ) ::
           :ok | {:error, term()}
   def stage_fork_resolution(cs, relative_path, ancestor, selected) do
     GenServer.call(cs, {:stage_fork_resolution, relative_path, ancestor, selected}, :infinity)

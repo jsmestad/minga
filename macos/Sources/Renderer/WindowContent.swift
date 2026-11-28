@@ -281,11 +281,12 @@ public struct GUIDiagnosticUnderline: Sendable, Equatable {
 
 // MARK: - Document highlight
 
-/// LSP document highlight kind (matches LSP spec values).
+/// LSP reference values and the editor's transient hover source.
 public enum GUIDocumentHighlightKind: UInt8, Sendable {
     case text = 1
     case read = 2
     case write = 3
+    case hover = 4
 }
 
 /// A document highlight range in display coordinates.
@@ -489,8 +490,9 @@ public struct GUIWindowOverlayDelta: Sendable, Equatable {
     public let cursorShape: CursorShape
     public let cursorline: GUICursorline?
     public let accessibilityCursorUTF16: UInt32?
+    public let documentHighlights: [GUIDocumentHighlight]
 
-    public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape, cursorline: GUICursorline?, accessibilityCursorUTF16: UInt32? = nil) {
+    public init(windowId: UInt16, contentEpoch: UInt32, cursorVisible: Bool, cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape, cursorline: GUICursorline?, accessibilityCursorUTF16: UInt32? = nil, documentHighlights: [GUIDocumentHighlight] = []) {
         self.windowId = windowId
         self.contentEpoch = contentEpoch
         self.cursorVisible = cursorVisible
@@ -499,6 +501,7 @@ public struct GUIWindowOverlayDelta: Sendable, Equatable {
         self.cursorShape = cursorShape
         self.cursorline = cursorline
         self.accessibilityCursorUTF16 = accessibilityCursorUTF16
+        self.documentHighlights = documentHighlights
     }
 }
 
@@ -871,6 +874,19 @@ public final class GUIWindowContent: Sendable {
             return nil
         }
 
+        let highlights = rowStore.mode.isResident ? delta.documentHighlights : documentHighlights
+        let difference = highlights.count - documentHighlights.count
+        let nextWeight: FrameResourceWeight
+        if difference == 0 {
+            nextWeight = resourceWeight
+        } else {
+            let change = FrameResourceWeight(arrayEntries: abs(difference), overlays: abs(difference))
+            guard let weight = try? (difference > 0 ? resourceWeight.adding(change) : resourceWeight.subtracting(change)) else {
+                return nil
+            }
+            nextWeight = weight
+        }
+
         return GUIWindowContent(
             windowId: windowId,
             fullRefresh: false,
@@ -885,7 +901,7 @@ public final class GUIWindowContent: Sendable {
             selection: selection,
             searchMatches: searchMatches,
             diagnosticUnderlines: diagnosticUnderlines,
-            documentHighlights: documentHighlights,
+            documentHighlights: highlights,
             lineAnnotations: lineAnnotations,
             paneGeometry: paneGeometry,
             cursorline: delta.cursorline,
@@ -896,7 +912,7 @@ public final class GUIWindowContent: Sendable {
                 GUIAccessibilityCursor(row: delta.cursorRow, utf16: $0)
             },
             accessibilitySelectionRanges: accessibilitySelectionRanges,
-            resourceWeight: resourceWeight
+            resourceWeight: nextWeight
         )
     }
 

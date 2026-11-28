@@ -12,9 +12,18 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.CompletionHandling
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.CompletionTrigger
+  alias MingaEditor.Handlers.FileEventHandler
   alias MingaEditor.Handlers.LspEventHandler
+  alias MingaEditor.HoverPopup
+  alias MingaEditor.Input.Hover
+  alias MingaEditor.Mouse.TextEvent
+  alias MingaEditor.Renderer.{TextInteractionIndex, TextPresentation}
+  alias MingaEditor.RenderModel.Window.{SourceOffsetMap, VisualRow}
+  alias Minga.RenderModel.Window.Row
+  alias MingaEditor.State.Render
   alias MingaEditor.Shell.Registry, as: ShellRegistry
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
@@ -25,6 +34,7 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   alias MingaEditor.SignatureHelp
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.State.Mouse
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.Windows
@@ -110,7 +120,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
 
       cursor_kinds = [
         {&MingaEditor.LspActions.goto_definition/1, "textDocument/definition", :definition},
-        {&MingaEditor.LspActions.hover/1, "textDocument/hover", :hover},
         {&MingaEditor.LspActions.prepare_rename/1, "textDocument/prepareRename", :prepare_rename},
         {&MingaEditor.LspActions.selection_range/1, "textDocument/selectionRange",
          :selection_range},
@@ -853,22 +862,422 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert LSPState.fetch_pending_request(result.lsp, ref) == :error
     end
 
-    test "identity-keyed hover_mouse response returns render_now without crashing" do
-      state = base_state()
+    test "second K focuses while the same request is still pending" do
+      state = file_buffer_state("hello\n")
       buffer = state.workspace.buffers.active
-      ref = make_ref()
+      client = start_fake_lsp_client()
+      register_lsp_client(buffer, client)
+      cursor = Minga.Buffer.cursor(buffer)
 
-      state =
-        track_pending_request(
-          state,
-          ref,
-          {:hover_mouse, 12, 34, buffer, 0, 0, Minga.Buffer.version(buffer)}
+      assert {:handled, focused} =
+               state |> CodeHoverWorkflow.open_cursor() |> Hover.handle_key(?K, 0)
+
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+      refute_receive {:lsp_request, "textDocument/hover", _, _, _}
+
+      response = {:ok, %{"contents" => %{"kind" => "markdown", "value" => "**Current docs**"}}}
+      {updated, [:render_now]} = LspEventHandler.handle(focused, {:lsp_response, ref, response})
+
+      assert %HoverPopup{focused: true} = popup = Runtime.state(updated.shell_runtime).hover_popup
+      assert HoverPopup.copy_text(popup) == "Current docs"
+      assert Minga.Buffer.cursor(buffer) == cursor
+    end
+
+    test "a diagnostic stays above the signature and first paragraph; focus adds the full docs" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      uri = Minga.LSP.SyncServer.path_to_uri(Minga.Buffer.file_path(buffer))
+
+      Minga.Diagnostics.publish(:hover_test, uri, [
+        %Minga.Diagnostics.Diagnostic{
+          message: "Unknown call",
+          severity: :warning,
+          range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 5}
+        }
+      ])
+
+      on_exit(fn -> Minga.Diagnostics.clear(:hover_test, uri) end)
+      :sys.get_state(Minga.Diagnostics)
+
+      local_only = CodeHoverWorkflow.open_cursor(state)
+
+      assert HoverPopup.copy_text(Runtime.state(local_only.shell_runtime).hover_popup) ==
+               "Unknown call"
+
+      register_lsp_client(buffer, start_fake_lsp_client())
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      markdown = "```elixir\nhello(name)\n```\n\nFirst paragraph.\n\nThe rest of the docs."
+      message = {:lsp_response, ref, {:ok, %{"contents" => markdown}}}
+      {state, [:render_now]} = LspEventHandler.handle(state, message)
+
+      lines = fn state ->
+        state.shell_runtime
+        |> Runtime.state()
+        |> Map.fetch!(:hover_popup)
+        |> HoverPopup.display_lines()
+        |> Enum.map(fn {segments, _type} -> Enum.map_join(segments, "", &elem(&1, 0)) end)
+      end
+
+      preview = lines.(state)
+      assert hd(preview) == "Unknown call"
+      assert signature = Enum.find_index(preview, &(&1 == "hello(name)"))
+      assert paragraph = Enum.find_index(preview, &(&1 == "First paragraph."))
+      assert signature < paragraph
+      refute "The rest of the docs." in preview
+
+      assert {:handled, focused} = Hover.handle_key(state, ?K, 0)
+      assert "The rest of the docs." in lines.(focused)
+    end
+
+    test "a disconnected or replaced provider cannot discard focused local diagnostics or add stale docs" do
+      for {client_change, response} <- [
+            {:removed, {:error, :connection_closed}},
+            {:replaced, {:ok, %{"contents" => "Stale docs"}}}
+          ] do
+        state = file_buffer_state("hello\n")
+        buffer = state.workspace.buffers.active
+        uri = Minga.LSP.SyncServer.path_to_uri(Minga.Buffer.file_path(buffer))
+        client = start_fake_lsp_client()
+        register_lsp_client(buffer, client)
+
+        Minga.Diagnostics.publish(:hover_test, uri, [
+          %Minga.Diagnostics.Diagnostic{
+            message: "Still here",
+            severity: :warning,
+            range: %{start_line: 0, start_col: 0, end_line: 0, end_col: 5}
+          }
+        ])
+
+        on_exit(fn -> Minga.Diagnostics.clear(:hover_test, uri) end)
+        :sys.get_state(Minga.Diagnostics)
+
+        assert {:handled, focused} =
+                 state |> CodeHoverWorkflow.open_cursor() |> Hover.handle_key(?K, 0)
+
+        assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+        clients = if client_change == :removed, do: [], else: [start_fake_lsp_client(), client]
+        Minga.LSP.SyncServer.put_clients(buffer, clients)
+
+        {updated, [:render_now]} = LspEventHandler.handle(focused, {:lsp_response, ref, response})
+
+        assert %HoverPopup{focused: true, pending_code: nil, code_range: {{0, 0}, {0, 1}}} =
+                 popup = Runtime.state(updated.shell_runtime).hover_popup
+
+        assert HoverPopup.copy_text(popup) == "Still here"
+        assert Minga.Buffer.cursor(buffer) == {0, 0}
+      end
+    end
+
+    test "attribution uses the editing task and remains last when LSP documentation arrives" do
+      state = file_buffer_state("old\n")
+      buffer = state.workspace.buffers.active
+      source = Minga.Buffer.EditSource.minga("writer", "tool-42")
+      version = Minga.Buffer.version(buffer)
+
+      assert {:ok, _} =
+               Minga.Buffer.replace_byte_range_if_version(
+                 buffer,
+                 version,
+                 {0, 0},
+                 3,
+                 "NEW",
+                 source
+               )
+
+      assert :ok = Minga.Buffer.move_to(buffer, {0, 0})
+
+      state = CodeHoverWorkflow.open_cursor(state)
+      popup = Runtime.state(state.shell_runtime).hover_popup
+      assert {:open_session, "writer", "tool-42"} = popup.open_action
+      assert HoverPopup.copy_text(popup) =~ "Minga · Task writer\nUnreviewed · "
+
+      register_lsp_client(buffer, start_fake_lsp_client())
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"contents" => "Docs first."}}})
+
+      popup = Runtime.state(state.shell_runtime).hover_popup
+      assert {:open_session, "writer", "tool-42"} = popup.open_action
+      assert HoverPopup.copy_text(popup) =~ "Docs first.\n\nMinga · Task writer\nUnreviewed · "
+      assert Minga.Buffer.cursor(buffer) == {0, 0}
+    end
+
+    test "a later edit closes the displayed hover; a delayed event for its own revision does not" do
+      state = file_buffer_state("hello\n")
+      buffer = state.workspace.buffers.active
+      revision = Minga.Buffer.version(buffer)
+      register_lsp_client(buffer, start_fake_lsp_client())
+
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"contents" => "Hello docs"}}})
+
+      event = %Minga.Events.BufferChangedEvent{
+        buffer: buffer,
+        source: :user,
+        sequence: 1,
+        version: revision
+      }
+
+      assert {state, []} = FileEventHandler.handle(state, {:minga_event, :buffer_changed, event})
+      assert HoverPopup.copy_text(Runtime.state(state.shell_runtime).hover_popup) == "Hello docs"
+
+      assert {:ok, _} =
+               Minga.Buffer.replace_byte_range_if_version(
+                 buffer,
+                 revision,
+                 {0, 0},
+                 5,
+                 "bye",
+                 :user
+               )
+
+      event = %{event | version: Minga.Buffer.version(buffer), sequence: 2}
+
+      assert {state, [{:render, 16}]} =
+               FileEventHandler.handle(state, {:minga_event, :buffer_changed, event})
+
+      assert Runtime.state(state.shell_runtime).hover_popup == nil
+    end
+
+    test "scrolling its source pane invalidates a code hover and refuses pending documentation" do
+      state = file_buffer_state("one\ntwo\nthree\n")
+      buffer = state.workspace.buffers.active
+      register_lsp_client(buffer, start_fake_lsp_client())
+
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      assert [{[{"Loading hover…", :plain}], :text}] =
+               HoverPopup.display_lines(Runtime.state(state.shell_runtime).hover_popup)
+
+      window = SessionState.active_window_struct(state.workspace)
+      viewport = MingaEditor.Viewport.put_top(window.viewport, 1)
+
+      windows =
+        Windows.replace_window(
+          state.workspace.windows,
+          window.id,
+          Window.set_viewport(window, viewport)
         )
 
-      {new_state, effects} = LspEventHandler.handle(state, {:lsp_response, ref, {:ok, nil}})
+      workspace = SessionState.set_windows(state.workspace, windows)
+      scrolled = %{state | workspace: workspace}
 
-      assert LSPState.fetch_pending_request(new_state.lsp, ref) == :error
-      assert effects == [:render_now]
+      assert Runtime.state(CodeHoverWorkflow.reconcile_source(state).shell_runtime).hover_popup
+      cleared = CodeHoverWorkflow.reconcile_source(scrolled)
+      assert Runtime.state(cleared.shell_runtime).hover_popup == nil
+      assert Minga.Buffer.cursor(buffer) == {0, 0}
+
+      {next, [:render_now]} =
+        LspEventHandler.handle(scrolled, {:lsp_response, ref, {:ok, %{"contents" => "Stale"}}})
+
+      assert Runtime.state(next.shell_runtime).hover_popup == nil
+    end
+
+    test "older replies cannot replace a newer hover for the same source position" do
+      state = file_buffer_state("hello\n")
+      register_lsp_client(state.workspace.buffers.active, start_fake_lsp_client())
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, older}
+
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, newer}
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, newer, {:ok, %{"contents" => "New"}}})
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, older, {:ok, %{"contents" => "Old"}}})
+
+      assert HoverPopup.copy_text(Runtime.state(state.shell_runtime).hover_popup) == "New"
+    end
+
+    test "hover uses only exact LSP ranges on the captured source revision" do
+      state = file_buffer_state("🙂token rest\n")
+      buffer = state.workspace.buffers.active
+      assert :ok = Minga.Buffer.move_to(buffer, {0, 4})
+      register_lsp_client(buffer, start_fake_lsp_client())
+
+      for {start, expected} <- [{2, {{0, 4}, {0, 9}}}, {1, {{0, 4}, {0, 5}}}] do
+        state = CodeHoverWorkflow.open_cursor(state)
+        assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+        response = %{
+          "contents" => "Documentation",
+          "range" => %{
+            "start" => %{"line" => 0, "character" => start},
+            "end" => %{"line" => 0, "character" => 7}
+          }
+        }
+
+        {state, [:render_now]} =
+          LspEventHandler.handle(state, {:lsp_response, ref, {:ok, response}})
+
+        assert %{code_range: ^expected} = Runtime.state(state.shell_runtime).hover_popup
+      end
+    end
+
+    test "pointer movement before a reply discards the pending popup" do
+      state = file_buffer_state("one\ntwo\nthree\nfour\n")
+      register_lsp_client(state.workspace.buffers.active, start_fake_lsp_client())
+
+      workspace =
+        SessionState.set_mouse(state.workspace, Mouse.set_hover(state.workspace.mouse, 2, 20))
+
+      state = CodeHoverWorkflow.open_pointer(%{state | workspace: workspace})
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      state = move_hover_pointer(state, {3, 20})
+      assert Runtime.state(state.shell_runtime).hover_popup == nil
+
+      message = {:lsp_response, ref, {:ok, %{"contents" => "Late docs"}}}
+      {state, [:render_now]} = LspEventHandler.handle(state, message)
+      assert Runtime.state(state.shell_runtime).hover_popup == nil
+    end
+
+    test "visible pointer hover survives the approach cell but dismisses on travel away" do
+      state = file_buffer_state("one\ntwo\nthree\nfour\n")
+      register_lsp_client(state.workspace.buffers.active, start_fake_lsp_client())
+
+      workspace =
+        SessionState.set_mouse(state.workspace, Mouse.set_hover(state.workspace.mouse, 2, 20))
+
+      state = CodeHoverWorkflow.open_pointer(%{state | workspace: workspace})
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"contents" => "Near"}}})
+
+      assert %{anchor_row: row, anchor_col: col} = Runtime.state(state.shell_runtime).hover_popup
+
+      near = move_hover_pointer(state, {row + 1, col + 1})
+      assert HoverPopup.copy_text(Runtime.state(near.shell_runtime).hover_popup) == "Near"
+
+      away = move_hover_pointer(near, {row + 1, col + 2})
+      assert Runtime.state(away.shell_runtime).hover_popup == nil
+    end
+
+    test "a dwell resolves its displayed lease only while the captured pane has not scrolled" do
+      state = file_buffer_state("one\ntarget\nthree\n")
+      buffer = state.workspace.buffers.active
+      window_id = state.workspace.windows.active
+      register_lsp_client(buffer, start_fake_lsp_client())
+
+      row = %Row{
+        row_id: 7,
+        row_type: :normal,
+        buf_line: 1,
+        text: "target",
+        spans: [],
+        content_hash: Row.compute_hash("target", [])
+      }
+
+      offset_map = SourceOffsetMap.new("target", "target", Minga.Core.Decorations.new(), 1)
+      visual = VisualRow.new(row, offset_map, 0, 6, 0)
+
+      presentation =
+        TextPresentation.new(
+          window_id,
+          buffer,
+          Minga.Buffer.version(buffer),
+          :displayed,
+          {:windowed, {visual}},
+          91
+        )
+
+      index = TextInteractionIndex.new() |> TextInteractionIndex.publish(presentation)
+      assert :ok = TextInteractionIndex.activate(index, window_id, 91)
+      render = Render.connect_renderer(state.render, self(), TextInteractionIndex.reader(index))
+
+      event =
+        TextEvent.new(%{
+          window_id: window_id,
+          presentation_id: 91,
+          row_index: 0,
+          row_id: 7,
+          utf16_offset: 2,
+          button: :none,
+          event_type: :motion,
+          mods: 0,
+          click_count: 1,
+          scroll_x: 0,
+          scroll_y: 0,
+          anchor: {0, 0}
+        })
+
+      target =
+        MingaEditor.Mouse.Target.Text.new(%{
+          window_id: window_id,
+          buffer: buffer,
+          source_version: presentation.source_version,
+          line: 1,
+          byte: 2
+        })
+
+      state = MingaEditor.Mouse.handle_text_event(%{state | render: render}, event, target)
+      captured = CodeHoverWorkflow.dwell_view(state, 0, 0, event)
+      assert {_, ^window_id, ^buffer, _} = captured
+      timer = make_ref()
+      armed = Mouse.accept_hover_timer(state.workspace.mouse, timer)
+      window = SessionState.active_window_struct(state.workspace)
+      viewport = MingaEditor.Viewport.put_top(window.viewport, 1)
+
+      windows =
+        Windows.replace_window(
+          state.workspace.windows,
+          window_id,
+          Window.set_viewport(window, viewport)
+        )
+
+      scrolled =
+        state.workspace |> SessionState.set_mouse(armed) |> SessionState.set_windows(windows)
+
+      assert {:noreply, cleared} =
+               MingaEditor.handle_info(
+                 {:timeout, timer, {:mouse_hover_timeout, captured}},
+                 %{state | workspace: scrolled}
+               )
+
+      assert Runtime.state(cleared.shell_runtime).hover_popup == nil
+
+      state = CodeHoverWorkflow.open_pointer(state)
+
+      assert_receive {:lsp_request, "textDocument/hover",
+                      %{"position" => %{"line" => 1, "character" => 2}}, _, ref}
+
+      assert %{anchor_row: 0, anchor_col: 0} = Runtime.state(state.shell_runtime).hover_popup
+
+      TextInteractionIndex.discard(index, presentation)
+
+      {state, [:render_now]} =
+        LspEventHandler.handle(state, {:lsp_response, ref, {:ok, %{"contents" => "Late hover"}}})
+
+      assert Runtime.state(state.shell_runtime).hover_popup == nil
+      assert CodeHoverWorkflow.open_pointer(state) == state
+    end
+
+    test "empty or failed hover clears the loading view and distinguishes the keyboard notices" do
+      for {response, notice} <- [
+            {{:ok, nil}, "No hover information"},
+            {{:ok, %{"range" => %{}}}, "No hover information"},
+            {{:error, "unavailable"}, "Hover request failed"}
+          ] do
+        state = file_buffer_state("hello\n")
+        register_lsp_client(state.workspace.buffers.active, start_fake_lsp_client())
+        state = CodeHoverWorkflow.open_cursor(state)
+        assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+        {state, [:render_now]} = LspEventHandler.handle(state, {:lsp_response, ref, response})
+
+        assert Runtime.state(state.shell_runtime).hover_popup == nil
+        assert NoticeWorkflow.message(state) == notice
+      end
     end
 
     test "inlay debounce clears the timer ref" do
@@ -1065,20 +1474,11 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
     end
 
     test "delayed hover response clears pending without touching or replaying a foreign shell" do
-      ref = make_ref()
-      state = base_state()
-      buffer = state.workspace.buffers.active
-      client = start_fake_lsp_client()
-      register_lsp_client(buffer, client)
-
-      state =
-        state
-        |> track_pending_request(
-          ref,
-          {:response, :hover, client, buffer, Minga.Buffer.version(buffer), nil,
-           Minga.Buffer.cursor(buffer)}
-        )
-        |> ShellWorkflow.switch(:fake)
+      state = file_buffer_state("hello\n")
+      register_lsp_client(state.workspace.buffers.active, start_fake_lsp_client())
+      state = CodeHoverWorkflow.open_cursor(state)
+      assert_receive {:lsp_request, "textDocument/hover", _, _, ref}
+      state = ShellWorkflow.switch(state, :fake)
 
       foreign_shell_state = Runtime.state(state.shell_runtime)
       message_store = state.render.message_store
@@ -1817,27 +2217,6 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
   defp track_pending_request(
          state,
          ref,
-         {:hover_mouse, row, col, buffer, line, buffer_col, version}
-       ) do
-    %{
-      state
-      | lsp:
-          LSPState.track_hover_mouse_request(
-            state.lsp,
-            ref,
-            row,
-            col,
-            buffer,
-            line,
-            buffer_col,
-            version
-          )
-    }
-  end
-
-  defp track_pending_request(
-         state,
-         ref,
          {:response, kind, client, buffer, version, tab_id, cursor}
        ) do
     %{
@@ -2011,6 +2390,38 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       lsp_version: 1,
       encoding: :utf16
     }
+  end
+
+  defp move_hover_pointer(state, anchor) do
+    window = state.workspace.windows.active
+    buffer = state.workspace.buffers.active
+
+    target =
+      MingaEditor.Mouse.Target.Text.new(%{
+        window_id: window,
+        buffer: buffer,
+        source_version: Minga.Buffer.version(buffer),
+        line: 2,
+        byte: 1
+      })
+
+    event =
+      TextEvent.new(%{
+        window_id: window,
+        presentation_id: 1,
+        row_index: 2,
+        row_id: 1,
+        utf16_offset: 1,
+        button: :none,
+        event_type: :motion,
+        mods: 0,
+        click_count: 1,
+        scroll_x: 0,
+        scroll_y: 0,
+        anchor: anchor
+      })
+
+    MingaEditor.Mouse.handle_text_event(state, event, target)
   end
 
   defp file_buffer_state(content) do

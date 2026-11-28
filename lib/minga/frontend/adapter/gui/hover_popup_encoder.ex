@@ -45,7 +45,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
       |> Enum.reduce(writer, &encode_line/2)
       |> Writer.finish()
 
-    IO.iodata_to_binary([hover, encode_hover_action(model.open_action_name)])
+    IO.iodata_to_binary([hover, encode_hover_action(model)])
   end
 
   @spec fingerprint(HoverPopup.t()) :: term()
@@ -53,7 +53,7 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
 
   defp fingerprint(%HoverPopup{} = model) do
     {model.visible?, model.anchor_row, model.anchor_col, model.focused?, model.scroll_offset,
-     model.content_lines, model.open_action_name}
+     model.content_lines, model.offer_id, model.actions?, model.open_label}
   end
 
   @spec encode_line(Line.t(), Writer.t()) :: Writer.t()
@@ -66,15 +66,18 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
     Enum.reduce(line.segments, writer, &encode_markdown_segment/2)
   end
 
-  @spec encode_hover_action(String.t() | nil) :: binary()
-  defp encode_hover_action(nil), do: <<@op_gui_hover_action, 1::16, 0::8>>
+  @spec encode_hover_action(HoverPopup.t()) :: binary()
+  defp encode_hover_action(%HoverPopup{actions?: false, open_label: nil}),
+    do: <<@op_gui_hover_action, 1::16, 0::8>>
 
-  defp encode_hover_action(action_name) do
+  defp encode_hover_action(%HoverPopup{} = model) do
     payload =
       :gui_hover_action
       |> Writer.new()
       |> Writer.append(<<1::8>>)
-      |> Writer.string16(:action_name, action_name)
+      |> Writer.uint64(:offer_id, model.offer_id)
+      |> Writer.uint8(:actions, if(model.actions?, do: 1, else: 0))
+      |> Writer.string16(:open_label, model.open_label || "")
       |> Writer.finish()
 
     :gui_hover_action
@@ -93,6 +96,13 @@ defmodule Minga.Frontend.Adapter.GUI.HoverPopupEncoder do
     |> Writer.append(<<13::8>>)
     |> Writer.rgb24(:syntax_fg, face.fg || @syntax_fallback_fg)
     |> Writer.uint8(:syntax_flags, encode_syntax_flags(face))
+    |> Writer.string16(:segment_text, text)
+  end
+
+  defp encode_markdown_segment(%Segment{text: text, style: {:link, id, selected?}}, writer) do
+    writer
+    |> Writer.uint8(:markdown_style, if(selected?, do: 15, else: 14))
+    |> Writer.uint16(:link_action_id, id)
     |> Writer.string16(:segment_text, text)
   end
 

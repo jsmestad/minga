@@ -76,7 +76,7 @@ While a prompt has focus (find file, project search, new task, rename, the comma
 One surface answers "what is this?" for everything: code, diagnostics, Minga's lines, blame lines, state glyphs and modeline segments.
 
 - **Opening:** `K` from the keyboard, or resting the pointer on something for about 400 ms. A grace area lets the pointer travel into the popover.
-- **Two levels:** the first `K` shows a compact peek; `K` again moves focus into it, where `j` / `k` and `⌃D` / `⌃U` scroll, `↩` follows a link, `y` copies, and `q` or `esc` return. This is the Neovim `K K` model.
+- **Two levels:** the first `K` shows a compact peek. `K` again focuses the hover. Use `j` / `k` and `⌃D` / `⌃U` to scroll, `Tab` / `Shift-Tab` to select a documentation link, `↩` to open it, `y` to copy, and `q` or `esc` to return. This is the Neovim `K K` model.
 - **Order:** the most urgent first: the diagnostic, then the signature, then the docs, then attribution ("Minga · 4 min ago · task · change 1 of 2 · unreviewed").
 - **Calm:** fixed position with no jitter, never covers the cursor line, a maximum size and then scrolling, no animation under Reduce Motion.
 - **It teaches keys:** hovering a modeline segment or a glyph shows its meaning and its key ("1 task needs you · SPC a a"). In the terminal the text goes to the echo area instead of a floating tooltip, and only when the terminal reports pointer motion.
@@ -113,7 +113,7 @@ Every screen can be reached and left by mouse, and every click teaches its key. 
 
 **Keyboard only, by design:** composed Vim grammar is not a place you go, so it has no click: operators with motions, counts and `.` repeat, text objects (`ih`, `ah`, `ic`, `ac`), ex ranges and commands (`:'<,'>Minga keep`, `:cdo`) and macros and registers. What they do is still reachable by mouse: select, then right-click and pick the action.
 
-**Terminal caveats.** Hover needs the terminal to stream pointer motion, so the terminal UI asks for motion events only while a panel that uses hover is open. There are no floating tooltips in the terminal; the echo line names the action instead. Minga never takes the terminal's own modifier for native text selection, so selecting text to copy always works.
+**Terminal caveats.** Minga asks for free pointer motion so that editor hover and modeline explanations work without dragging. The modeline uses the echo area; editor hover uses an anchored popup. If the terminal or multiplexer does not report free motion, use `K` for editor hover. Minga does not take the terminal's modifier for native text selection.
 
 ## Mockup and storyboard metrics
 

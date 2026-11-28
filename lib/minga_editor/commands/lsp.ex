@@ -12,6 +12,7 @@ defmodule MingaEditor.Commands.Lsp do
   alias MingaEditor.HoverPopup
   alias MingaEditor.LspActions
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.ServerRegistry
@@ -293,7 +294,10 @@ defmodule MingaEditor.Commands.Lsp do
     execute: &LspActions.goto_definition/1
   )
 
-  command(:hover, "Hover documentation", requires_buffer: true, execute: &LspActions.hover/1)
+  command(:hover, "Hover documentation",
+    requires_buffer: true,
+    execute: &CodeHoverWorkflow.open_cursor/1
+  )
 
   command(:peek_definition, "Peek definition",
     requires_buffer: true,

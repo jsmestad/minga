@@ -7,12 +7,12 @@ defmodule MingaEditor.Frontend.TextPresentationProtocolTest do
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Mouse.TextEvent
 
-  test "decodes a fixed-width editor text event without screen coordinates" do
+  test "decodes the immutable text position separately from the physical motion anchor" do
     packet =
       <<Opcodes.editor_text_event(), 7::16, 91::unsigned-64, 42::32, 99::unsigned-64, 6::32, 0::8,
-        0x09::8, 3::8, 2::8, -1::8-signed, 1::8-signed>>
+        0x09::8, 2::8, 1::8, 0::8-signed, 0::8-signed, 5::16, 9::16, 7::16>>
 
-    assert byte_size(packet) == 33
+    assert byte_size(packet) == 39
 
     assert {:ok,
             {:editor_text_event,
@@ -24,10 +24,12 @@ defmodule MingaEditor.Frontend.TextPresentationProtocolTest do
                utf16_offset: 6,
                button: :left,
                mods: 0x09,
-               event_type: :drag,
-               click_count: 2,
-               scroll_x: -1,
-               scroll_y: 1
+               event_type: :motion,
+               click_count: 1,
+               scroll_x: 0,
+               scroll_y: 0,
+               anchor: {5, 9},
+               terminal_caret_row: 7
              }}} = Protocol.decode_event(packet)
   end
 
@@ -45,7 +47,7 @@ defmodule MingaEditor.Frontend.TextPresentationProtocolTest do
   test "rejects malformed text event directions and lifecycle values" do
     bad_scroll =
       <<Opcodes.editor_text_event(), 7::16, 91::unsigned-64, 42::32, 99::unsigned-64, 6::32, 0::8,
-        0::8, 0::8, 1::8, 2::8-signed, 0::8-signed>>
+        0::8, 0::8, 1::8, 2::8-signed, 0::8-signed, 0::32, 65_535::16>>
 
     bad_lifecycle = <<Opcodes.text_presentation_state(), 2::16, 55::unsigned-64, 2::8>>
 

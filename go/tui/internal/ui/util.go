@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
-	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
 func lineAt(lines []string, index int) string {
@@ -13,14 +12,6 @@ func lineAt(lines []string, index int) string {
 		return lines[index]
 	}
 	return ""
-}
-
-func renderRichLine(line protocol.RichLine) string {
-	parts := make([]string, 0, len(line.Segments))
-	for _, segment := range line.Segments {
-		parts = append(parts, segment.Text)
-	}
-	return strings.Join(parts, "")
 }
 
 func agentMessagePrefix(kind byte) string {

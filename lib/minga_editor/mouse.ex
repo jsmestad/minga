@@ -44,6 +44,7 @@ defmodule MingaEditor.Mouse do
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
@@ -91,6 +92,9 @@ defmodule MingaEditor.Mouse do
     handle(state, 0, 0, :left, 0, :release, 1)
   end
 
+  def handle_text_event(state, %TextEvent{event_type: :motion, anchor: {_, _}}, nil),
+    do: clear_pointer_hover(state)
+
   def handle_text_event(state, %TextEvent{}, nil), do: state
 
   def handle_text_event(
@@ -103,6 +107,13 @@ defmodule MingaEditor.Mouse do
       :ok -> state
     end
   end
+
+  def handle_text_event(
+        state,
+        %TextEvent{event_type: :motion, anchor: {_, _}},
+        {:block_action, _, _, _}
+      ),
+      do: clear_pointer_hover(state)
 
   def handle_text_event(state, %TextEvent{}, {:block_action, _click, _row, _col}), do: state
 
@@ -436,11 +447,81 @@ defmodule MingaEditor.Mouse do
   @spec handle_text_motion(state(), TextEvent.t(), TextTarget.t()) :: state()
   defp handle_text_motion(state, event, %TextTarget{} = target) do
     case validate_target(target) do
-      {:ok, _position} -> handle_text_motion_modifiers(state, event, target)
-      {:error, _reason} -> state
+      {:ok, _position} ->
+        state = handle_text_motion_modifiers(state, event, target)
+        track_text_hover(state, event, target)
+
+      {:error, _reason} ->
+        clear_pointer_hover(state)
     end
   catch
     :exit, _reason -> state
+  end
+
+  @spec track_text_hover(state(), TextEvent.t(), TextTarget.t()) :: state()
+  defp track_text_hover(state, %TextEvent{mods: 0, anchor: {row, col}} = event, target)
+       when target.window_id != 65_534 do
+    if within_hover_approach?(state, target.window_id, row, col) do
+      state
+    else
+      state
+      |> dismiss_moved_hover()
+      |> update_hover(row, col, text_event: event)
+    end
+  end
+
+  defp track_text_hover(state, %TextEvent{anchor: nil}, _target), do: state
+  defp track_text_hover(state, _event, _target), do: clear_pointer_hover(state)
+
+  # The popup surface already owns motion inside its frame. Keep one cell
+  # around the source so the pointer can cross the placement gap without
+  # arming another dwell. A loading-only card must still yield to a new source.
+  @spec within_hover_approach?(state(), Window.id(), non_neg_integer(), non_neg_integer()) ::
+          boolean()
+  defp within_hover_approach?(
+         %{
+           shell_runtime: %{
+             state: %{
+               hover_popup: %{
+                 code_source: %{trigger: :pointer, window: window},
+                 focused: false,
+                 content_lines: [_ | _],
+                 pending_code: pending,
+                 anchor_row: anchor_row,
+                 anchor_col: anchor_col
+               }
+             }
+           }
+         },
+         window,
+         row,
+         col
+       ) do
+    case pending do
+      {_ref, {[], []}} -> false
+      _ -> abs(row - anchor_row) <= 1 and abs(col - anchor_col) <= 1
+    end
+  end
+
+  defp within_hover_approach?(_state, _window, _row, _col), do: false
+
+  @spec dismiss_moved_hover(state()) :: state()
+  defp dismiss_moved_hover(
+         %{
+           shell_runtime: %{
+             state: %{hover_popup: %{code_source: %{trigger: :pointer}, focused: false}}
+           }
+         } = state
+       ),
+       do: MingaEditor.Shell.Traditional.HoverPopupWorkflow.dismiss(state)
+
+  defp dismiss_moved_hover(state), do: state
+
+  @spec clear_pointer_hover(state()) :: state()
+  defp clear_pointer_hover(state) do
+    {mouse, timer} = MouseState.prepare_clear_hover(state.workspace.mouse)
+    cancel_timer(timer)
+    state |> dismiss_moved_hover() |> update_mouse(fn _ -> mouse end)
   end
 
   @spec handle_text_motion_modifiers(state(), TextEvent.t(), TextTarget.t()) :: state()
@@ -1041,22 +1122,34 @@ defmodule MingaEditor.Mouse do
     |> update_hover(row, col)
   end
 
-  @spec update_hover(state(), integer(), integer()) :: state()
-  defp update_hover(state, row, col) do
+  @spec update_hover(state(), integer(), integer(), keyword()) :: state()
+  defp update_hover(state, row, col, opts \\ []) do
     {mouse, previous_timer, schedule?} =
       MouseState.prepare_hover(
         state.workspace.mouse,
         row,
         col,
-        backend: state.frontend.backend
+        Keyword.put(opts, :backend, state.frontend.backend)
       )
 
     cancel_timer(previous_timer)
 
     mouse =
       if schedule? do
-        timer = Process.send_after(self(), :mouse_hover_timeout, MouseState.hover_delay_ms())
-        MouseState.accept_hover_timer(mouse, timer)
+        case CodeHoverWorkflow.dwell_view(state, row, col, Keyword.get(opts, :text_event)) do
+          nil ->
+            mouse
+
+          view ->
+            timer =
+              :erlang.start_timer(
+                MouseState.hover_delay_ms(),
+                self(),
+                {:mouse_hover_timeout, view}
+              )
+
+            MouseState.accept_hover_timer(mouse, timer)
+        end
       else
         mouse
       end

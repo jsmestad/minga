@@ -148,7 +148,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
 
   defp physical_capacity?(_opcode, _fields), do: false
 
-  defp act_target?(:gui_action_act_menu_action, fields),
+  defp act_target?(opcode, fields)
+       when opcode in [:gui_action_act_menu_action, :gui_action_hover_open_action],
     do: act_fields(fields) == [offer: 64, id: 16]
 
   defp act_target?(:gui_action_review_ribbon_act, fields),

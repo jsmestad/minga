@@ -224,15 +224,45 @@ defmodule MingaEditor.HoverPopupTest do
       assert Presenter.box(popup, @viewport) == {0, 10, 32, 18}
     end
 
+    test "pointer placement protects the displayed caret even on another line" do
+      popup = Builder.new(tall_hover_text(), 7, 10)
+
+      source = %{
+        trigger: :pointer,
+        tab: 1,
+        window: 1,
+        viewport: MingaEditor.Viewport.new(24, 80),
+        buffer: self(),
+        version: 1,
+        position: {22, 4},
+        anchor: {7, 10},
+        path: nil
+      }
+
+      above_caret = HoverPopup.bind_code(popup, Map.put(source, :terminal_caret_row, 3))
+      below_caret = HoverPopup.bind_code(popup, Map.put(source, :terminal_caret_row, 10))
+
+      assert Presenter.box(above_caret, @viewport) == {8, 10, 32, 16}
+      assert Presenter.box(below_caret, @viewport) == {0, 10, 32, 7}
+      assert Presenter.box(Builder.new("one row", 0, 0), {1, 80}) == nil
+    end
+
     test "focused and unfocused popups have identical geometry" do
       popup = Builder.new("Returns the **value**.", 2, 6)
 
       assert Presenter.box(popup, @viewport) ==
                Presenter.box(HoverPopup.focus(popup), @viewport)
     end
+
+    test "scrolling does not move the popup or shrink its footprint" do
+      popup = Builder.new(tall_hover_text(), 18, 54)
+      scrolled = Enum.reduce(1..13, popup, fn _, hover -> HoverPopup.scroll_down(hover) end)
+
+      assert Presenter.box(popup, @viewport) == Presenter.box(scrolled, @viewport)
+    end
   end
 
-  describe "with_open_action/2 and open_action_name/1" do
+  describe "with_open_action/2 and open_action_label/1" do
     test "accepts an open_session action (with and without a tool_call_id) and exposes it" do
       popup =
         "x"
@@ -241,7 +271,7 @@ defmodule MingaEditor.HoverPopupTest do
 
       assert popup.open_action == {:open_session, "sess-123", "tc1"}
       assert HoverPopup.open_action?(popup)
-      assert HoverPopup.open_action_name({:open_session, "sess-123", "tc1"}) == "open_session"
+      assert HoverPopup.open_action_label(popup.open_action) == "↩ conversation"
 
       # tool_call_id is optional (plain resume).
       no_tc = HoverPopup.with_open_action(Builder.new("x", 1, 1), {:open_session, "s", nil})
@@ -257,6 +287,26 @@ defmodule MingaEditor.HoverPopupTest do
       atom = HoverPopup.with_open_action(Builder.new("x", 1, 1), :some_command)
       assert atom.open_action == :some_command
     end
+  end
+
+  test "focused link navigation keeps same-label destinations distinct and skips unsafe Markdown" do
+    markdown =
+      "[Guide](https://example.com/first)\n\n[Unsafe](file:///tmp/secret)\n\n[Guide](https://example.com/second)"
+
+    lines = MingaAgent.Markdown.parse(markdown)
+    popup = HoverPopup.resolve_code(Builder.new("initial", 1, 1), lines)
+    assert HoverPopup.select_link(popup, :next).selected_link == nil
+
+    first = popup |> HoverPopup.focus() |> HoverPopup.select_link(:next)
+    assert HoverPopup.link_at(first, first.selected_link) == "https://example.com/first"
+    assert first.scroll_offset == 0
+
+    second = HoverPopup.select_link(first, :next)
+    assert HoverPopup.link_at(second, second.selected_link) == "https://example.com/second"
+    assert second.scroll_offset > first.scroll_offset
+    assert HoverPopup.link_at(second, 4) == nil
+    assert HoverPopup.select_link(second, :next).selected_link == first.selected_link
+    assert HoverPopup.select_link(first, :previous).selected_link == second.selected_link
   end
 
   describe "expandable popups" do

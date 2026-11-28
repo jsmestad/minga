@@ -1,7 +1,6 @@
 defmodule Minga.Platform.System do
   @moduledoc """
-  Production platform backend. Shells out to OS-specific commands for
-  trash operations.
+  Production backend for OS-level desktop operations.
 
   - **macOS:** Uses AppleScriptObjC to call Foundation's native Trash API.
   - **Linux:** Uses `gio trash` (GNOME/freedesktop) which follows the
@@ -15,6 +14,25 @@ defmodule Minga.Platform.System do
       {:unix, _} -> trash_linux(path)
       {:win32, _} -> {:error, "Windows trash not supported"}
     end
+  end
+
+  @spec open_url(String.t()) :: :ok | {:error, String.t()}
+  def open_url(url) do
+    case :os.type() do
+      {:unix, :darwin} -> launch_url("open", ["--", url])
+      {:unix, _os} -> launch_url("xdg-open", [url])
+      _os -> {:error, "Opening links is not supported on this platform"}
+    end
+  end
+
+  @spec launch_url(String.t(), [String.t()]) :: :ok | {:error, String.t()}
+  defp launch_url(executable, args) do
+    case System.cmd(executable, args, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {_, status} -> {:error, "#{executable} exited with status #{status}"}
+    end
+  rescue
+    ErlangError -> {:error, "#{executable} could not start"}
   end
 
   @spec trash_macos(String.t()) :: :ok | {:error, String.t()}

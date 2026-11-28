@@ -34,6 +34,28 @@ defmodule Minga.Session.StagedDraftsTest do
                Enum.sort_by([edit, created, deleted], & &1.path)
     end
 
+    test "different writing steps survive as separate UTF-8 byte ranges", %{
+      opts: opts,
+      root: root
+    } do
+      origins = [{0, 2, {{:minga, "a", "step-1"}, 100}}, {3, 2, {{:minga, "b", "step-2"}, 200}}]
+      draft = StagedDraft.new("source", "x y", "α β", origins)
+
+      assert :ok = StagedDrafts.write(root, "v", 1, draft, opts)
+      assert [^draft] = root |> load!(opts) |> drafts()
+    end
+
+    test "a mismatched byte revision restores the file but not its old origins",
+         %{opts: opts, root: root} do
+      draft = StagedDraft.new("source", "abc", "ABC", [{0, 3, {{:minga, "a", "step-1"}, 100}}])
+      assert :ok = StagedDrafts.write(root, "v", 1, draft, opts)
+      file = StagedDrafts.draft_file(root, "v", "source", opts)
+      record = file |> File.read!() |> JSON.decode!()
+      File.write!(file, JSON.encode!(Map.put(record, "content", Base.encode64("ACB"))))
+
+      assert [%{content: "ACB", origins: []}] = root |> load!(opts) |> drafts()
+    end
+
     test "names that are not valid UTF-8 round trip", %{opts: opts, root: root} do
       root = root <> <<0xFF>>
       draft = StagedDraft.new(<<"lib/", 0xFE, ".ex">>, "a", "b")

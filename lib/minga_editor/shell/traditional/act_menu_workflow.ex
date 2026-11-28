@@ -27,6 +27,7 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.HoverPopup
   alias MingaEditor.Input.Router
   alias MingaEditor.PickerUI
   alias MingaEditor.PromptUI
@@ -34,6 +35,8 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
+  alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
@@ -75,6 +78,24 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
   def replace(%State{} = state, _menu), do: state
 
   @spec open(State.t()) :: State.t()
+  def open(
+        %State{
+          workspace: %{editing: %{mode: :normal}},
+          shell_runtime: %Runtime{
+            state: %ShellState{
+              hover_act_origin: id,
+              hover_popup: %HoverPopup{code_id: id, code_source: source}
+            }
+          }
+        } = state
+      )
+      when is_integer(id),
+      do: open_hover(state, source)
+
+  def open(%State{shell_runtime: %Runtime{state: %ShellState{hover_act_origin: origin}}} = state)
+      when is_integer(origin),
+      do: stale(state)
+
   def open(%State{workspace: %{keymap_scope: :file_tree, file_tree: file_tree}} = state) do
     with %FileTree{} = tree <- FileTreeState.resident_tree(file_tree),
          %{path: _path} = entry <- FileTree.selected_entry(tree) do
@@ -224,6 +245,35 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
     if available?(state), do: open_current_file(state, anchor), else: state
   end
 
+  @doc "Opens the normal file Act menu on the exact position offered by a code hover."
+  @spec open_hover(State.t(), HoverPopup.code_source()) :: State.t()
+  def open_hover(state, source) do
+    state = HoverPopupWorkflow.dismiss(state)
+    %{window: window, buffer: buffer, version: version, position: point, anchor: anchor} = source
+
+    with :ok <- hover_file_current(state, source),
+         {:ok, prepared} <- WindowFocus.prepare_buffer_focus_result(state, window, buffer),
+         {:ok, ^point} <- Buffer.move_to_if_version(buffer, version, point),
+         %CursorContext{version: ^version} = cursor <- Buffer.cursor_context(buffer),
+         ^point <- CursorContext.position(cursor) do
+      focused = WindowFocus.prepared_buffer_focus_state(prepared)
+      file = {window, buffer, version, point}
+      next = present_file(focused, anchor, file, cursor, {{:cursor, 1}, :notice, {:file, file}})
+      WindowFocus.commit_prepared_buffer_focus(prepared, next)
+    else
+      _stale -> stale(state)
+    end
+  catch
+    :exit, _gone -> stale(state)
+  end
+
+  @spec hover_file_current(State.t(), HoverPopup.code_source()) :: :ok | {:error, :stale}
+  defp hover_file_current(state, source) do
+    if available?(state) and CodeHoverWorkflow.source_live?(state, source),
+      do: :ok,
+      else: {:error, :stale}
+  end
+
   @spec open_current_file(State.t(), Model.anchor() | nil) :: State.t()
   defp open_current_file(state, anchor) do
     with %Window{id: window, content: {:buffer, buffer}} <-
@@ -231,26 +281,38 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
          %{version: version} = cursor <- Buffer.cursor_context(buffer) do
       point = CursorContext.position(cursor)
       source = {window, buffer, version, point}
-      {selection, continuation, ordinary_source} = file_selection(state, source)
-
-      case Buffer.prepare_review_with_extent(buffer, selection) do
-        {:ok, _, _, _, _} = offer ->
-          open_review(state, anchor, source, offer, continuation)
-
-        :empty ->
-          show_file(state, anchor, ordinary_source, buffer, cursor)
-
-        {:error, :stale_selection} ->
-          stale(state)
-
-        {:error, :invalid_range} ->
-          show_file(state, anchor, ordinary_source, buffer, cursor)
-      end
+      present_file(state, anchor, source, cursor, file_selection(state, source))
     else
       _outside -> state
     end
   catch
     :exit, _gone -> stale(state)
+  end
+
+  @spec present_file(
+          State.t(),
+          Model.anchor() | nil,
+          ActMenu.file_source(),
+          CursorContext.t(),
+          {BufferProcess.review_selection(), PendingKeep.continuation(), ActMenu.source()}
+        ) :: State.t()
+  defp present_file(
+         state,
+         anchor,
+         {_, buffer, _, _} = source,
+         cursor,
+         {selection, continuation, ordinary_source}
+       ) do
+    case Buffer.prepare_review_with_extent(buffer, selection) do
+      {:ok, _, _, _, _} = offer ->
+        open_review(state, anchor, source, offer, continuation)
+
+      {:error, :stale_selection} ->
+        stale(state)
+
+      empty_or_invalid when empty_or_invalid in [:empty, {:error, :invalid_range}] ->
+        show_file(state, anchor, ordinary_source, buffer, cursor)
+    end
   end
 
   @spec open_ribbon(State.t(), Window.id(), pos_integer(), ReviewRibbon.head(), Model.anchor()) ::

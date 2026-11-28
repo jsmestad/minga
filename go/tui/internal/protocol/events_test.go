@@ -72,8 +72,8 @@ func TestEncodeGUISemanticItemActivate(t *testing.T) {
 }
 
 func TestEncodeGUIHoverOpenAction(t *testing.T) {
-	got := EncodeGUIHoverOpenAction()
-	want := []byte{generated.OPGuiAction, generated.GUIActionHoverOpenAction}
+	got := EncodeGUIHoverOpenAction(0x0102030405060708, 1)
+	want := []byte{generated.OPGuiAction, generated.GUIActionHoverOpenAction, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("hover open action packet = %v, want %v", got, want)
 	}

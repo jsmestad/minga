@@ -1,9 +1,11 @@
 defmodule MingaEditor.Input.HoverTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.Editing
   alias MingaEditor.HoverPopup
   alias MingaEditor.Input.Hover
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State.Registers
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -68,6 +70,36 @@ defmodule MingaEditor.Input.HoverTest do
 
       assert {:handled, new_state} = Hover.handle_key(state, @key_k, @none)
       assert Runtime.state(new_state.shell_runtime).hover_popup.scroll_offset == 0
+    end
+
+    test "Ctrl-D and Ctrl-U scroll the focused popup without moving the editor cursor" do
+      state = state_with_hover(focused: true)
+      buffer = state.workspace.buffers.active
+      cursor = Minga.Buffer.cursor(buffer)
+
+      assert {:handled, scrolled} = Hover.handle_key(state, ?d, 0x02)
+      assert Runtime.state(scrolled.shell_runtime).hover_popup.scroll_offset > 0
+      assert {:handled, returned} = Hover.handle_key(scrolled, ?u, 0x02)
+      assert Runtime.state(returned.shell_runtime).hover_popup.scroll_offset == 0
+      assert Minga.Buffer.cursor(buffer) == cursor
+    end
+
+    test "yank copies styled documentation in full without dismissing a scrolled hover" do
+      state = base_state()
+      Minga.Buffer.set_option(state.workspace.buffers.active, :clipboard, :none)
+
+      popup =
+        "**First** paragraph\nSecond `code`\nThird\nFourth\nFifth\nSixth"
+        |> HoverPopup.new(10, 20)
+        |> HoverPopup.focus()
+        |> HoverPopup.scroll_down()
+
+      state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.show(state, popup)
+      assert {:handled, updated} = Hover.handle_key(state, ?y, @none)
+
+      expected = "First paragraph\nSecond code\nThird\nFourth\nFifth\nSixth"
+      assert Registers.get(Editing.registers(updated), "") == {expected, :charwise}
+      assert Runtime.state(updated.shell_runtime).hover_popup == popup
     end
 
     test "Enter held with Control, Alt or Command neither opens nor dismisses a popup with an Open action" do

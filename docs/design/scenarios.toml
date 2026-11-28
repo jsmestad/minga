@@ -296,9 +296,8 @@ exits = [
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
   { key = "SPC a r", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
   { key = "]h", click = "twist head", to = "minga.review.in_file" },
-  { key = "K", click = "rest the pointer on a Minga line", to = "minga.hover.attribution" },
+  { key = "]h K", click = "rest the pointer on a Minga line", to = "minga.hover.attribution" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
-  { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
   { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
   { key = "SPC o t", click = "mode pill › Open › Terminal (macOS: also the menu bar)", to = "terminal.drawer" },
 ]
@@ -332,7 +331,7 @@ exits = [
   { key = "SPC p p", click = "mode pill › Project › Switch project (macOS: also the menu bar)", to = "start.project_switcher" },
   { key = "SPC p r", click = "mode pill › Project › Recent files in project (macOS: also the menu bar)", to = "start.recent_files" },
   { key = "insert mode typing", click = "", to = "code.completion" },
-  { key = "K", click = "hover a symbol", to = "code.hover" },
+  { key = "K on a documented symbol", click = "hover a symbol", to = "code.hover" },
   { key = "SPC c a", click = "mode pill › Code › Code actions (macOS: also the menu bar)", to = "code.actions" },
   { key = "SPC c r", click = "mode pill › Code › Rename symbol (macOS: also the menu bar)", to = "code.rename" },
   { key = "SPC c D", click = "mode pill › Code › References (macOS: also the menu bar)", to = "code.references" },
@@ -677,11 +676,11 @@ exits = [
   { key = "g.", click = "g. actions", to = "minga.act_menu" },
   { key = "esc", click = "move the pointer away", to = "edit.plain" },
 ]
-notes = "Any motion also closes it. The footer names the act menu instead of carrying buttons."
+notes = "A pointer hover stays open while the pointer is inside it. The footer leads to the act menu rather than repeating its actions."
 [[scenario]]
 id = "code.diagnostics.hover"
 journey = "code"
-title = "Hover on a diagnostic with Fix and Ask Minga"
+title = "A diagnostic leads the hover, with one entry to its actions"
 surfaces = ["hover_popup"]
 states = []
 frontends = ["macos", "tui"]
@@ -690,11 +689,10 @@ boards = { macos = "V3Diagnostics.dc.html", tui = "Batch8_code_diagnostics_hover
 transient = true
 exits = [
   { key = "g.", click = "g. actions", to = "minga.act_menu" },
-  { key = "SPC a ?", click = "Ask Minga to Fix", to = "minga.inline_ask" },
-  { key = "y", click = "Copy", to = "code.diagnostics.hover", keyboard_only = "copies the message" },
+  { key = "K", click = "", to = "code.hover.focused", keyboard_only = "focuses the hover for copying and links" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
-notes = "The macOS board predates V4.1; Batch8_code_diagnostics_hover shows both frontends in today's style."
+notes = "The boards show older diagnostic action buttons. Use g. to open the shared act menu with diagnostic actions and Ask Minga."
 
 [[scenario]]
 id = "code.diagnostics.list"
@@ -2215,7 +2213,7 @@ boards = { macos = "Batch7_hover_code.dc.html", tui = "Batch7_hover_code.dc.html
 transient = true
 exits = [
   { key = "j / k, ⌃D / ⌃U", click = "scroll", to = "code.hover.focused" },
-  { key = "↩", click = "a link", to = "edit.plain", note = "jumps to the linked definition" },
+  { key = "TAB ↩", click = "a link", to = "edit.plain", note = "opens the selected documentation link and returns editor focus" },
   { key = "y", click = "", to = "code.hover.focused", keyboard_only = "copies the docs" },
   { key = "q", click = "", to = "edit.plain", keyboard_only = "esc does the same" },
   { key = "esc", click = "click outside", to = "edit.plain" },
@@ -2224,7 +2222,7 @@ exits = [
 [[scenario]]
 id = "minga.hover.attribution"
 journey = "minga"
-title = "Hover on a line Minga wrote: who, which task, change 1 of 2, unreviewed, age"
+title = "Hover on a line Minga wrote: originating task, review state and edit age"
 surfaces = ["hover_popup"]
 states = ["unreviewed"]
 frontends = ["macos", "tui"]
@@ -2233,8 +2231,8 @@ boards = { macos = "Batch7_hover_minga_and_chrome.dc.html", tui = "Batch7_hover_
 transient = true
 exits = [
   { key = "g.", click = "g. actions", to = "minga.act_menu" },
-  { key = "↩", click = "the task name", to = "minga.conversation" },
-  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+  { key = "↩", click = "conversation", to = "minga.conversation" },
+  { key = "esc", click = "move the pointer away", to = "minga.review.in_file" },
 ]
 
 [[scenario]]

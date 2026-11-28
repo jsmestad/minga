@@ -139,6 +139,39 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
     display_col_at_composed(entry, composed)
   end
 
+  @doc "Projects the visible parts of a source interval without marking inserted display text."
+  @spec source_display_ranges(t(), non_neg_integer(), non_neg_integer()) ::
+          [{non_neg_integer(), non_neg_integer()}]
+  def source_display_ranges(%__MODULE__{} = entry, first, last) when first < last do
+    {start, ranges} =
+      Enum.reduce_while(entry.source_offset_map.insertions, {first, []}, fn
+        {byte, _length}, {start, ranges} when byte >= last ->
+          {:halt, {start, ranges}}
+
+        {byte, _length}, {start, ranges} when byte > start ->
+          {:cont, {byte, prepend_display_range(entry, start, byte, ranges)}}
+
+        _earlier, acc ->
+          {:cont, acc}
+      end)
+
+    entry |> prepend_display_range(start, last, ranges) |> Enum.reverse()
+  end
+
+  def source_display_ranges(%__MODULE__{}, _first, _last), do: []
+
+  @spec prepend_display_range(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [{non_neg_integer(), non_neg_integer()}]
+        ) :: [{non_neg_integer(), non_neg_integer()}]
+  defp prepend_display_range(entry, first, last, ranges) do
+    start = display_col(entry, first, :start)
+    stop = display_col(entry, last, :end)
+    if start < stop, do: [{start, stop} | ranges], else: ranges
+  end
+
   @doc "Projects an unmodified source slice without scanning the logical line prefix."
   @spec plain_source_display_col(t(), non_neg_integer()) :: non_neg_integer()
   def plain_source_display_col(%__MODULE__{} = entry, byte) do

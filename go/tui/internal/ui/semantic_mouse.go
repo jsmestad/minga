@@ -29,7 +29,6 @@ const (
 	zonePrefixTimelineEntry    = "timeline:entry:"
 	zonePrefixTimelineReview   = "timeline:review:"
 	zonePrefixEmptyStateItem   = "empty-state:item:"
-	zoneIDHoverAction          = "hover:action"
 	zoneIDGitRetry             = "git:retry"
 	reviewModelineCommand      = "next_minga_change_at:"
 	bottomPanelWheelLines      = 3
@@ -978,15 +977,43 @@ func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 }
 
 func (m Model) hoverActionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
+	hover, visible := m.hoverPopup()
 	action, ok := m.hoverAction()
-	if !ok || !action.Visible {
+	if !visible || !hover.Visible || !ok || action.Offer == 0 {
 		return nil, false
 	}
-	zoneInfo := m.zones.Get(zoneIDHoverAction)
-	if zoneInfo != nil && zoneInfo.InBounds(msg) {
-		return protocol.EncodeGUIHoverOpenAction(), true
+	if action.OpenLabel != "" {
+		if packet, hit := m.hoverActionAt(msg, action.Offer, 0); hit {
+			return packet, true
+		}
+	}
+	if action.Actions {
+		if packet, hit := m.hoverActionAt(msg, action.Offer, 1); hit {
+			return packet, true
+		}
+	}
+	for _, line := range hover.Lines[min(int(hover.ScrollOffset), len(hover.Lines)):] {
+		for _, segment := range line.Segments {
+			if segment.LinkID >= 2 {
+				if packet, hit := m.hoverActionAt(msg, action.Offer, segment.LinkID); hit {
+					return packet, true
+				}
+			}
+		}
 	}
 	return nil, false
+}
+
+func (m Model) hoverActionAt(msg tea.MouseMsg, offer uint64, action uint16) ([]byte, bool) {
+	zone := m.zones.Get(zoneIDHoverAction(offer, action))
+	if zone != nil && zone.InBounds(msg) {
+		return protocol.EncodeGUIHoverOpenAction(offer, action), true
+	}
+	return nil, false
+}
+
+func zoneIDHoverAction(offer uint64, action uint16) string {
+	return fmt.Sprintf("hover:%d:%d", offer, action)
 }
 
 func reviewModelineTarget(status protocol.StatusBar) (string, int) {

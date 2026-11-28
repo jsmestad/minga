@@ -44,6 +44,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   @type t :: %__MODULE__{
           flashes: Flashes.t(),
           hover_popup: HoverPopup.t() | nil,
+          hover_act_origin: pos_integer() | nil,
           notice: Notice.t(),
           blocked_review: blocked_review() | nil,
           whichkey: WhichKey.t(),
@@ -62,6 +63,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   defstruct flashes: %Flashes{},
             hover_popup: nil,
+            hover_act_origin: nil,
             notice: %Notice{},
             blocked_review: nil,
             whichkey: %WhichKey{},
@@ -230,6 +232,15 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec dismiss_hover_popup(t()) :: t()
   def dismiss_hover_popup(%__MODULE__{} = state),
     do: %{state | hover_popup: HoverPopup.dismiss(state.hover_popup)}
+
+  @doc "Binds the pending `g` prefix to this hover, even if the popup leaves before the next key."
+  @spec capture_hover_act(t()) :: t()
+  def capture_hover_act(%__MODULE__{hover_popup: %HoverPopup{code_id: id}} = state),
+    do: %{state | hover_act_origin: id}
+
+  @doc "Releases the captured hover when the normal prefix completes or is interrupted."
+  @spec clear_hover_act(t()) :: t()
+  def clear_hover_act(%__MODULE__{} = state), do: %{state | hover_act_origin: nil}
 
   @doc "Shows newly produced signature-help content."
   @spec show_signature_help(t(), SignatureHelp.t()) :: t()

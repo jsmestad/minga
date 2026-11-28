@@ -3519,14 +3519,14 @@ func TestGitSidebarContainsMaskedAndNonTargetPressesButNotWheel(t *testing.T) {
 		Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}},
 	}}
 	model.surfacePlacements = []generated.SurfacePlacement{
-		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 2, Width: 8, Height: 1}, Z: 290},
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 2, Width: 13, Height: 1}, Z: 290},
 	}
 	model = applyTo(t, model)
 	shown := model.View()
 	y := renderedGitRow(t, shown, "Hover 1:1")
 	drainOutboundPackets(out)
 
-	// Hover paints a padded line beyond its authored eight-cell rect.
+	// Padding inside the visible hover masks the underlying Git row too.
 	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 12, Y: y})
 	updated, _ := updateFromPublishedView(model, shown, click)
 	model = updated.(Model)
@@ -3575,8 +3575,8 @@ func TestGitSidebarContainsMaskedAndNonTargetPressesButNotWheel(t *testing.T) {
 func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 	model := New(60, 16, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}}}},
-		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Visible: true, Name: "Open documentation"}},
+		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Style: 1, Text: "Read "}, {Style: 14, LinkID: 2, Text: "Documentation"}}}}}},
+		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Offer: 51, Actions: true, OpenLabel: "Open documentation"}},
 	}
 	// The hover popup is registry-placed now (#2281): it renders at its BEAM
 	// placement rect and its hover-action zone is scanned from there.
@@ -3584,12 +3584,53 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 11, Col: 0, Width: 60, Height: 4}, Z: 290, HitKind: 8},
 	}
 	model.viewport.SetContent(model.content())
-	_ = model.View()
+	rendered := ansi.Strip(model.View().Content)
+	if !strings.Contains(rendered, "Read Documentation") || !strings.Contains(rendered, "Open documentation   g. actions") {
+		t.Fatalf("rendered hover hides a styled span or footer action:\n%s", rendered)
+	}
 
-	zone := waitForZone(t, model, zoneIDHoverAction)
-	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
-	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIHoverOpenAction()) {
-		t.Fatalf("hover action click should route hover_open_action, ok=%v packet=%v", ok, cmd)
+	for _, action := range []uint16{0, 1, 2} {
+		zone := waitForZone(t, model, zoneIDHoverAction(51, action))
+		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
+		cmd, ok := model.semanticMousePacket(click)
+		if !ok || !bytes.Equal(cmd, protocol.EncodeGUIHoverOpenAction(51, action)) {
+			t.Fatalf("hover action %d click sent %x, accepted=%v", action, cmd, ok)
+		}
+	}
+
+	zone := waitForZone(t, model, zoneIDHoverAction(51, 0))
+	oldClick := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
+	model.chrome[generated.OPGuiHoverAction] = protocol.ChromePayload{HoverAction: protocol.HoverAction{Offer: 52, OpenLabel: "New target"}}
+	if cmd, ok := model.hoverActionMousePacket(oldClick); ok {
+		t.Fatalf("stale footer activated the replacement: %x", cmd)
+	}
+}
+
+func TestHoverRendersTheCommittedScrollOffset(t *testing.T) {
+	model := New(60, 16, nil)
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 4, Col: 3, Width: 32, Height: 6}, Z: 290},
+	}
+
+	first := protocol.RichLine{Segments: []protocol.RichSegment{{Text: "first paragraph"}}}
+	second := protocol.RichLine{Segments: []protocol.RichSegment{{Text: "later paragraph"}}}
+	hover := protocol.HoverPopup{Visible: true, Focused: true, Lines: []protocol.RichLine{first, second}}
+	model.chrome[generated.OPGuiHoverPopup] = protocol.ChromePayload{Hover: hover}
+	initial := model.View().Content
+	if !strings.Contains(initial, "first paragraph") || !strings.Contains(initial, "later paragraph") {
+		t.Fatalf("initial hover did not show both paragraphs:\n%s", initial)
+	}
+
+	hover.ScrollOffset = 1
+	model.chrome[generated.OPGuiHoverPopup] = protocol.ChromePayload{Hover: hover}
+	scrolled := model.View().Content
+	if strings.Contains(scrolled, "first paragraph") || !strings.Contains(scrolled, "later paragraph") {
+		t.Fatalf("committed scroll offset did not change the visible paragraph:\n%s", scrolled)
+	}
+	firstRow := strings.Count(initial[:strings.Index(initial, "first paragraph")], "\n")
+	scrolledRow := strings.Count(scrolled[:strings.Index(scrolled, "later paragraph")], "\n")
+	if scrolledRow != firstRow {
+		t.Fatalf("hover moved on scroll: first content row %d became %d", firstRow, scrolledRow)
 	}
 }
 

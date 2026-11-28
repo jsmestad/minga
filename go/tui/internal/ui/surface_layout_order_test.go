@@ -98,7 +98,7 @@ func TestOverlayBottomPanelOpenHoverWins(t *testing.T) {
 	}
 	model.surfacePlacements = []generated.SurfacePlacement{
 		{SurfaceID: surfaceIDBottomPanel, Z: 200, HitKind: 7},
-		{SurfaceID: surfaceIDHoverPopup, Z: 290, HitKind: 8},
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 4, Col: 4, Width: 36, Height: 3}, Z: 290, HitKind: 8},
 	}
 
 	got := strings.Join(model.overlayLines(), "\n")

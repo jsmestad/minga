@@ -10,6 +10,8 @@ defmodule Minga.Session.StagedDrafts do
 
   Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
 
+  New drafts also store the observed Minga ranges with a fingerprint of the staged bytes they describe. A draft from before attribution was recorded still restores its bytes, without claiming a writer or age.
+
   The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/1`. A draft above `max_file_bytes/1` is never saved; `write_lost/6` replaces its stored copy with a content-free marker, so the next start reports it as lost instead of restoring an older version.
 
   Several Minga instances can share the store. Each view directory holds an owner record naming the instance that saves it (`claim_view_dir/4`): its OS process id and that process's start time, so a reused process id never looks like the old owner. An instance only writes, restores, or deletes a view it has claimed; a view whose owner is still running is left alone, and the claim of an owner that is gone is taken over.
@@ -19,6 +21,8 @@ defmodule Minga.Session.StagedDrafts do
 
   import Bitwise, only: [band: 2]
 
+  alias Minga.Buffer.Author
+  alias Minga.Buffer.DraftOrigins
   alias Minga.SecureFile
   alias Minga.Session.StagedDraft
 
@@ -82,9 +86,12 @@ defmodule Minga.Session.StagedDrafts do
   @spec max_file_bytes(keyword()) :: pos_integer()
   def max_file_bytes(opts \\ []), do: Keyword.get(opts, :max_file_bytes, @max_file_bytes)
 
-  @doc "Largest draft file, in bytes, that is read back: Base64 of a maximal base and content, plus room for the envelope."
+  @doc "Largest stored draft, including Base64 content, its origin ranges, and the envelope."
   @spec max_draft_bytes(keyword()) :: pos_integer()
-  def max_draft_bytes(opts \\ []), do: 2 * div(max_file_bytes(opts) * 4, 3) + 64 * 1024
+  def max_draft_bytes(opts \\ []) do
+    max = max_file_bytes(opts)
+    2 * div(max * 4, 3) + max + 64 * 1024
+  end
 
   @doc "Returns the root directory of the staged draft store."
   @spec dir(keyword()) :: String.t()
@@ -131,9 +138,15 @@ defmodule Minga.Session.StagedDrafts do
     target = draft_file(project_root, view_id, draft.path, opts)
 
     with :ok <- within_size_limit(draft, opts),
-         {:ok, json} <- encode_json(encode(project_root, view_id, workspace_id, draft)) do
+         {:ok, json} <- encode_json(encode(project_root, view_id, workspace_id, draft)),
+         :ok <- encoded_size_limit(json, opts) do
       publish(project_root, view_id, opts, target, json)
     end
+  end
+
+  @spec encoded_size_limit(binary(), keyword()) :: :ok | {:error, :draft_too_large}
+  defp encoded_size_limit(json, opts) do
+    if byte_size(json) <= max_draft_bytes(opts), do: :ok, else: {:error, :draft_too_large}
   end
 
   @doc """
@@ -734,6 +747,24 @@ defmodule Minga.Session.StagedDrafts do
       "deleted" => draft.content == :deleted,
       "content" => encode_content(draft.content)
     }
+    |> encode_origins(draft)
+  end
+
+  @spec encode_origins(map(), StagedDraft.t()) :: map()
+  defp encode_origins(envelope, %StagedDraft{origins: []}), do: envelope
+
+  defp encode_origins(envelope, %StagedDraft{content: bytes, origins: origins}) do
+    Map.put(envelope, "origins", [
+      StagedDraft.fingerprint(bytes),
+      Enum.map(origins, &encode_origin/1)
+    ])
+  end
+
+  @spec encode_origin(DraftOrigins.range()) :: list()
+  defp encode_origin({start, count, {nil, time}}), do: [start, count, time]
+
+  defp encode_origin({start, count, {{:minga, task, step}, time}}) do
+    [start, count, time, Base.encode64(task), Base.encode64(step)]
   end
 
   @spec encode_json(map()) :: {:ok, String.t()} | {:error, :invalid_format}
@@ -775,7 +806,10 @@ defmodule Minga.Session.StagedDrafts do
          {:ok, base} <- decode_optional_bytes(Map.get(map, "base")),
          :ok <- verify_base(base, Map.get(map, "base_sha256")),
          {:ok, content} <- decode_content(map) do
-      {{:ok, file, StagedDraft.new(path, base, content)}, view_id, workspace_id}
+      draft =
+        StagedDraft.new(path, base, content, decode_origins(content, Map.get(map, "origins")))
+
+      {{:ok, file, draft}, view_id, workspace_id}
     else
       {:error, reason} -> {{:lost, file, name, reason}, nil, nil}
     end
@@ -787,6 +821,44 @@ defmodule Minga.Session.StagedDrafts do
 
   defp decode(file, map, _root),
     do: {{:lost, file, lost_name(map, file), :invalid_format}, nil, nil}
+
+  @spec decode_origins(StagedDraft.content(), term()) :: [DraftOrigins.range()]
+  defp decode_origins(bytes, [fingerprint, records]) when is_binary(bytes) and is_list(records) do
+    if fingerprint == StagedDraft.fingerprint(bytes),
+      do: decode_origin_records(records, byte_size(bytes), 0, []),
+      else: []
+  end
+
+  defp decode_origins(_content, _unknown), do: []
+
+  @spec decode_origin_records(list(), non_neg_integer(), non_neg_integer(), [DraftOrigins.range()]) ::
+          [DraftOrigins.range()]
+  defp decode_origin_records([], _size, _stop, acc), do: Enum.reverse(acc)
+
+  defp decode_origin_records([[start, count, time | key] | rest], size, stop, acc)
+       when is_integer(start) and start >= stop and is_integer(count) and count > 0 and
+              start + count <= size and is_integer(time) do
+    case decode_origin_key(key) do
+      {:ok, author} ->
+        decode_origin_records(rest, size, start + count, [{start, count, {author, time}} | acc])
+
+      :error ->
+        []
+    end
+  end
+
+  defp decode_origin_records(_invalid, _size, _stop, _acc), do: []
+
+  @spec decode_origin_key(list()) :: {:ok, Author.key() | nil} | :error
+  defp decode_origin_key([]), do: {:ok, nil}
+
+  defp decode_origin_key([task, step]) when is_binary(task) and is_binary(step) do
+    with {:ok, task} <- Base.decode64(task), {:ok, step} <- Base.decode64(step) do
+      {:ok, Author.key(Author.minga(task), step)}
+    end
+  end
+
+  defp decode_origin_key(_invalid), do: :error
 
   @spec not_lost(map()) :: :ok | {:error, :too_large}
   defp not_lost(%{"lost" => "too_large"}), do: {:error, :too_large}

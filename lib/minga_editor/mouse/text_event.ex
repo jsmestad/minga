@@ -17,7 +17,7 @@ defmodule MingaEditor.Mouse.TextEvent do
     :scroll_x,
     :scroll_y
   ]
-  defstruct @enforce_keys
+  defstruct [{:anchor, nil}, {:terminal_caret_row, nil} | @enforce_keys]
 
   @type scroll_direction :: -1 | 0 | 1
   @type t :: %__MODULE__{
@@ -31,7 +31,9 @@ defmodule MingaEditor.Mouse.TextEvent do
           event_type: Protocol.mouse_event_type(),
           click_count: pos_integer(),
           scroll_x: scroll_direction(),
-          scroll_y: scroll_direction()
+          scroll_y: scroll_direction(),
+          anchor: {non_neg_integer(), non_neg_integer()} | nil,
+          terminal_caret_row: non_neg_integer() | nil
         }
 
   @spec new(map()) :: t()

@@ -145,6 +145,8 @@ Use **Queue** in the conversation header or `SPC a q q` to focus `*minga-queue*`
 
 A finite wheel burst must finish without another input event. The input filter forwards each normalized wheel event to `Model.Update` with its coordinates and modifiers intact; the model reads the signed delta from that event, not shared filter state. The filter never holds wheel input for a later event. Pointer motion remains rate-limited.
 
+Minga asks the terminal for all pointer motion (DECSET 1003), so moving without a button held can show an explanation in the echo area or a hover in the editor. If your terminal or multiplexer does not forward free motion, use `K` to open editor hover and `K` again to focus it. Clicks, wheel input, and drags still work where the terminal reports them. The absence of hover reports does not change keyboard behavior.
+
 ## Capture actual terminal output
 
 Use the production capture when a renderer change looks correct in a model test but leaves stale cells or loses updates in a terminal. `scripts/go_tui_capture.py` launches the supplied production binary with a real PTY, sends committed protocol frames through separate pipes, and reconstructs the emitted ANSI stream into terminal cells. It does not call `Model.View` in place of running the renderer.

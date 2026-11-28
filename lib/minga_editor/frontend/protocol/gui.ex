@@ -344,7 +344,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:tab_unpin, id :: pos_integer()}
           | {:tab_move_left, id :: pos_integer()}
           | {:tab_move_right, id :: pos_integer()}
-          | :hover_open_action
+          | {:hover_open_action, offer_id :: pos_integer(),
+             :open | :actions | {:link, pos_integer()}}
           | :system_will_sleep
           | :system_did_wake
           | {:system_will_unmount, volume_path :: String.t()}
@@ -759,7 +760,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_tab_move_left, <<id::32>>), do: {:ok, {:tab_move_left, id}}
   def decode_gui_action(@gui_action_tab_move_right, <<id::32>>), do: {:ok, {:tab_move_right, id}}
 
-  def decode_gui_action(@gui_action_hover_open_action, <<>>), do: {:ok, :hover_open_action}
+  def decode_gui_action(@gui_action_hover_open_action, <<offer::64, 0::16>>) when offer > 0,
+    do: {:ok, {:hover_open_action, offer, :open}}
+
+  def decode_gui_action(@gui_action_hover_open_action, <<offer::64, 1::16>>) when offer > 0,
+    do: {:ok, {:hover_open_action, offer, :actions}}
+
+  def decode_gui_action(@gui_action_hover_open_action, <<offer::64, id::16>>) when offer > 0,
+    do: {:ok, {:hover_open_action, offer, {:link, id}}}
 
   def decode_gui_action(@gui_action_toggle_panel, <<panel::8>>),
     do: {:ok, {:toggle_panel, panel}}

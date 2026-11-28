@@ -30,8 +30,7 @@ defmodule MingaEditor.State.LSP.PendingRequests do
              non_neg_integer(), non_neg_integer(), position()}
           | {:completion_resolve, pid(), pid(), non_neg_integer(), non_neg_integer(), map()}
           | {:signature_help, pid(), pid(), non_neg_integer(), position()}
-          | {:hover_mouse, non_neg_integer(), non_neg_integer(), pid(), non_neg_integer(),
-             non_neg_integer(), non_neg_integer()}
+          | {:hover, pid()}
           | {:semantic_tokens, pid(), pid(), non_neg_integer(),
              Minga.LSP.PositionEncoding.encoding(), {[String.t()], [String.t()]}}
           | {:operation, operation_kind(), MingaEditor.State.Operation.id(),
@@ -233,34 +232,10 @@ defmodule MingaEditor.State.LSP.PendingRequests do
     )
   end
 
-  @spec track_hover_mouse(
-          t(),
-          reference(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pid(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {:ok, t()} | {:error, :duplicate_ref}
-  def track_hover_mouse(
-        %__MODULE__{} = pending,
-        ref,
-        row,
-        col,
-        buffer,
-        buffer_line,
-        buffer_col,
-        version
-      )
-      when is_reference(ref) and is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and
-             is_pid(buffer) and is_integer(buffer_line) and buffer_line >= 0 and
-             is_integer(buffer_col) and buffer_col >= 0 and is_integer(version) and version >= 0 do
-    track_request(
-      pending,
-      ref,
-      {:hover_mouse, row, col, buffer, buffer_line, buffer_col, version}
-    )
+  @spec track_hover(t(), reference(), pid()) :: {:ok, t()} | {:error, :duplicate_ref}
+  def track_hover(%__MODULE__{} = pending, ref, client)
+      when is_reference(ref) and is_pid(client) do
+    track_request(pending, ref, {:hover, client})
   end
 
   @spec track_semantic_tokens(

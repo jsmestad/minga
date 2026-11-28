@@ -91,7 +91,7 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 					updated, _ = model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: textX, Y: textY}))
 					model = updated.(Model)
 					packets = drainOutboundPackets(out)
-					wantText := protocol.EncodeEditorTextEvent(protocol.AgentPromptWindowID, 825, 0, rows[0].ID, 0, 0, 0, protocol.MousePress, 1, 0, 0)
+					wantText := protocol.EncodeEditorTextEvent(protocol.AgentPromptWindowID, 825, 0, rows[0].ID, 0, 0, 0, protocol.MousePress, 1, 0, 0, 0, 0, protocol.NoTerminalCaretRow)
 					if len(packets) != 1 || !bytes.Equal(packets[0], wantText) {
 						t.Fatalf("rendered prompt text lost its source target: %x", packets)
 					}

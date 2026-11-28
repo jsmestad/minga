@@ -30,6 +30,9 @@ defmodule Minga.Platform.Stub do
     end
   end
 
+  @spec open_url(String.t()) :: :ok
+  def open_url(_url), do: :ok
+
   @spec task_caller_result() :: response() | nil
   defp task_caller_result do
     Enum.find_value(Process.get(:"$callers", []), fn caller ->

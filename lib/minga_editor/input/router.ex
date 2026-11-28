@@ -23,6 +23,8 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor.Shell.Entry
   alias MingaEditor.Shell.Traditional
   alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
+  alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
@@ -272,6 +274,8 @@ defmodule MingaEditor.Input.Router do
   def post_action_housekeeping(state, snapshot) do
     state
     |> InFileReview.resume_ready()
+    |> CodeHoverWorkflow.reconcile_source()
+    |> HoverPopupWorkflow.clear_finished_act_prefix()
     |> maybe_clear_selection_ranges(snapshot.old_mode)
     |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
     |> LspActions.schedule_inlay_hints_on_scroll()

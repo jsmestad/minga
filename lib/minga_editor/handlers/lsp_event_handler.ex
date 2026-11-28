@@ -17,6 +17,7 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   alias MingaEditor.LSP.FormatLifecycle
   alias MingaEditor.LspActions
   alias MingaEditor.SemanticTokenSync
+  alias MingaEditor.Shell.Traditional.CodeHoverWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
@@ -60,6 +61,9 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   def handle(state, {:lsp_response, ref, result}) do
     case LSPState.take_pending_request(state.lsp, ref) do
+      {:ok, {:hover, client}, lsp} ->
+        {CodeHoverWorkflow.finish(%{state | lsp: lsp}, ref, client, result), [:render_now]}
+
       {:ok, request, lsp} ->
         state = %{state | lsp: lsp}
         {dispatch_pending_response(request, state, result), [:render_now]}
@@ -271,14 +275,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
   end
 
   defp dispatch_pending_response(
-         {:hover_mouse, _row, _col, _buffer, _line, _buffer_col, _version} = request,
-         state,
-         result
-       ) do
-    apply_traditional_lsp_response(request, state, result)
-  end
-
-  defp dispatch_pending_response(
          {:semantic_tokens, client, buffer, version, encoding, legend},
          state,
          result
@@ -319,42 +315,12 @@ defmodule MingaEditor.Handlers.LspEventHandler do
 
   defp apply_signature_help_response(state, _result), do: state
 
-  @spec apply_traditional_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
-  defp apply_traditional_lsp_response(
-         kind,
-         %{shell_runtime: %{state: %ShellState{}}} = state,
-         result
-       ),
-       do: dispatch_lsp_response(kind, state, result)
-
-  defp apply_traditional_lsp_response(_kind, state, _result), do: state
-
   @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
   defp dispatch_lsp_response(:definition, state, result),
     do: LspActions.handle_definition_response(state, result)
 
   defp dispatch_lsp_response(:peek_definition, state, result),
     do: LspActions.handle_peek_definition_response(state, result)
-
-  defp dispatch_lsp_response(:hover, state, result),
-    do: LspActions.handle_hover_response(state, result)
-
-  defp dispatch_lsp_response(
-         {:hover_mouse, row, col, buffer, line, buffer_col, version},
-         state,
-         result
-       ),
-       do:
-         LspActions.handle_hover_mouse_response(
-           state,
-           result,
-           row,
-           col,
-           buffer,
-           line,
-           buffer_col,
-           version
-         )
 
   defp dispatch_lsp_response({kind, operation_id, origin_tab_id}, state, result)
        when kind in [:references, :rename] do
@@ -457,9 +423,6 @@ defmodule MingaEditor.Handlers.LspEventHandler do
     Minga.Log.debug(:lsp, "Unhandled LSP response kind: #{inspect(kind)}")
     state
   end
-
-  defp dispatch_current_response(:hover, state, result, _origin),
-    do: apply_traditional_lsp_response(:hover, state, result)
 
   defp dispatch_current_response(:code_lens, state, result, origin),
     do: LspActions.handle_code_lens_response(state, result, origin)

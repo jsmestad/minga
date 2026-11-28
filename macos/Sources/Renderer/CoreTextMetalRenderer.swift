@@ -758,7 +758,7 @@ final class CoreTextMetalRenderer {
         // their line textures come from WindowContentRenderer instead.
         // Selection, search, and diagnostic overlays are drawn as Metal quads.
         var semanticOverlayQuads: [QuadGPU] = []
-        var diagnosticQuads: [QuadGPU] = []
+        var textMarkQuads: [QuadGPU] = []
 
         if let wcr = windowContentRenderer {
             for preparedSurface in preparedSurfaces {
@@ -893,7 +893,12 @@ final class CoreTextMetalRenderer {
 
                 // Document highlight overlay quads (drawn before search matches,
                 // so search matches paint over them when they overlap).
-                for highlight in preparedSurface.surface.residentSemantics == nil ? content.documentHighlights : [] {
+                let highlights = content.documentHighlights
+                let hoverStart = highlights.last?.kind == .hover
+                    ? (highlights.lastIndex { $0.kind != .hover }.map { $0 + 1 } ?? highlights.startIndex)
+                    : highlights.endIndex
+                let referenceEnd = preparedSurface.surface.residentSemantics == nil ? hoverStart : highlights.startIndex
+                for highlight in highlights[..<referenceEnd] {
                     guard highlight.endCol > highlight.startCol else { continue }
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
@@ -954,6 +959,7 @@ final class CoreTextMetalRenderer {
                 )
                 var visibleRowEnds: [Int: Float] = [:]
                 var textRows: [PresentedTextLayout.Row] = []
+                var hoverIndex = hoverStart
                 for command in preparedRows.commands {
                     let displayRow = command.displayRow
                     let presentationRow = command.presentationRow
@@ -994,6 +1000,29 @@ final class CoreTextMetalRenderer {
                         rect: CGRect(x: CGFloat(contentColOffset / scale), y: CGFloat(yPos / scale), width: CGFloat((contentRightPx - contentColOffset) / scale), height: CGFloat(displayCellH))
                     )
                     textRows.append(textRow)
+                    while hoverIndex < highlights.endIndex && Int(highlights[hoverIndex].startRow) < presentationRow {
+                        hoverIndex += 1
+                    }
+                    if hoverIndex < highlights.endIndex, Int(highlights[hoverIndex].startRow) == presentationRow,
+                       let mark = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: max(scale, 1), top: contentTopPx, bottom: contentBottomPx) {
+                        let columns = GUIDisplayColumnMap(command.row.text)
+                        let ink = colorFromU24(wcr.defaultFgRGB, default: SIMD3<Float>(0.8, 0.8, 0.8))
+                        while hoverIndex < highlights.endIndex && Int(highlights[hoverIndex].startRow) == presentationRow {
+                            let highlight = highlights[hoverIndex]
+                            hoverIndex += 1
+                            guard highlight.startCol < highlight.endCol,
+                                  let x = textRow.xRange(columns: Int(highlight.startCol)..<Int(highlight.endCol), columnMap: columns, startColumn: command.composedStartColumn) else { continue }
+                            let left = max(Float(x.lowerBound) * scale, contentColOffset)
+                            let right = min(Float(x.upperBound) * scale, contentRightPx)
+                            guard left < right else { continue }
+                            var quad = QuadGPU()
+                            quad.position = SIMD2<Float>(left, mark.y)
+                            quad.size = SIMD2<Float>(right - left, mark.height)
+                            quad.color = ink
+                            quad.alpha = 1.0
+                            textMarkQuads.append(quad)
+                        }
+                    }
                     if let cursor = panningCaret, Int(cursor.row) == presentationRow,
                        (command.composedUTF16Start...command.composedUTF16End).contains(Int(cursor.utf16)) {
                         // Animate in committed coordinates; the draw pass applies the presentation offset and clips.
@@ -1132,7 +1161,7 @@ final class CoreTextMetalRenderer {
                     quad.size = SIMD2<Float>(diagRight - diagX, clipped.height)
                     quad.color = diagColor
                     quad.alpha = 1.0
-                    diagnosticQuads.append(quad)
+                    textMarkQuads.append(quad)
                 }
             }
         }
@@ -1194,7 +1223,7 @@ final class CoreTextMetalRenderer {
             smoothScrollOffsetPx: smoothScrollOffsetPx
         )
         let quadPassCounts = [bgQuads.count] + guidePassCounts
-            + [semanticOverlayQuads.count, diagnosticQuads.count, gutterChromeQuads.count]
+            + [semanticOverlayQuads.count, textMarkQuads.count, gutterChromeQuads.count]
             + [gutterMarkQuads.count]
         let bufferDemand: NativeDrawBufferDemand
         do {
@@ -1596,10 +1625,11 @@ final class CoreTextMetalRenderer {
                              texture: atlasTexture, encoder: encoder, uniforms: &uniforms)
         }
 
-        // Pass 3.5: Diagnostic underline quads (drawn after text, before gutter).
-        if !diagnosticQuads.isEmpty {
+        // Pass 3.5: Text marks drawn after the block caret and glyphs.
+        // Diagnostics stay below the glyphs; the exact hover source marks their top edge.
+        if !textMarkQuads.isEmpty {
             encoder.setRenderPipelineState(bgPipeline)
-            drawQuadBatches(diagnosticQuads, buffer: candidateQuadBuffer,
+            drawQuadBatches(textMarkQuads, buffer: candidateQuadBuffer,
                                             writeOffset: &candidateQuadWriteOffset,
                                             encoder: encoder, uniforms: &uniforms)
         }
