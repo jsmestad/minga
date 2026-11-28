@@ -127,7 +127,7 @@ The top of the act menu and every surface where Minga asks a yes or no question.
 | Label to consequence | `hairline` | 2 pt | next row |
 | Height | content | label plus consequence, at least 44 pt | 2 rows |
 
-On macOS both cards share the same top edge, heading baseline and bottom shortcut baseline. The consequence starts below the heading and aligns with its text, not its key. The label uses `emphasis` semibold and the consequence uses smaller text; neither relies on low contrast for hierarchy. The selected half uses a light tint and outline in the target's role. The TUI centers the label and consequence in two rows and uses reverse video in the target's role. The no half is never preselected.
+On macOS both cards share the same top edge, heading baseline and bottom shortcut baseline. The consequence starts below the heading and aligns with its text, not its key. The label uses `emphasis` semibold and the consequence uses smaller text; neither relies on low contrast for hierarchy. The selected half uses a light tint and outline in the target's role. The TUI centers consequences and aligns headings and shortcuts to their own columns when both shortcuts fit. When space is tight, it centers both headings and omits both shortcuts. The TUI uses reverse video in the target's role. The no half is never preselected.
 
 ## Popover and menu
 

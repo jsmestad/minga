@@ -93,12 +93,18 @@ func (m Model) floatingActMenu() (*lipgloss.Layer, actMenuPresentation) {
 	for _, row := range menu.Rows {
 		width = max(width, max(keyWidth+hintWidth+displayWidth(row.Label)+actMenuDetailWidth(row.Detail)+2*spaceXL.cols()+2*insetWidth, displayWidth(row.Section)+2*spaceXL.cols()))
 	}
+	leadLabelWidth, leadHintWidth, leadDetailWidth := 0, 0, 0
 	for _, row := range menu.Lead {
-		leadLabel := displayWidth(row.Key) + spaceMD.cols() + displayWidth(row.Label)
-		if row.Hint != "" {
-			leadLabel += 2 * (spaceMD.cols() + displayWidth(row.Hint))
+		leadLabelWidth = max(leadLabelWidth, displayWidth(row.Key)+spaceMD.cols()+displayWidth(row.Label))
+		leadHintWidth = max(leadHintWidth, displayWidth(row.Hint))
+		leadDetailWidth = max(leadDetailWidth, displayWidth(row.Detail))
+	}
+	leadWithHint := leadLabelWidth + leadHintWidth + 3*spaceMD.cols()
+	if len(menu.Lead) > 0 {
+		lead := max(leadLabelWidth, leadDetailWidth) + 2*insetWidth
+		if leadHintWidth > 0 {
+			lead = max(lead, leadWithHint)
 		}
-		lead := max(leadLabel, displayWidth(row.Detail)) + 2*insetWidth
 		width = max(width, lead*len(menu.Lead)+len(menu.Lead)-1)
 	}
 	width = min(width+2, min(m.width, actMenuMaxWidth))
@@ -126,6 +132,10 @@ func (m Model) floatingActMenu() (*lipgloss.Layer, actMenuPresentation) {
 	if len(menu.Lead) > 0 && leadHeight > 0 {
 		leadWidth := (inside - len(menu.Lead) + 1) / len(menu.Lead)
 		if leadWidth > 0 {
+			// If either shortcut would crowd its label, neither card shows one.
+			if leadWithHint > leadWidth {
+				leadHintWidth = 0
+			}
 			var leadLines [decisionBarRows]string
 			for i, row := range menu.Lead {
 				top, detail := base.Bold(true), muted
@@ -133,7 +143,7 @@ func (m Model) floatingActMenu() (*lipgloss.Layer, actMenuPresentation) {
 					top = selected.Bold(true)
 					detail = selected
 				}
-				label := actMenuLeadLabel(actMenuKeyLabel(row), row.Hint, leadWidth)
+				label := actMenuLeadLabel(actMenuKeyLabel(row), row.Hint, leadWidth, leadHintWidth)
 				texts := [decisionBarRows]string{label, sanitizeTerminalText(row.Detail)}
 				styles := [decisionBarRows]lipgloss.Style{top, detail}
 				for line := range leadHeight {
@@ -256,14 +266,14 @@ func actMenuDetailWidth(detail string) int {
 	return displayWidth(" · ") + displayWidth(detail)
 }
 
-func actMenuLeadLabel(label, hint string, width int) string {
-	hint = sanitizeTerminalText(hint)
-	hintWidth := displayWidth(hint)
-	side := hintWidth + spaceMD.cols()
-	if hintWidth == 0 || displayWidth(label)+2*side > width {
+func actMenuLeadLabel(label, hint string, width, hintWidth int) string {
+	if hintWidth == 0 {
 		return label
 	}
-	return strings.Repeat(" ", side) + lipgloss.PlaceHorizontal(width-2*side, lipgloss.Center, label) + gap(spaceMD) + hint
+	padding := gap(spaceMD)
+	labelWidth := width - hintWidth - 3*spaceMD.cols()
+	return padding + fitStyled(label, labelWidth) + padding +
+		lipgloss.PlaceHorizontal(hintWidth, lipgloss.Right, sanitizeTerminalText(hint)) + padding
 }
 
 func boolCell(on bool) int {

@@ -88,13 +88,15 @@ func TestActMenuFitsShortTerminalAndRevealsSelectedRow(t *testing.T) {
 	}
 }
 
-func TestActMenuKeepsBothConsequencesInsideTheWideTerminalWidthCap(t *testing.T) {
+func TestActMenuAlignsBothShortcutsAndKeepsConsequencesInsideTheWidthCap(t *testing.T) {
 	menu := reviewActMenuFixture()
 	menu.Title = "Minga’s change · 48 lines · unreviewed"
 	menu.Lead[0].Label = "Keep change"
 	menu.Lead[0].Detail = "Leaves Minga’s edits in place"
+	menu.Lead[0].Hint = "SPC a y"
 	menu.Lead[1].Label = "Reject change"
 	menu.Lead[1].Detail = "Undoes only Minga’s edits"
+	menu.Lead[1].Hint = "SPC a d"
 	menu.Rows[0].Label = strings.Repeat("long action ", 8)
 	model := applyTo(t, New(120, 40, nil), frame(actMenuCommand(menu))...)
 	layer, shown := model.floatingActMenu()
@@ -104,6 +106,14 @@ func TestActMenuKeepsBothConsequencesInsideTheWideTerminalWidthCap(t *testing.T)
 	plain := ansi.Strip(layer.GetContent())
 	if !strings.Contains(plain, menu.Lead[0].Detail) || !strings.Contains(plain, menu.Lead[1].Detail) {
 		t.Fatalf("both decision consequences should fit:\n%s", plain)
+	}
+	view := model.View()
+	for i, row := range menu.Lead {
+		x, y := actMenuCell(t, view, row.Hint)
+		card := shown.rows[i].box
+		if y != card.Y || x+displayWidth(row.Hint) != card.X+card.Width-1 {
+			t.Fatalf("%q is not inset one cell from the card's trailing edge", row.Hint)
+		}
 	}
 }
 

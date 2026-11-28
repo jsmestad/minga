@@ -9,7 +9,7 @@
 ▾  1  defmodule UsageLimit do
    2 ▚  def label, do: "Your plan limit applies"
    1    def windo╭─○ Minga’s change · 1 line · unreviewed──────────────› filter╮
-   2    def retry│        y Keep change  SPC a y│       n Reject change        │
+   2    def retry│ y Keep change        SPC a y │ n Reject change      SPC a d │
    3  end        │Leaves Minga’s edits in place │  Undoes only Minga’s edits   │
    4             │ This change ────────────────────────────────────────────────│
       ~          │ = Show diff                                               = │

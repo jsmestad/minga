@@ -11,7 +11,7 @@
    1    def window, do: 60
    4 ▚  def retry?, do: true
    1  ╭─○ 2 Minga changes · 2 lines · unreviewed────────────› filter╮
-   2  │       y Keep 2 changes       │      n Reject 2 changes      │
+   2  │ y Keep 2 changes     SPC a y │ n Reject 2 changes   SPC a d │
       │Leaves Minga’s edits in place │  Undoes only Minga’s edits   │
       │ This change ────────────────────────────────────────────────│
       │ = Show diff                                               = │
