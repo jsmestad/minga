@@ -21,10 +21,19 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 
 ## Ordering against the Spine
 
-- #4060 slice 1 (Zig 0.17) lands before S1 writes `minga-run`. S1 writes its PTY and process-group code as a module `minga-terminal` can link.
+Agreed with the session running the Spine epic (#4027) on 2026-11-28.
+
+- **Order:** #4397, then #4388, then the real-frontend measurements left open on #4387, then S1. Neither #4378 nor #4254 needs to land before #4397.
+- **Zig:** the Spine lands #4060 slice 1 (Zig 0.17) as a standalone toolchain PR. It must merge before S1 writes `minga-run`; S1 does not wait for the rest of #4060. S1 lands the PTY and process-group code as a module, and #4060 slice 2 links it into `minga-terminal`. The module is shared; the helper process and its protocol are not.
+- **Protocol:** prefer #4059 first, and serialize schema changes with it. #4059 owns diagnostic signs, blame and source-edit authorship. S1 owns one command-block description (state, author, exit code, duration), reuses the existing Spine state tokens, and keeps placement separate so a run header and a terminal gutter can show the same facts. Do not extend `gutter_authored_region` to mean command authorship: its revision and unit id are file-review facts. Take wire versions from `main` at integration.
+- **Drawers:** S1 extends `MingaEditor.Shell.Traditional.Drawers`, the existing one-slot stack, and adds an in-grid buffer drawer without changing the Tasks list reservation. #4060 owns the terminal-over-Tasks replay of `windows.drawer_stack`. #4393 and #4379 do not conflict.
+- **Project root:** a run captures the resolved project root at launch, separately from its working directory. The log is never keyed by a workspace or tab id, a changeset overlay directory, or whichever project is active when output arrives. #4056 and #4057 own root resolution.
+- **Folds and gutters:** coordinate #4378's gutter change with #4388, keep #4145's distinction between inherited pane fill and explicit span backgrounds, and preserve exact presented-row hits in #4388.
+- **Stay out of:** hover and text input (#4053), project-config trust (#4329), disk visibility of unreviewed edits (#4033), and approval authority (#4052, #4335). S5 keeps the agent's current working-directory contract without waiting for #4033. S1's quit changes are coordinated with #4395 so stopping runs does not weaken scoped swap release.
 - #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It merged on 2026-11-28.
 - S1 defines the block-state and strand fields in the protocol once. #4061 reuses them.
-- #4061 depends on S2, for the shared command-block target. S5 depends on nothing from #4060.
+- #4061 waits for #4060, S1 and S2, then adds the interactive terminal source and verifies `terminal.failed_block.menu`. It does not wait for S5. S5 depends on nothing from #4060.
+- Scenarios `terminal.minga_shell` and `terminal.minga_shell.approval` keep their ids. Their ownership in the storyboard registry moves from #4061 to S5 when S5 is filed, and S5 updates their boards and paired renders. #4027's first acceptance criterion still counts both unless the owner narrows it.
 - S0 (#4388) changes rendering code Spine tickets share; see its coordination note.
 
 ## A prerequisite Spike B found
@@ -100,6 +109,8 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
   - Keys in the focused buffer: `q`, `esc`, `x`, `r`, `]]`, `[[`, `za`. `SPC c o`. Links with `↩`, `go` and ⌘-click through the generic `path:line` matcher. `SPC m t o` becomes an alias.
   - `:{range}!cmd` as a filter and `:r !cmd` as an insert.
   - Delete `Minga.CommandOutput`; fix the "Building Minga" notification copy by removing those notifications.
+  - `Minga.Session.EventRecorder` (`lib/minga/session/event_recorder.ex`) subscribes to and persists `:command_done`. Move it and its tests to terminal run outcomes, not every progress event, and keep historical records readable.
+  - #4062 expects clickable `file:line` links in test output. Keep that behaviour on the new output path.
 - **Done when:**
   - `:!seq 1 3000` shows its output in the drawer with the file still focused, on both frontends.
   - `:!sleep 300` then `x` ends the OS process group; the block reads "Stopped".
@@ -131,6 +142,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 **Owner agreed (2026-11-28):** `Minga.Run` owns agent command execution, and agent commands use the PTY by default with a pipe for stdout as a per-command fallback. First step of this slice: run the agent's most common commands both ways and compare what the model receives, including the untested pipe-with-controlling-terminal case. The agent's Session keeps the approval decision and the run buffer only shows it, and command-block actions are one act-menu target with a run source (S2) and a terminal source (#4061).
 
 - **Delivers:** the agent's shell commands are runs in the same buffer, with the minga strand, the word "Minga", and approvals as pending blocks. `SPC a w`.
+- **Also owns:** adding Watch Minga (`SPC a w`) through the shared `SPC a` keymap, including the stale storyboard check attributed to #4028; the boards and renders for `terminal.minga_shell` and `terminal.minga_shell.approval`.
 - **Work:** `MingaAgent.Tools.Shell` becomes a client of `Minga.Run` (colour stripped from what the model reads); approval routing from the Editor to the agent; the ⌘. order; the ADR-0008 amendment; delete `minga-shell-output-reader` and the hook runner's shell mode.
 - **Done when:** an agent run and your run appear as blocks with different strands; your keys cannot stop Minga's run; an approval answered in the drawer and one answered in the conversation agree; the agent's reading of `mix test`, `git diff`, `rg` and `ls` is compared with today's pipe, and each difference is either covered by the tool's description or removed by the pipe option. Spike A already shows `rg` and `ls` differ.
 
