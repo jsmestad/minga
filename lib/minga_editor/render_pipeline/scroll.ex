@@ -45,6 +45,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     ]
 
     defstruct [
+      {:extra_sources, []},
       :window,
       :win_layout,
       :is_active,
@@ -83,6 +84,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             cursor_col: non_neg_integer(),
             first_line: non_neg_integer(),
             lines: [String.t()],
+            extra_sources: [Minga.Buffer.RenderSnapshot.extra_range()],
             snapshot: Minga.Buffer.RenderSnapshot.t(),
             gutter_w: non_neg_integer(),
             content_w: pos_integer(),

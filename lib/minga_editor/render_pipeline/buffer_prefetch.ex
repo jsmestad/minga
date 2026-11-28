@@ -108,19 +108,13 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   def ensure_resident_source(
         state,
         %WindowScroll{wrap_on: true} = scroll,
-        {:splice, start, _, count}
-      )
-      when count > 0 do
-    replace_resident_source(state, scroll, start, count)
-  end
-
-  def ensure_resident_source(
-        state,
-        %WindowScroll{wrap_on: true} = scroll,
-        {:splices, [first | rest]}
+        {:splices, [_ | _] = source_splices}
       ) do
-    last = Enum.reduce(rest, first, &max/2)
-    replace_resident_source(state, scroll, first, last - first + 1)
+    [{first, last} | rest] = EditDelta.inserted_line_ranges(source_splices)
+
+    state
+    |> replace_resident_source(scroll, first, last - first + 1)
+    |> with_extra_sources(state, rest)
   end
 
   def ensure_resident_source(_state, scroll, _plan), do: scroll
@@ -146,10 +140,62 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       scroll
       | snapshot: snapshot,
         lines: lines,
+        extra_sources: [],
         preview_matches: preview_matches,
         first_line: first,
         visible_row_start_index: scroll.viewport.top
     }
+  end
+
+  # Attaches the source text for every further range the frame's edits changed. A range the snapshot already
+  # holds (it was read in the same buffer call as the edits) is used as it is; any other is fetched at the
+  # snapshot's version.
+  @spec with_extra_sources(WindowScroll.t(), state(), [EditDelta.line_range()]) ::
+          WindowScroll.t()
+  defp with_extra_sources(%WindowScroll{} = scroll, _state, []), do: %{scroll | extra_sources: []}
+
+  defp with_extra_sources(%WindowScroll{snapshot: snapshot} = scroll, state, ranges) do
+    primary_last = scroll.first_line + length(scroll.lines) - 1
+
+    {sources, preview_matches} =
+      ranges
+      |> Enum.reject(fn {first, last} -> first >= scroll.first_line and last <= primary_last end)
+      |> Enum.map_reduce(scroll.preview_matches, fn {first, last}, matches ->
+        {source_first, offset, lines} = extra_range(scroll, snapshot, first, last)
+
+        {lines, more} =
+          if scroll.is_active,
+            do: SearchHighlight.maybe_substitute_preview(state, lines, source_first),
+            else: {lines, []}
+
+        {{source_first, offset, lines}, matches ++ more}
+      end)
+
+    extra_lines =
+      Enum.reduce(sources, 0, fn {_first, _offset, lines}, sum -> sum + length(lines) end)
+
+    report_line_fetch(scroll.window.id, buffer_pid(scroll.window), extra_lines, true)
+    %{scroll | extra_sources: sources, preview_matches: preview_matches}
+  end
+
+  @spec extra_range(WindowScroll.t(), RenderSnapshot.t(), non_neg_integer(), non_neg_integer()) ::
+          RenderSnapshot.extra_range()
+  defp extra_range(scroll, snapshot, first, last) do
+    held =
+      Enum.find(snapshot.extra_ranges, fn {held_first, _offset, lines} ->
+        first >= held_first and last < held_first + length(lines)
+      end)
+
+    case held do
+      nil ->
+        fetched =
+          fetch_at_version!(buffer_pid(scroll.window), snapshot.version, first, last - first + 1)
+
+        {first, fetched.first_line_byte_offset, fetched.lines}
+
+      range ->
+        range
+    end
   end
 
   # ── Private ──────────────────────────────────────────────────────────────
@@ -537,6 +583,22 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
         visible_row_start_index: visible_row_start_index,
         full_residence: full_residence?
     }
+    |> with_extra_sources(
+      state,
+      extra_delta_ranges(window, full_residence? and not wrap_on, line_count)
+    )
+  end
+
+  # The changed ranges after the first one, for a resident window that reads its edits from the frame's own
+  # fetch. A wrapped window fetches from its build plan instead (`ensure_resident_source/3`).
+  @spec extra_delta_ranges(Window.t(), boolean(), non_neg_integer()) :: [EditDelta.line_range()]
+  defp extra_delta_ranges(_window, false, _line_count), do: []
+
+  defp extra_delta_ranges(window, true, line_count) do
+    case resident_delta_ranges(window, line_count) do
+      [_first | rest] -> rest
+      [] -> []
+    end
   end
 
   defp admit_residence(state, window, snapshot, basis, wrap_on, direct_layout?, active?) do
@@ -711,17 +773,28 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {buf_first, buf_last - buf_first + 1, 0}
   end
 
+  # The first range the frame's edits changed. The frame fetches it as its own source; the ranges after it
+  # ride along as extra sources, so lines between two edits are never read.
   @spec resident_delta_fetch_range(Window.t(), non_neg_integer()) ::
           {non_neg_integer(), pos_integer()} | nil
   defp resident_delta_fetch_range(window, line_count) do
+    case resident_delta_ranges(window, line_count) do
+      [{first, last} | _rest] -> {first, last - first + 1}
+      [] -> nil
+    end
+  end
+
+  @spec resident_delta_ranges(Window.t(), non_neg_integer()) :: [EditDelta.line_range()]
+  defp resident_delta_ranges(window, line_count) do
     deltas = Window.pending_edit_deltas(window)
 
     if Window.resident_build(window) != nil and deltas != [] do
-      {first, last} = EditDelta.affected_line_range(deltas)
-      bounded_first = min(first, max(line_count - 1, 0))
-      {bounded_first, max(min(last, line_count - 1) - bounded_first + 1, 1)}
+      deltas
+      |> EditDelta.line_splices()
+      |> EditDelta.inserted_line_ranges()
+      |> EditDelta.clamp_line_ranges(line_count)
     else
-      nil
+      []
     end
   end
 
@@ -852,25 +925,51 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           Window.pending_edit_deltas(window)} do
       {%ResidentBuild{store: store, line_count: old_count}, prior, [_ | _] = deltas}
       when is_integer(prior) and prior <= limit ->
-        {first, last} = EditDelta.affected_line_range(deltas)
-        count = last - first + 1
-        old_end = first + count - (snapshot.line_count - old_count)
+        source_splices = EditDelta.line_splices(deltas)
 
-        case {ResidentStore.visual_rank(store, first), ResidentStore.visual_rank(store, old_end)} do
-          {old_start, old_stop}
-          when is_integer(old_start) and is_integer(old_stop) and old_stop >= old_start ->
-            range = fetch_at_version!(buffer_pid(window), snapshot.version, first, count)
+        net =
+          Enum.reduce(source_splices, 0, fn {_start, delete_count, insert_count}, net ->
+            net + insert_count - delete_count
+          end)
 
-            prior - (old_stop - old_start) +
-              Enum.sum(WrapLayout.row_counts(range, width, oracle, cursor_line))
+        removed = removed_visual_rows(store, source_splices)
 
-          _unmatched ->
-            measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
+        if is_integer(removed) and old_count + net == snapshot.line_count do
+          added =
+            source_splices
+            |> EditDelta.inserted_line_ranges()
+            |> Enum.reduce(0, fn {first, last}, sum ->
+              range =
+                fetch_at_version!(buffer_pid(window), snapshot.version, first, last - first + 1)
+
+              sum + Enum.sum(WrapLayout.row_counts(range, width, oracle, cursor_line))
+            end)
+
+          prior - removed + added
+        else
+          measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
         end
 
       _other ->
         measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
     end
+  end
+
+  # The visual rows the splices delete from the store, or nil when a splice does not land on a known line.
+  @spec removed_visual_rows(ResidentStore.t(), [EditDelta.line_splice()]) ::
+          non_neg_integer() | nil
+  defp removed_visual_rows(store, source_splices) do
+    Enum.reduce_while(source_splices, 0, fn {start, delete_count, _insert_count}, sum ->
+      case {ResidentStore.visual_rank(store, start),
+            ResidentStore.visual_rank(store, start + delete_count)} do
+        {old_start, old_stop}
+        when is_integer(old_start) and is_integer(old_stop) and old_stop >= old_start ->
+          {:cont, sum + old_stop - old_start}
+
+        _unmatched ->
+          {:halt, nil}
+      end
+    end)
   end
 
   @spec measure_wrap_chunks(

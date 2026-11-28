@@ -674,7 +674,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          font_registry
        ) do
     inputs = %{
-      source: resident_source(first_line, lines, snapshot.line_count),
+      source: resident_source(first_line, lines, snapshot.line_count, scroll.extra_sources),
       line_count: snapshot.line_count,
       compose_fp: retain_ctx.compose_fp,
       highlight_fp: highlight_content_fingerprint(ctx.highlight),
@@ -701,8 +701,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       build_dirty: fn dirty, registry ->
         build_dirty_entries(
           dirty,
-          lines,
-          first_line,
+          [{first_line, snapshot.first_line_byte_offset, lines} | scroll.extra_sources],
           scroll.wrap_on,
           ctx,
           snapshot,
@@ -835,45 +834,73 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp row_store_mode(%ResidentBuild{store: store}), do: {:resident, ResidentStore.size(store)}
   defp row_store_mode(nil), do: :windowed
 
-  @spec resident_source(non_neg_integer(), [String.t()], non_neg_integer()) ::
-          ResidentBuild.source()
-  defp resident_source(0, lines, count) do
+  @spec resident_source(
+          non_neg_integer(),
+          [String.t()],
+          non_neg_integer(),
+          [RenderSnapshot.extra_range()]
+        ) :: ResidentBuild.source()
+  defp resident_source(0, lines, count, extra_sources) do
     case length(lines) do
       ^count -> {:complete, lines}
-      _ -> {:range, 0, lines}
+      _ -> source_ranges(0, lines, extra_sources)
     end
   end
 
-  defp resident_source(first, lines, _count), do: {:range, first, lines}
+  defp resident_source(first, lines, _count, extra_sources),
+    do: source_ranges(first, lines, extra_sources)
+
+  defp source_ranges(first, lines, extra_sources) do
+    extras =
+      for {extra_first, _offset, extra_lines} <- extra_sources, do: {extra_first, extra_lines}
+
+    {:ranges, [{first, lines} | extras]}
+  end
 
   # Composes complete visual groups only for dirty logical lines.
   @spec build_dirty_entries(
           MapSet.t(non_neg_integer()),
-          [String.t()],
-          non_neg_integer(),
+          [RenderSnapshot.extra_range()],
           boolean(),
           Context.t(),
           map(),
           retain_ctx(),
           FontRegistry.t()
         ) :: {%{non_neg_integer() => [visual_row_entry()]}, FontRegistry.t()}
-  defp build_dirty_entries(
+  defp build_dirty_entries(dirty, sources, wrapped?, ctx, snapshot, retain_ctx, font_registry) do
+    wrap_opts = if wrapped?, do: wrap_options(ctx, snapshot.options), else: nil
+
+    # Each source range is a separate run of the document, so byte offsets and highlight walks restart in it.
+    Enum.reduce(sources, {%{}, font_registry}, fn {first_line, first_byte_off, lines}, acc ->
+      last_line = first_line + length(lines) - 1
+      in_range = Enum.filter(dirty, &(&1 >= first_line and &1 <= last_line))
+
+      build_dirty_in_source(
+        in_range,
+        {first_line, first_byte_off, lines},
+        wrap_opts,
+        ctx,
+        retain_ctx,
+        acc
+      )
+    end)
+  end
+
+  defp build_dirty_in_source([], _source, _wrap_opts, _ctx, _retain_ctx, acc), do: acc
+
+  defp build_dirty_in_source(
          dirty,
-         lines,
-         first_line,
-         wrapped?,
+         {first_line, first_byte_off, lines},
+         wrap_opts,
          ctx,
-         snapshot,
          retain_ctx,
-         font_registry
+         acc
        ) do
-    first_byte_off = snapshot.first_line_byte_offset
     local_dirty = MapSet.new(dirty, &(&1 - first_line))
     offsets = dirty_line_offsets(lines, first_byte_off, local_dirty)
     masked = masked_highlight_by_index(ctx.highlight, lines, first_byte_off, local_dirty)
-    wrap_opts = if wrapped?, do: wrap_options(ctx, snapshot.options), else: nil
 
-    Enum.reduce(dirty, {%{}, font_registry}, fn absolute_index, {acc, registry} ->
+    Enum.reduce(dirty, acc, fn absolute_index, {acc, registry} ->
       local_index = absolute_index - first_line
       {line_text, line_byte_offset} = Map.fetch!(offsets, local_index)
 

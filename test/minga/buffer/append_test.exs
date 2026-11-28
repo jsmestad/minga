@@ -15,7 +15,7 @@ defmodule Minga.Buffer.AppendTest do
   end
 
   # Registers the renderer as a reader, as the first frame of a window does.
-  defp consume(buffer), do: Buffer.renderer_consume(buffer, nil)
+  defp consume(buffer), do: Buffer.renderer_consume(buffer, [])
 
   describe "what one chunk records" do
     test "a chunk is one insertion at the old end, read once by the renderer" do

@@ -78,8 +78,8 @@ defmodule MingaEditor.Renderer.BufferChanges do
   defp consume_buffer_if_changed(%State{} = state, buffer, observed_version) do
     # This call is intentionally unconditional. Besides advancing changed buffers,
     # it closes the consume/fetch race when a retry reuses an older editor intent.
-    prior_range = pending_affected_range(state.resident_windows, buffer)
-    consumed = safe_consume(buffer, observed_version, prior_range)
+    prior_ranges = pending_affected_ranges(state.resident_windows, buffer)
+    consumed = safe_consume(buffer, observed_version, prior_ranges)
     residents = fanout(state.resident_windows, buffer, consumed)
 
     delta_count =
@@ -104,13 +104,10 @@ defmodule MingaEditor.Renderer.BufferChanges do
     %{state | resident_windows: residents, observed_buffers: observed_buffers}
   end
 
-  @spec safe_consume(
-          pid(),
-          non_neg_integer(),
-          {non_neg_integer(), non_neg_integer()} | nil
-        ) :: RendererConsume.t()
-  defp safe_consume(buffer, fallback_version, prior_range) do
-    Minga.Buffer.renderer_consume(buffer, prior_range)
+  @spec safe_consume(pid(), non_neg_integer(), [{non_neg_integer(), non_neg_integer()}]) ::
+          RendererConsume.t()
+  defp safe_consume(buffer, fallback_version, prior_ranges) do
+    Minga.Buffer.renderer_consume(buffer, prior_ranges)
   catch
     :exit, _ ->
       %RendererConsume{
@@ -161,62 +158,40 @@ defmodule MingaEditor.Renderer.BufferChanges do
     end)
   end
 
-  @spec pending_affected_range(
+  # The line ranges still pending for a buffer, in its current coordinates. A window that holds a changed
+  # snapshot already knows them exactly; otherwise they come from the deltas it has not rendered yet.
+  @spec pending_affected_ranges(
           %{optional(MingaEditor.Window.id()) => ResidentWindowState.t()},
           pid()
-        ) :: {non_neg_integer(), non_neg_integer()} | nil
-  defp pending_affected_range(residents, buffer) do
-    snapshots =
-      Enum.flat_map(residents, fn
-        {_id, %ResidentWindowState{buffer: ^buffer, render_cache: cache}} ->
-          case MingaEditor.Renderer.WindowCache.changed_snapshot(cache) do
-            %RenderSnapshot{} = snapshot -> [snapshot]
-            nil -> []
-          end
+        ) :: [{non_neg_integer(), non_neg_integer()}]
+  defp pending_affected_ranges(residents, buffer) do
+    caches =
+      for {_id, %ResidentWindowState{buffer: ^buffer, render_cache: cache}} <- residents,
+          do: cache
 
-        _ ->
-          []
+    snapshot_ranges =
+      Enum.flat_map(caches, fn cache ->
+        case MingaEditor.Renderer.WindowCache.changed_snapshot(cache) do
+          %RenderSnapshot{} = snapshot -> RenderSnapshot.line_ranges(snapshot)
+          nil -> []
+        end
       end)
 
-    pending_range_from_snapshots(snapshots, residents, buffer)
-  end
-
-  @spec pending_range_from_snapshots(
-          [RenderSnapshot.t()],
-          %{optional(MingaEditor.Window.id()) => ResidentWindowState.t()},
-          pid()
-        ) :: {non_neg_integer(), non_neg_integer()} | nil
-  defp pending_range_from_snapshots([_ | _] = snapshots, _residents, _buffer) do
-    Enum.reduce(snapshots, nil, fn snapshot, range ->
-      last = snapshot.first_line + max(length(snapshot.lines) - 1, 0)
-      union_range(range, {snapshot.first_line, last})
-    end)
-  end
-
-  defp pending_range_from_snapshots([], residents, buffer) do
-    deltas =
-      Enum.find_value(residents, [], fn
-        {_id, %ResidentWindowState{buffer: ^buffer, render_cache: cache}} ->
+    case snapshot_ranges do
+      [] ->
+        caches
+        |> Enum.find_value([], fn cache ->
           case MingaEditor.Renderer.WindowCache.pending_edit_deltas(cache) do
             [] -> nil
             pending -> pending
           end
+        end)
+        |> EditDelta.affected_line_ranges()
 
-        _ ->
-          nil
-      end)
-
-    EditDelta.affected_line_range(deltas)
+      ranges ->
+        EditDelta.affected_line_ranges([], ranges)
+    end
   end
-
-  @spec union_range(
-          {non_neg_integer(), non_neg_integer()} | nil,
-          {non_neg_integer(), non_neg_integer()}
-        ) :: {non_neg_integer(), non_neg_integer()}
-  defp union_range(nil, range), do: range
-
-  defp union_range({first, last}, {new_first, new_last}),
-    do: {min(first, new_first), max(last, new_last)}
 
   @spec materialize(State.t(), Intent.t(), MingaEditor.Renderer.HighlightCache.highlights()) ::
           Input.t()

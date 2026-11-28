@@ -27,7 +27,15 @@ defmodule Minga.Buffer.RenderSnapshot do
     :decorations,
     :change_sequence
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [extra_ranges: []]
+
+  @typedoc """
+  A further changed line range read in the same buffer call: its first line, that line's byte offset,
+  and its lines. Ranges are ascending, disjoint, and all after `lines`.
+  """
+  @type extra_range ::
+          {first_line :: non_neg_integer(), first_line_byte_offset :: non_neg_integer(),
+           lines :: [String.t()]}
 
   @type t :: %__MODULE__{
           cursor: Minga.Buffer.Document.position(),
@@ -44,6 +52,19 @@ defmodule Minga.Buffer.RenderSnapshot do
           version: non_neg_integer(),
           options: %{atom() => term()},
           decorations: Minga.Core.Decorations.t(),
-          change_sequence: non_neg_integer()
+          change_sequence: non_neg_integer(),
+          extra_ranges: [extra_range()]
         }
+
+  @doc "Returns every line range the snapshot holds, ascending."
+  @spec line_ranges(t()) :: [{non_neg_integer(), non_neg_integer()}]
+  def line_ranges(%__MODULE__{first_line: first, lines: lines, extra_ranges: extras}) do
+    extra =
+      for {extra_first, _offset, extra_lines} <- extras, do: range_of(extra_first, extra_lines)
+
+    if lines == [], do: extra, else: [range_of(first, lines) | extra]
+  end
+
+  @spec range_of(non_neg_integer(), [String.t()]) :: {non_neg_integer(), non_neg_integer()}
+  defp range_of(first, lines), do: {first, first + max(length(lines) - 1, 0)}
 end

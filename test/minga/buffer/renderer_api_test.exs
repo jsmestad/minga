@@ -39,7 +39,7 @@ defmodule Minga.Buffer.RendererAPITest do
     refute Map.has_key?(Map.from_struct(snapshot), :document)
   end
 
-  test "retry consume snapshots the union of a prior pending range and a second edit" do
+  test "retry consume snapshots a prior pending range and a second edit as separate ranges" do
     buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree\nfour"})
     _initial = Buffer.renderer_consume(buffer)
 
@@ -57,10 +57,11 @@ defmodule Minga.Buffer.RendererAPITest do
              changes: {:ok, [_]},
              snapshot: %RenderSnapshot{
                first_line: 1,
-               lines: ["Aone", "two", "Bthree"],
+               lines: ["Aone"],
+               extra_ranges: [{3, 14, ["Bthree"]}],
                version: 2
              }
-           } = Buffer.renderer_consume(buffer, {1, 1})
+           } = Buffer.renderer_consume(buffer, [{1, 1}])
   end
 
   test "retry range follows pending content shifted by a structural edit" do
@@ -79,9 +80,44 @@ defmodule Minga.Buffer.RendererAPITest do
     assert %RendererConsume{
              snapshot: %RenderSnapshot{
                first_line: 0,
-               lines: ["new", "zero", "one", "two", "Xthree"]
+               lines: ["new", "zero"],
+               extra_ranges: [{4, 17, ["Xthree"]}]
              }
-           } = Buffer.renderer_consume(buffer, {3, 3})
+           } = Buffer.renderer_consume(buffer, [{3, 3}])
+  end
+
+  test "two edits far apart in one consume are read as two ranges, without the lines between" do
+    content = Enum.map_join(0..999, "\n", &"line #{&1}")
+    buffer = start_supervised!({Buffer, content: content})
+    _initial = Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {10, 0})
+    :ok = Buffer.insert_text(buffer, "above\n")
+    :ok = Buffer.move_to(buffer, {900, 0})
+    :ok = Buffer.insert_text(buffer, "below\n")
+
+    assert %RendererConsume{
+             changes: {:ok, [_, _]},
+             snapshot: %RenderSnapshot{
+               first_line: 10,
+               lines: ["above", "line 10"],
+               extra_ranges: [{900, _offset, ["below", "line 899"]}]
+             }
+           } = Buffer.renderer_consume(buffer)
+  end
+
+  test "edits on touching lines are read as one range" do
+    buffer = start_supervised!({Buffer, content: "zero\none\ntwo\nthree"})
+    _initial = Buffer.renderer_consume(buffer)
+
+    :ok = Buffer.move_to(buffer, {1, 0})
+    :ok = Buffer.insert_text(buffer, "A")
+    :ok = Buffer.move_to(buffer, {2, 0})
+    :ok = Buffer.insert_text(buffer, "B")
+
+    assert %RendererConsume{
+             snapshot: %RenderSnapshot{first_line: 1, lines: ["Aone", "Btwo"], extra_ranges: []}
+           } = Buffer.renderer_consume(buffer)
   end
 
   test "version-checked range fetch returns no Document and rejects an intervening edit" do
