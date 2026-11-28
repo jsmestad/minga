@@ -30,4 +30,4 @@ The run design also opens a drawer without a keypress, when a check fails. Its r
 - `MingaEditor.Layout.GUI` gains a buffer-drawer region inside the grid. Native drawers outside the grid remain for lists.
 - The protocol gains the chrome-cost report and the gesture and pointer facts. Both frontends send them.
 - The Room test can be conservative by less than one row, because the chrome cost is rounded up.
-- A buffer drawer under a split is a window, so it takes a window label when labels are showing ([ADR-0009](0009-one-modeline-and-window-labels.md)).
+- A buffer drawer is a window, but it has its own header, so it takes no window label and does not count toward the labels on file windows ([ADR-0009](0009-one-modeline-and-window-labels.md) decision 5, as amended on 2026-11-28).
