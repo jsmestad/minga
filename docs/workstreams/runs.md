@@ -1,6 +1,6 @@
 # Runs workstream
 
-**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed. Epic: [#4385](https://github.com/jsmestad/minga/issues/4385). Filed so far: Spike A [#4386](https://github.com/jsmestad/minga/issues/4386), Spike B [#4387](https://github.com/jsmestad/minga/issues/4387), S0 [#4388](https://github.com/jsmestad/minga/issues/4388), S1 [#4389](https://github.com/jsmestad/minga/issues/4389). S2 to S6 are not ticketed.
+**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Accepted on 2026-11-28. Epic: [#4385](https://github.com/jsmestad/minga/issues/4385). Filed so far: Spike A [#4386](https://github.com/jsmestad/minga/issues/4386), Spike B [#4387](https://github.com/jsmestad/minga/issues/4387), S0 [#4388](https://github.com/jsmestad/minga/issues/4388), S1 [#4389](https://github.com/jsmestad/minga/issues/4389). S2 to S6 are not ticketed.
 
 This page is the plan: what has to be decided, what has to be proven before code is built on it, and the slices in order. Each slice ships complete. None leaves a foundation the next one has to rework.
 
@@ -24,7 +24,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 - #4060 slice 1 (Zig 0.17) lands before S1 writes `minga-run`. S1 writes its PTY and process-group code as a module `minga-terminal` can link.
 - #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It merged on 2026-11-28.
 - S1 defines the block-state and strand fields in the protocol once. #4061 reuses them.
-- #4061 gains a dependency on S2 if ADR-0010 is accepted. S5 depends on nothing from #4060.
+- #4061 depends on S2, for the shared command-block target. S5 depends on nothing from #4060.
 - S0 (#4388) changes rendering code Spine tickets share; see its coordination note.
 
 ## A prerequisite Spike B found
@@ -39,13 +39,13 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 ## Decisions needed before S1
 
 1. **Accept S0 as a prerequisite.** `*run*` folds its blocks and marks dropped output with a virtual row. A window with folds, decoration fold regions, virtual lines or block decorations is not in the resident store today; it uses the windowed path. The resident-scroll workstream lists folded residence as a deferred remnant. Without it, `*run*` would be the one buffer that scrolls the old way.
-2. **Accept or change ADR-0010 and ADR-0011.** They fix the run record's owner, the shared runner, the PTY helper and how a buffer drawer is laid out.
+2. **Accept or change ADR-0010 and ADR-0011. Done: both accepted on 2026-11-28, ADR-0010 with two conditions (#4397 and the row ceiling).** They fix the run record's owner, the shared runner, the PTY helper and how a buffer drawer is laid out.
 3. **Head and tail at the cap.** The design keeps the first 2,000 and last 8,000 lines of a run. Confirm, or pick another split.
 
 ## Decisions needed before S4
 
 4. **Background completion (principle 7).** The design changes only the modeline and the echo line when a run ends. Whether a long run may post one passive notification when Minga is not frontmost, and show progress on the Dock icon, needs an ADR either way. Without it a ten-minute test run that ends while you are in the browser leaves no trace outside the window.
-5. **`esc` closes a drawer that opened by itself.** Added after the last review round, so no reviewer has seen it. The risk is a habitual extra `esc` closing a failure you wanted to read.
+5. **`esc` closes a drawer that opened by itself. Decided 2026-11-28: it does not.** `esc` never closes an unfocused drawer; `SPC ~` or a click does.
 6. **Hover shows the drawer header's hints on macOS.** The tasks drawer does not do this today. If the run drawer does, the tasks drawer should too.
 
 ## Prove before building on it
@@ -143,7 +143,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 
 | Document | Change | With |
 |---|---|---|
-| `docs/design/terminal.md`, ADR-0008 | Only if ADR-0010 is accepted and the owner question with #4061 is settled: `*minga-shell*` withdrawn; the terminal reuses the run helper's PTY code and the block value | S5 |
+| `docs/design/terminal.md`, ADR-0008 | Done on acceptance (2026-11-28): `*minga-shell*` withdrawn. Still to do: the terminal reuses the run helper's PTY code and the block value | S5 |
 | `docs/design/keys.md`, `docs/AGENTIC-KEYMAP.md`, `doom_conventions.tsv` | The run keys and a "Run buffer" table | S1 and S2 |
 | `docs/design/surfaces.md` | The run segment in the modeline order; switcher and which-key sections | S2, S6 |
 | `docs/design/marks.md`, `themes.md`, `anatomy.md` | Strand in a block buffer, entry marks, Working takes its author's role, in-buffer button height | S1 |
@@ -158,9 +158,22 @@ Carried from the review of #4384. None is settled.
 - **`x` and ⌘. on a block Minga ran.** The design says your keys never stop Minga's run; say what the key does instead on such a block.
 - **Approval keys.** The design's act-menu text lists `y` and `n` only. The existing approval target has `y` once, `a` this session, `t` this turn, `n` deny, and `esc` defers. Use that set.
 - **Row ceiling.** Running runs are never evicted, so seven running runs at their caps exceed the resident store's 65,536 rows.
-- **Window label row.** ADR-0009 gives a buffer drawer a label while labels are showing. The drawer's minimum and the Room test do not count that row, and nothing says whether a drawer plus one file counts as two buffer windows.
+- **Window label row. Settled 2026-11-28:** ADR-0009 decision 5 is amended, and a drawer with its own header has no label and does not count as a second buffer window. The earlier question was: ADR-0009 gives a buffer drawer a label while labels are showing. The drawer's minimum and the Room test do not count that row, and nothing says whether a drawer plus one file counts as two buffer windows.
 - **Where block state is drawn.** `terminal.md` uses a gutter column; the runs design uses the header row. Settle before #4061 starts.
 - **`SPC ~`** against "closing a drawer returns to the one it replaced" in `surfaces.md`.
+
+## Open questions from the review of the accepted ADRs
+
+Four independent reviews on 2026-11-28. What they settled is in ADR-0010 ("Owner and failure", "Security rules", "Conditions on decision 6") and ADR-0009 decision 5. These remain open.
+
+- **Follow** beyond appends: see the open note in `runs.md` section 7. Before S1.
+- **Author without colour.** In the terminal frontend the strand has no stated form, and the word "Minga" comes after the command, where a long command clips it. Before S5: put the author before the command and pair the colour with a shape.
+- **Header counts and steppers** mix your runs with Minga's. Before S5: count yours, show Minga's separately, and say whether `]]` crosses authors.
+- **`SPC a w` and a pending approval.** It scrolls to Minga's newest block, which can be past an older pending approval. Before S5.
+- **Retention of Minga's blocks.** Five finished blocks per author drops most of what an agent did. Before S5.
+- **Row fit of the 24 pt header.** Where the leftover points go when the header rounds up to two rows, the drawer's width under a vertical split, and a worked 80 by 24 example. Before S1.
+- **`x` stops with no confirmation,** including on a long run. Before S2.
+- **Mouse paths** missing for resize by keyboard, open-at-file in the terminal frontend, and the stop list. Before S2.
 
 ## Not verified
 

@@ -2,9 +2,9 @@
 
 A run is a command you start from the editor and do not type into: `:!make`, the project's tests, a build. This page says where a run's output goes, what you can do with it, and what Minga does when one fails. The interactive shell is a different surface, covered in [terminal.md](terminal.md).
 
-**Status:** proposed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed.
+**Status:** designed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Accepted on 2026-11-28.
 
-**Which page governs.** Until ADR-0010 and ADR-0011 are accepted, [terminal.md](terminal.md), [keys.md](keys.md), [surfaces.md](surfaces.md), ADR-0006 and ADR-0008 govern wherever this page disagrees with them. That includes `*minga-shell*`, `SPC a w`, approvals, command blocks and the failed-block menu, which belong to issue #4061. Build from this page only through the runs tickets (#4385 to #4389). Sentences marked *(open)* below depend on an owner decision or a spike listed in the workstream page and are not settled. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
+**Which page governs.** This page governs runs, the run buffer and its drawer, and Minga's commands: where they appear, their approvals as pending blocks, and the actions on a command block. [terminal.md](terminal.md) governs the interactive terminal. [keys.md](keys.md) and [surfaces.md](surfaces.md) still govern keys and chrome; where this page names a key they do not list yet, the key lands with its slice. Sentences marked *(open)* below depend on a decision or a ticket listed in the workstream page and are not settled. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
 
 The design went through seven review rounds with a Minga UX specialist, a macOS designer and a Doom/Neovim power user, and one architecture review. Two decisions were the owner's: a failed check opens the run drawer by default, and no "current run" is stored.
 
@@ -15,7 +15,7 @@ Minga has two kinds of command surface, split by one question: does the command 
 - **A run** is a non-interactive command with a known command line: `:!cmd`, a test command, a project command, and every command Minga's agent runs. The BEAM owns a run record for it.
 - **A terminal** (`SPC o t`, [ADR-0008](../adr/0008-terminal-engine.md), not shipped) is an interactive shell in a PTY.
 
-Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Approvals would be pending blocks in it, and `*minga-shell*` as a separate buffer would be withdrawn at slice S5 if ADR-0010 is accepted *(open: the owner of Minga's commands is being settled with #4061)*. One buffer per project is *(open: Spike B, #4387)*.
+Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Minga's commands are blocks in it, and an approval is a pending block; there is no separate `*minga-shell*` buffer. One buffer per project is *(conditional: it needs [#4397](https://github.com/jsmestad/minga/issues/4397); Spike B, #4387)*.
 
 `*run*` is a buffer, not a list view. The editor renderer draws it in uniform rows at the buffer's row pitch, with the Vim cursor, like any buffer (ADR-0001). Nothing in it has its own row height.
 
@@ -65,7 +65,7 @@ The new keys (`SPC c c`, `SPC c C`, `SPC p c`, `SPC c o`, `SPC c s`, `SPC ~`, `S
 | A pending approval | The answer prompt | `↩` on the block | Its Needs-you shape |
 | A block | Folded / unfolded | `za`, `zM`, `zR` | Its chevron; double-click the header row |
 | A held view | The newest output | `G` | "↓ N new lines" at the bottom edge |
-| Anywhere | Minga's commands | *(proposed; keys.md and #4061 govern `SPC a w` today)* `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
+| Anywhere | Minga's commands | `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
 | The drawer | Full height | `SPC ,` → `*run*` | same |
 
 `]q` from a file moves the drawer's cursor to that entry when the drawer is visible. `↩` on an entry sets the list index. `]q` and `[q` always echo "N of M · message"; the owning run is prefixed only when it is not the run the segment names. The first `]q` or `[q` after the list changes owner always prefixes the owning run, so the jump explains itself and `:colder` is the way back.
@@ -90,7 +90,7 @@ Which run takes the quickfix list:
 - When `]q` steps a list that is not the run the segment names, the echo line names the owner: "mix credo · 2 of 4 · message".
 - An entry binds to a buffer position when its file is first opened after the run, and shifts with later edits. If the file on disk is newer than the run's start at that moment, `]q` lands on the recorded line and the echo line adds "file changed since the run". An entry whose line was deleted moves to the nearest remaining line.
 
-**Only a run you started acts by itself**: opens the drawer, takes the quickfix list, or (while you have a run to name) names the segment. `r` on one of Minga's blocks starts a new block authored by you.
+**Only a run you started acts by itself**: opens the drawer, takes the quickfix list, or (while you have a run to name) names the segment. A block Minga authored has no rerun: `r`, Rerun and Rerun failed are not offered on it, and Edit and rerun opens the Run prompt with the full command and runs only on `↩`. A pending or denied block starts only through its approval answer (ADR-0010, security rules).
 
 ## 4. Concurrency and retention
 
@@ -141,12 +141,13 @@ The first columns are the code gutter's sign column and fold column, three cells
 ## 7. The drawer
 
 - Header (chrome, drawn at 24 pt at every row pitch; for the Room test the frontend reports the drawer's chrome cost as a whole number of rows, rounded up): `Runs`, a run stepper `‹ 3 of 4 ›`, state counts that are buttons, the error stepper with its severity sign `‹ 2 of 3 ›`. The run stepper disables at its ends. The error stepper wraps as `]q` does and reads "– of 3" before the first entry.
-- Hints: `g. actions`, `x stop`, `r rerun`, `f fix`, `q close`. They act on the block under the cursor. In the TUI they show only while the drawer has focus (`anatomy.md`). An unfocused drawer shows no hints on either frontend, as the tasks drawer does today: its keys work only with focus, so showing them would teach something false. *(open: owner decision 6)* On macOS the hints would also appear while the pointer is over the drawer's header, so a mouse user closes it in one click on `q close`. From the keyboard, `SPC ~` hides it from anywhere, and *(open: owner decisions 5 and 6; no reviewer has seen either)* from a file window, `esc` in Normal mode closes a drawer that opened by itself and that you have not touched, and never one you opened. `surfaces.md` already gives `esc` in Normal mode to dismissing an echo-area notice, and a failure writes one, so the order of the two is undecided. Both frontends show the same steppers and counts whether or not the drawer has focus.
+- Hints: `g. actions`, `x stop`, `r rerun`, `f fix`, `q close`. They act on the block under the cursor. In the TUI they show only while the drawer has focus (`anatomy.md`). An unfocused drawer shows no hints on either frontend, as the tasks drawer does today: its keys work only with focus, so showing them would teach something false. *(open: owner decision 6)* On macOS the hints would also appear while the pointer is over the drawer's header, so a mouse user closes it in one click on `q close`. From the keyboard, `SPC ~` hides it from anywhere, and a click on its close control does the same. `esc` never closes a drawer that does not have focus: it stays a no-op in a file's Normal mode apart from dismissing an echo-area notice, so a habitual `esc` cannot hide a failure you have not read. Both frontends show the same steppers and counts whether or not the drawer has focus.
 - Narrowing, in order, each step only when the header no longer fits: hint labels drop and keys stay; the word "Errors" drops and the severity sign stays; state counts collapse to shapes with numbers.
 - The unfocused drawer draws its cursor row in the muted selection (one role, no outline, used by every unfocused window) with a hollow cursor on the character it is on. The focused one draws the block cursor and the accent tint.
 - An output run you started reveals the drawer at its first output, without focus and with follow on, under the same Who, When and Room rules as a failed check (below). Its reveal window opens at the first output and expires 30 s later. Exit 0 with no output never opens it; the echo area says "Done · 0.3 s".
 - Spine drawer mechanics: 1 pt divider, 5 pt hit area with the resize cursor, double-click resets to 40%, share 15% to 70%, first open 30%, height remembered. Minimum: the header plus 4 rows. The divider drags in points; the content area shows the whole rows that fit, and leftover points under the last row are drawer background.
 - *(open: needs a buffer change; Spike B, [#4387](https://github.com/jsmestad/minga/issues/4387))* Today every append moves the buffer cursor and a focused window scrolls to it, so a focused run buffer cannot hold a scrolled-up view. The rule below is the target.
+- *(open: follow is specified for appends only. Output also arrives above the view when an older block grows or a run is evicted, and `]q`, `]]`, search and `⌃D` are not named as turning follow off. Before S1: anchor the view by row identity, turn follow off on any motion away from the followed block's end, and make `G` and "↓ N new lines" refer to that block, not the buffer end.)*
 - Follow is one flag for the drawer window, owned by the BEAM, bound to the running block under the cursor, else the newest running block. It turns off when you scroll or at the first error row, and on again with `G`.
 - Animation: open and close take 120 ms, ease-out, including a self-open; none under Reduce Motion. Folding is immediate.
 
@@ -188,7 +189,7 @@ The segment, not the echo line, is the durable carrier of a failure; the echo li
 
 Act menu (`g.`), per `surfaces.md`: a header naming the target, a filter, the most likely action on top, labelled groups, the in-menu letter at the left and the direct key at the right (empty when there is none).
 
-- Opened on a line, the header names the line ("test/user_test.exs:20 · in mix test · Failed") and the selection and edge use the neutral role. Opened on a block header, it names the run and uses the run's role. Opened on a pending approval, it leads with the decision bar (`y` Approve once, `n` Deny). A denied request ends as Stopped, "denied".
+- Opened on a line, the header names the line ("test/user_test.exs:20 · in mix test · Failed") and the selection and edge use the neutral role. Opened on a block header, it names the run and uses the run's role. Opened on a pending approval, it shows the full command, unclipped, and leads with the decision bar (`y` Approve once, `n` Deny). A denied request ends as Stopped, "denied".
 - This line: Open (`↩`), Open and keep focus (`go`), Copy line (`yy`). This run: Rerun, Rerun failed, Edit and rerun, Fix with Minga, Copy output, Copy as report, Copy command, and Send to quickfix, which reads "Use as quickfix list" when the run already has one. Anywhere: Show Minga's commands, and last, Clear finished runs with its consequence.
 - The panel's bottom edge lies on a row boundary, the top of the row above the target; its shadow gives the separation. Its header carries the state shape with the word. A panel taller than half the window scrolls; nothing is collapsed, so the last row and its consequence stay reachable. The right-click menu is a native menu at the pointer with the same rows.
 

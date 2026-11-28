@@ -98,7 +98,7 @@ SPC a  Minga
 | `SPC a d` | Reject Minga's change at the cursor or in the selection | new; replaces the proposed `SPC g r`; mirrors `y` / `n` in review |
 | `SPC a ?` | Ask about the line or selection | kept (145) |
 | `SPC a r` | Review buffer | kept (158, "Pending reviews") |
-| `SPC a w` | Watch Minga: a split that follows Minga's edits and shows `*minga-shell*` | new |
+| `SPC a w` | Watch Minga: a split that follows Minga's edits and shows Minga's commands in `*run*` | new |
 | `SPC a e` | Rewrite selection inline | kept (146) |
 | `SPC a W` | Why is this line like this? | shipped; was `SPC g w` (203) |
 | `SPC a A` | Code autobiography | shipped; was `SPC g a` (204) |
