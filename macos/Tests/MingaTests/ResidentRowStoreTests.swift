@@ -381,8 +381,14 @@ struct ResidentRowStoreTests {
             resultRowCount: 303
         )
 
-        let expected = original[0..<20] + top + original[21..<280] + bottom + original[281..<300]
-        #expect(store.rows(in: 0..<store.count).rows.map(\.rowId) == expected.map(\.rowId))
+        var expected: [UInt64] = []
+        expected += original[0..<20].map { $0.rowId }
+        expected += top.map { $0.rowId }
+        expected += original[21..<280].map { $0.rowId }
+        expected += bottom.map { $0.rowId }
+        expected += original[281..<300].map { $0.rowId }
+        let actual: [UInt64] = store.rows(in: 0..<store.count).rows.map { $0.rowId }
+        #expect(actual == expected)
         #expect(store.row(at: 282)?.rowId == bottom[0].rowId)
         #expect(store.row(at: 283)?.bufLine == 283)
         #expect(store.validateInvariants())
@@ -404,8 +410,13 @@ struct ResidentRowStoreTests {
             resultRowCount: 201
         )
 
-        let expected = original[0..<100] + joined + original[201..<299] + appended
-        #expect(store.rows(in: 0..<store.count).rows.map(\.rowId) == expected.map(\.rowId))
+        var expected: [UInt64] = []
+        expected += original[0..<100].map { $0.rowId }
+        expected += joined.map { $0.rowId }
+        expected += original[201..<299].map { $0.rowId }
+        expected += appended.map { $0.rowId }
+        let actual: [UInt64] = store.rows(in: 0..<store.count).rows.map { $0.rowId }
+        #expect(actual == expected)
         #expect(store.validateInvariants())
     }
 
