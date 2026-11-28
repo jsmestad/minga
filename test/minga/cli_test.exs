@@ -635,18 +635,22 @@ defmodule Minga.CLITest do
       File.ln_s!(nested, link)
 
       assert :ok = CLI.prepare_startup(["missing.ex"], {:terminal, root})
+
       assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
                {missing, nil, root}
 
       assert :ok = CLI.prepare_startup(["link"], {:terminal, root})
+
       assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
                {nil, link, root}
 
       assert :ok = CLI.prepare_startup(["missing.ex"], {:terminal, root})
+
       assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
                {missing, nil, root}
 
       assert :ok = CLI.prepare_startup([], :app)
+
       assert {CLI.startup_file(), CLI.startup_directory(), CLI.startup_project_root()} ==
                {nil, nil, nil}
     after

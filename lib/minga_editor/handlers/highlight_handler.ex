@@ -257,7 +257,6 @@ defmodule MingaEditor.Handlers.HighlightHandler do
 
   @spec attach_buffer(term(), pid()) :: term()
   defp attach_buffer({:highlight_names, names}, pid), do: {:highlight_names, pid, names}
-  defp attach_buffer({:highlight_spans, spans}, pid), do: {:highlight_spans, pid, spans}
   defp attach_buffer({:injection_ranges, ranges}, pid), do: {:injection_ranges, pid, ranges}
   defp attach_buffer({:conceal_spans, spans}, pid), do: {:conceal_spans, pid, spans}
   defp attach_buffer({:fold_ranges, ranges}, pid), do: {:fold_ranges, pid, ranges}

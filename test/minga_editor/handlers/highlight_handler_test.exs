@@ -300,6 +300,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
                  state,
                  {:minga_highlight, {:buffer_event, buf, correlation, {:fold_ranges, [{0, 5}]}}}
                )
+
       {_state, effects} =
         HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, buf, [{0, 5}]}})
 
@@ -337,7 +338,10 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       span_event = {:minga_highlight, {:buffer_event, buffer, parse, {:highlight_spans, []}}}
       {state, effects} = HighlightHandler.handle(state, span_event)
       assert effects == [{:request_semantic_tokens, buffer}, {:prettify_symbols, buffer}, :render]
-      assert %{version: 1, parser_correlation: ^parse} = HighlightSync.get_highlight(state, buffer)
+
+      assert %{version: 1, parser_correlation: ^parse} =
+               HighlightSync.get_highlight(state, buffer)
+
       refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
 
       fold_event = {:minga_highlight, {:buffer_event, buffer, parse, {:fold_ranges, [{0, 5}]}}}
