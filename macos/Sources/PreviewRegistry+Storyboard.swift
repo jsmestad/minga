@@ -267,9 +267,22 @@ enum StoryboardCapture {
     }
 
     private static func probeTooltip(window: NSWindow, host: NSView, recorder: AnatomyPartRecorder, output: URL) async throws {
+        guard let activationPath = ProcessInfo.processInfo.environment["MINGA_TOOLTIP_ACTIVATION_RECEIPT"] else {
+            throw Failure.rejected("the hosted tooltip probe has no activation receipt path")
+        }
+        try Data(String(ProcessInfo.processInfo.processIdentifier).utf8)
+            .write(to: URL(fileURLWithPath: activationPath), options: .atomic)
+        let clock = ContinuousClock()
+        let activationDeadline = clock.now.advanced(by: .seconds(8))
+        while !(NSApp.isActive && window.isKeyWindow) && clock.now < activationDeadline {
+            try await clock.sleep(for: .milliseconds(25))
+        }
         let mayPost = CGPreflightPostEventAccess()
         print("TOOLTIP_PROBE post_event_access=\(mayPost) app_active=\(NSApp.isActive) key_window=\(window.isKeyWindow) window=\(window.frame) screen=\(String(describing: window.screen?.frame))")
         guard mayPost else { throw Failure.rejected("the hosted PreviewHost launch cannot post a session event") }
+        guard NSApp.isActive && window.isKeyWindow else {
+            throw Failure.notPresented("LaunchServices did not foreground the original PreviewHost process")
+        }
         guard let screen = window.screen, screen.frame.origin == .zero,
               let target = recorder.frames.first(where: { $0.name == "modeline.segment" && $0.text == "needs_you: Needs you" }) else {
             throw Failure.notPresented("no needs-you modeline anchor on the main display")
