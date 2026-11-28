@@ -388,6 +388,10 @@ defmodule Minga.Project.FileTree do
     %{tree | entries: entries, cursor: min(tree.cursor, max_idx)}
   end
 
+  @doc "Invalidates the visible entries without changing the cursor or cached file paths."
+  @spec invalidate_entries(t()) :: t()
+  def invalidate_entries(%__MODULE__{} = tree), do: %{tree | entries: nil}
+
   @doc "Rebuilds the visible entries from current inputs and clamps the cursor."
   @spec refresh(t()) :: t()
   def refresh(%__MODULE__{} = tree) do
@@ -471,9 +475,6 @@ defmodule Minga.Project.FileTree do
   end
 
   # ── Private ───────────────────────────────────────────────────────────────
-
-  @spec invalidate_entries(t()) :: t()
-  defp invalidate_entries(%__MODULE__{} = tree), do: %{tree | entries: nil}
 
   @typep walk_context :: %{
            root: String.t(),

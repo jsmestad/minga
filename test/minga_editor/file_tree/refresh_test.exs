@@ -29,9 +29,40 @@ defmodule MingaEditor.FileTree.RefreshTest do
     assert request.effect.root == Path.expand(root)
   end
 
-  test "run rescans through the typed effect and returns a completed tree", %{tmp_dir: root} do
-    File.write!(Path.join(root, "alpha.ex"), "")
-    request = request(tree(root), :completed, {:return, tree(root)})
+  test "request and run preserve the fallback cursor and cache without carrying old rows", %{
+    tmp_dir: root
+  } do
+    cached_files = ["alpha.ex", "beta.ex", "stale.ex"]
+    Enum.each(cached_files, &File.write!(Path.join(root, &1), ""))
+    selection_path = Path.join(root, "stale.ex")
+
+    tree =
+      root
+      |> FileTree.new()
+      |> FileTree.put_cached_files(cached_files)
+      |> FileTree.select(2)
+
+    File.rm!(selection_path)
+
+    request =
+      Refresh.request(tree, Minga.Events.default_registry(), selection_path: selection_path)
+
+    assert %FileTree{entries: nil, cursor: 2, cached_files: ^cached_files} = request.effect.tree
+    assert %{path: ^selection_path} = FileTree.selected_entry(tree)
+
+    assert {:ok,
+            %FileTree{
+              entries: [%{name: "alpha.ex"}, %{name: "beta.ex"}],
+              cursor: 1,
+              cached_files: ^cached_files
+            }} = Refresh.run(request.effect)
+  end
+
+  test "request and run pass the original tree to an injected scanner", %{tmp_dir: root} do
+    tree = root |> tree(["alpha.ex", "beta.ex"]) |> FileTree.select(1)
+    request = request(tree, :completed, {:return, tree})
+
+    assert request.effect.tree === tree
 
     assert {:ok, %FileTree{root: refreshed_root}} = Refresh.run(request.effect)
     assert refreshed_root == Path.expand(root)
