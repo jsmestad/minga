@@ -115,6 +115,18 @@ enum StoryboardCapture {
                 throw Failure.rejected("tooltip probe requires a GitHub-hosted runner and the real edit.working fixture")
             }
         }
+        let probeScreen = tooltipProbe ? NSScreen.screens.first : nil
+        let aperture: NSSize
+        if tooltipProbe {
+            guard let screen = probeScreen, screen.visibleFrame.width >= 700, screen.visibleFrame.height >= 500 else {
+                throw Failure.notPresented("no usable screen for the hosted tooltip test")
+            }
+            // This probe checks native help on the physical display, not canonical storyboard geometry.
+            aperture = NSSize(width: min(CGFloat(size.width), screen.visibleFrame.width - 40),
+                              height: min(CGFloat(size.height), screen.visibleFrame.height - 120))
+        } else {
+            aperture = NSSize(width: size.width, height: size.height)
+        }
 
         let recorder = AnatomyPartRecorder()
         AnatomyPartRecorder.shared = recorder
@@ -134,13 +146,14 @@ enum StoryboardCapture {
         renderer.setupRenderers(fontManager: fontManager)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
+            contentRect: NSRect(origin: .zero, size: aperture),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.ignoresMouseEvents = !tooltipProbe
+        window.acceptsMouseMovedEvents = tooltipProbe
 
         var editor: EditorNSView?
         let dispatcher = CommandDispatcher(
@@ -184,18 +197,19 @@ enum StoryboardCapture {
 
         let host = NSHostingView(rootView:
             PreviewRegistry.productionContentView(appState)
-                .frame(width: CGFloat(size.width), height: CGFloat(size.height))
+                .frame(width: aperture.width, height: aperture.height)
                 .environment(\.motionPaused, true)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true
                 })
         window.contentView = host
-        window.setContentSize(NSSize(width: size.width, height: size.height))
-        if tooltipProbe, let screen = NSScreen.main {
+        window.setContentSize(aperture)
+        if let screen = probeScreen {
             window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 20, y: screen.visibleFrame.minY + 80))
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
+            window.orderFrontRegardless()
             window.makeKeyAndOrderFront(nil)
         } else {
             window.orderFrontRegardless()
@@ -205,6 +219,11 @@ enum StoryboardCapture {
             of: dispatcher, view: view, host: host, scenario: transcript.scenario,
             requiresPrompt: transcript.prompt != nil
         )
+
+        if tooltipProbe {
+            try await probeTooltip(window: window, host: host, recorder: recorder, output: URL(fileURLWithPath: job.output))
+            return
+        }
 
         let measured = view.reportedGrid
         guard Int(measured.cols) == transcript.cols, Int(measured.rows) == transcript.rows else {
@@ -233,11 +252,6 @@ enum StoryboardCapture {
                 throw Failure.promptPaneWidthMismatch(
                     scenario: transcript.scenario, size: transcript.size, expected: expected.cols, measured: columns)
             }
-        }
-
-        if tooltipProbe {
-            try await probeTooltip(window: window, host: host, recorder: recorder, output: URL(fileURLWithPath: job.output))
-            return
         }
 
         let png = try await settledPNG(window: window, host: host)
