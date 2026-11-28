@@ -1,0 +1,386 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "greet(name)\n"
+  },
+  {
+   "frame": [
+    118,
+    94,
+    77,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u250c\u2500 elixir "
+  },
+  {
+   "frame": [
+    193,
+    94,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    118,
+    115,
+    292,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "greet(name :: String.t()) :: String.t()"
+  },
+  {
+   "frame": [
+    118,
+    136,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2514"
+  },
+  {
+   "frame": [
+    126,
+    136,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    110,
+    163,
+    234,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "Returns a greeting for the given name."
+  },
+  {
+   "frame": [
+    110,
+    189,
+    457,
+    34
+   ],
+   "role": "AXStaticText",
+   "value": "The name is preserved exactly, including whitespace and punctuation. The return value is a string, not terminal output."
+  },
+  {
+   "frame": [
+    110,
+    231,
+    69,
+    19
+   ],
+   "role": "AXStaticText",
+   "value": "Examples"
+  },
+  {
+   "frame": [
+    118,
+    262,
+    77,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u250c\u2500 elixir "
+  },
+  {
+   "frame": [
+    193,
+    262,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    118,
+    283,
+    99,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "greet(\"Maya\")"
+  },
+  {
+   "frame": [
+    118,
+    304,
+    129,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "#=> \"Hello, Maya\""
+  },
+  {
+   "frame": [
+    118,
+    325,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2514"
+  },
+  {
+   "frame": [
+    126,
+    325,
+    10,
+    17
+   ],
+   "role": "AXStaticText",
+   "value": "\u2500"
+  },
+  {
+   "frame": [
+    110,
+    352,
+    463,
+    34
+   ],
+   "role": "AXStaticText",
+   "value": "A caller can use the same function for dialog labels, notifications and logs. It does not read the active project or modify the editor."
+  },
+  {
+   "frame": [
+    110,
+    394,
+    52,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": "See the "
+  },
+  {
+   "frame": [
+    258,
+    394,
+    235,
+    18
+   ],
+   "role": "AXStaticText",
+   "value": " for character and encoding examples."
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    319,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    112,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "code.hover.focused"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    423,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    451,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    99,
+    85,
+    500,
+    272
+   ],
+   "part": "hover.document",
+   "text": "Hover documentation"
+  },
+  {
+   "frame": [
+    99,
+    85,
+    500,
+    300
+   ],
+   "part": "hover.panel"
+  },
+  {
+   "baseline": 373.5,
+   "frame": [
+    512,
+    362,
+    75,
+    15
+   ],
+   "part": "hover.actions",
+   "text": "g. actions"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    1386,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1420,
+    904,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "code.hover.focused",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}
