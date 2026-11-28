@@ -45,7 +45,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 ## Decisions needed before S4
 
 4. **Background completion (principle 7).** The design changes only the modeline and the echo line when a run ends. Whether a long run may post one passive notification when Minga is not frontmost, and show progress on the Dock icon, needs an ADR either way. Without it a ten-minute test run that ends while you are in the browser leaves no trace outside the window.
-5. **`esc` closes a drawer that opened by itself.** Added after the last review round, so no reviewer has seen it. The risk is a habitual extra `esc` closing a failure you wanted to read.
+5. **`esc` closes a drawer that opened by itself. Decided 2026-11-28: it does not.** `esc` never closes an unfocused drawer; `SPC ~` or a click does.
 6. **Hover shows the drawer header's hints on macOS.** The tasks drawer does not do this today. If the run drawer does, the tasks drawer should too.
 
 ## Prove before building on it
@@ -158,9 +158,22 @@ Carried from the review of #4384. None is settled.
 - **`x` and ⌘. on a block Minga ran.** The design says your keys never stop Minga's run; say what the key does instead on such a block.
 - **Approval keys.** The design's act-menu text lists `y` and `n` only. The existing approval target has `y` once, `a` this session, `t` this turn, `n` deny, and `esc` defers. Use that set.
 - **Row ceiling.** Running runs are never evicted, so seven running runs at their caps exceed the resident store's 65,536 rows.
-- **Window label row.** ADR-0009 gives a buffer drawer a label while labels are showing. The drawer's minimum and the Room test do not count that row, and nothing says whether a drawer plus one file counts as two buffer windows.
+- **Window label row. Settled 2026-11-28:** ADR-0009 decision 5 is amended, and a drawer with its own header has no label and does not count as a second buffer window. The earlier question was: ADR-0009 gives a buffer drawer a label while labels are showing. The drawer's minimum and the Room test do not count that row, and nothing says whether a drawer plus one file counts as two buffer windows.
 - **Where block state is drawn.** `terminal.md` uses a gutter column; the runs design uses the header row. Settle before #4061 starts.
 - **`SPC ~`** against "closing a drawer returns to the one it replaced" in `surfaces.md`.
+
+## Open questions from the review of the accepted ADRs
+
+Four independent reviews on 2026-11-28. What they settled is in ADR-0010 ("Owner and failure", "Security rules", "Conditions on decision 6") and ADR-0009 decision 5. These remain open.
+
+- **Follow** beyond appends: see the open note in `runs.md` section 7. Before S1.
+- **Author without colour.** In the terminal frontend the strand has no stated form, and the word "Minga" comes after the command, where a long command clips it. Before S5: put the author before the command and pair the colour with a shape.
+- **Header counts and steppers** mix your runs with Minga's. Before S5: count yours, show Minga's separately, and say whether `]]` crosses authors.
+- **`SPC a w` and a pending approval.** It scrolls to Minga's newest block, which can be past an older pending approval. Before S5.
+- **Retention of Minga's blocks.** Five finished blocks per author drops most of what an agent did. Before S5.
+- **Row fit of the 24 pt header.** Where the leftover points go when the header rounds up to two rows, the drawer's width under a vertical split, and a worked 80 by 24 example. Before S1.
+- **`x` stops with no confirmation,** including on a long run. Before S2.
+- **Mouse paths** missing for resize by keyboard, open-at-file in the terminal frontend, and the stop list. Before S2.
 
 ## Not verified
 
