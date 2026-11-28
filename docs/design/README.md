@@ -13,7 +13,7 @@ Start with [principles](principles.md). They are short, and every other file fol
 | [surfaces.md](surfaces.md) | Modeline, which-key, drawers, tasks, review, composer, switcher, diagnostics, subagent peek, background alerts |
 | [anatomy.md](anatomy.md) | The measurements of every surface part in tokens, for macOS and the TUI: insets, gaps, row pitch, text steps. Boards fix structure; this file fixes polish |
 | [terminal.md](terminal.md) | The built-in terminal |
-| [runs.md](runs.md) | Commands you start and do not type into: `:!`, tests, builds. The run buffer, its drawer, errors and `]q` (reviewed, not built) |
+| [runs.md](runs.md) | Commands you start and do not type into: `:!`, tests, builds. The run buffer, its drawer, errors and `]q` (proposed; [terminal.md](terminal.md) governs until ADR-0010 is accepted) |
 | [tui.md](tui.md) | How the Go TUI draws all of this with Lip Gloss and Bubble Tea, and what needs a modern terminal |
 | [storyboard.md](storyboard.md) | How we keep macOS and the TUI consistent: scenarios, storyboards and flow-graph checks |
 | [scenarios.toml](https://github.com/jsmestad/minga/blob/main/docs/design/scenarios.toml) | The scenario inventory that the storyboard and the flow map are built from |

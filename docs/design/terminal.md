@@ -1,5 +1,7 @@
 # The built-in terminal
 
+This page and issue #4061 govern `*minga-shell*`, command blocks, approvals and the failed-block menu. [runs.md](runs.md) and [ADR-0010](../adr/0010-runs.md) (Proposed) propose moving Minga's commands into a run buffer. Until ADR-0010 is accepted, do not build from runs.md where it disagrees with this page.
+
 A terminal is a buffer. It uses the same modes, marks, drawers and yes/no grammar as everything else, and it is where Minga runs its commands, so you can watch them. This is the interaction contract for #19 and #122. The emulator engine is libghostty-vt in a helper process, with the BEAM owning the terminal buffer; see [ADR-0008](../adr/0008-terminal-engine.md).
 
 ## Opening and closing

@@ -95,7 +95,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 ### S3: errors and the quickfix core
 
 - **Delivers:** `]q` and `[q` from any window, the `:c*` commands, entry marks, the error stepper, watch cycles, progress.
-- **Work:** `Minga.Run.Matcher` and its registry with built-ins for the languages that have test runners; `Minga.Quickfix` as a pure value in editor state; entry anchoring through buffer change deltas; which run takes the list (seen, superseded, unvisited entries); the `→` and severity marks in the sign column.
+- **Work:** `Minga.Run.Matcher` and its registry with built-ins for the languages that have test runners; extending the existing `MingaEditor.Quickfix` (`lib/minga_editor/quickfix.ex`; `]q` / `[q` are already bound) with runs as a source, a list stack and the missing `:c*` commands; entry anchoring through buffer change deltas; which run takes the list (seen, superseded, unvisited entries); the `→` and severity marks in the sign column.
 - **Done when:** a failing `mix test` then `]q` lands on the assertion line with the drawer cursor following; typing ten lines above an error and pressing `]q` still lands on it; a passing rerun leaves `]q` saying "No errors"; `npm test` in watch mode replaces its list each cycle; the loop "run, first error, fix, rerun, green" is 8 keys.
 
 ### S4: the reveal
@@ -119,7 +119,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 
 | Document | Change | With |
 |---|---|---|
-| `docs/design/terminal.md`, ADR-0008 | `*minga-shell*` withdrawn; the terminal reuses the run helper's PTY code and the block value | S5 |
+| `docs/design/terminal.md`, ADR-0008 | Only if ADR-0010 is accepted and the owner question with #4061 is settled: `*minga-shell*` withdrawn; the terminal reuses the run helper's PTY code and the block value | S5 |
 | `docs/design/keys.md`, `docs/AGENTIC-KEYMAP.md`, `doom_conventions.tsv` | The run keys and a "Run buffer" table | S1 and S2 |
 | `docs/design/surfaces.md` | The run segment in the modeline order; switcher and which-key sections | S2, S6 |
 | `docs/design/marks.md`, `themes.md`, `anatomy.md` | Strand in a block buffer, entry marks, Working takes its author's role, in-buffer button height | S1 |
