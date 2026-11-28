@@ -91,7 +91,7 @@ panel=f'''
     <span style="font-family:{MONO};color:#8f8d88">SPC</span><span style="color:#55575f">›</span>
     <span style="font-family:{MONO};color:{GO}">a</span><span style="font-weight:700;font-size:13px">Minga</span>
     <span style="color:#55575f">·</span>{work_badge}<span style="color:#55575f">·</span>{needs_badge}
-    <span style="flex:1"></span><span style="color:#8f8d88;font-size:11.5px"><span style="font-family:{MONO}">⌫</span> back   <span style="font-family:{MONO}">esc</span> cancel</span>
+    <span style="flex:1"></span><span style="color:#8f8d88;font-size:11.5px"><span style="font-family:{MONO}">⌫</span> back   <span style="font-family:{MONO}">esc</span> close</span>
   </div>
   <div style="display:flex;gap:40px">
     {col("Tasks",[("a","Tasks",W,f'<span style="color:{A}">· 1 needs you</span>'),("n","New task…",W,""),("i","Inspect a task",W,""),("w","Watch Minga",W,""),("s","Stop",W,dim("⌘."))])}
