@@ -40,15 +40,35 @@ jobs:
           import json
           import os
           from pathlib import Path
+          import re
           import subprocess
+
+          required = {"GITHUB_ACTIONS": "true", "CI": "true", "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_REF": "refs/heads/diag/4053-native-tooltip"}
+          if any(os.environ.get(key) != value for key, value in required.items()):
+              raise SystemExit("the launch probe requires the isolated diagnostic branch on a GitHub-hosted runner")
 
           root = Path(os.environ["RUNNER_TEMP"])
           transcript = root / "storyboard/transcripts/edit.working/macos-catppuccin_latte-1280.json"
           jobs = root / "tooltip-jobs.json"
           jobs.write_text(json.dumps([{"transcript": str(transcript), "output": str(root / "tooltip-frames/edit.working")}]))
-          app = root / "derived/Build/Products/Debug/PreviewHost.app/Contents/MacOS/PreviewHost"
-          env = dict(os.environ, PREVIEW_VIEW="Storyboard", PREVIEW_STORYBOARD_JOBS=str(jobs), MINGA_STORYBOARD_TOOLTIP_PROBE="1", LC_ALL="en_US.UTF-8", TZ="UTC")
-          subprocess.run([str(app)], env=env, check=True, timeout=30)
+          bundle = root / "derived/Build/Products/Debug/PreviewHost.app"
+          stdout, stderr = root / "tooltip.stdout", root / "tooltip.stderr"
+          env = dict(required, MINGA_REQUIRE_METAL="1")
+          env.update(PREVIEW_VIEW="Storyboard", PREVIEW_STORYBOARD_JOBS=str(jobs), MINGA_STORYBOARD_TOOLTIP_PROBE="1", LC_ALL="en_US.UTF-8", TZ="UTC")
+          launch = ["/usr/bin/open", "-W", "-n", "--stdout", str(stdout), "--stderr", str(stderr)]
+          for key, value in env.items():
+              launch.extend(("--env", f"{key}={value}"))
+          launch.append(str(bundle))
+          try:
+              subprocess.run(launch, env=env, check=True, timeout=45)
+          finally:
+              executable = bundle / "Contents/MacOS/PreviewHost"
+              subprocess.run(["/usr/bin/pkill", "-TERM", "-f", f"^{re.escape(str(executable))}$"], check=False)
+              for log in (stdout, stderr):
+                  if log.exists():
+                      print(log.read_text(), end="")
+          if not stdout.exists() or "TOOLTIP_PROBE result=verified_owned_detached_help" not in stdout.read_text().splitlines():
+              raise SystemExit("LaunchServices returned without verified native help and dismissal")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
