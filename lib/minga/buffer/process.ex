@@ -1651,7 +1651,7 @@ defmodule Minga.Buffer.Process do
           events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
         }
 
-        register_path(path)
+        register_path(path, state.swap.directory)
         {:ok, state, {:continue, :take_kept_swap}}
 
       {:error, reason} ->
@@ -1694,7 +1694,7 @@ defmodule Minga.Buffer.Process do
             new_state |> take_kept_swap() |> rebuild_conflict_index() |> reconcile_kept()
 
           unregister_path(state.file_path)
-          register_path(file_path)
+          register_path(file_path, new_state.swap.directory)
 
           broadcast_buffer_path_changed(state.file_path, new_state)
           defer_filetype_changed(state, new_state)
@@ -3267,7 +3267,7 @@ defmodule Minga.Buffer.Process do
         {new_mtime, new_size} = Persistence.file_metadata(state, intent.target)
         state = leave_file_swap(state)
         unregister_path(state.file_path)
-        register_path(intent.target)
+        register_path(intent.target, state.swap.directory)
 
         first_line = content |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(intent.target, first_line)
@@ -3639,8 +3639,12 @@ defmodule Minga.Buffer.Process do
       state = revoke_swap_writes(state)
 
       case discard_unsaved_swap(state) do
-        {:ok, state} -> {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
-        {{:error, _reason} = error, state} -> {:reply, error, state}
+        {:ok, state} ->
+          Registry.unregister(Minga.Buffer.SwapRegistry, self())
+          {:reply, :ok, %{state | swap: SwapState.release(state.swap)}}
+
+        {{:error, _reason} = error, state} ->
+          {:reply, error, state}
       end
     else
       {:reply, {:error, :timeout}, state}
@@ -4253,10 +4257,10 @@ defmodule Minga.Buffer.Process do
 
   # ── Registry helpers ──
 
-  @spec register_path(String.t() | nil) :: :ok
-  defp register_path(nil), do: :ok
+  @spec register_path(String.t() | nil, String.t() | nil) :: :ok
+  defp register_path(nil, _swap_dir), do: :ok
 
-  defp register_path(path) do
+  defp register_path(path, swap_dir) do
     abs_path = Path.expand(path)
 
     case Registry.register(Minga.Buffer.Registry, abs_path, nil) do
@@ -4265,7 +4269,26 @@ defmodule Minga.Buffer.Process do
     end
 
     register_file_path(abs_path)
+    put_swap_path(abs_path, swap_dir)
   end
+
+  # Swap ownership is by writer, even when two buffers visit the same path.
+  @spec put_swap_path(String.t(), String.t() | nil) :: :ok
+  defp put_swap_path(path, directory) when is_binary(directory) do
+    entry = {directory, path}
+    pid = self()
+
+    case Registry.update_value(Minga.Buffer.SwapRegistry, pid, fn _ -> entry end) do
+      :error ->
+        {:ok, _owner} = Registry.register(Minga.Buffer.SwapRegistry, pid, entry)
+        :ok
+
+      {_new, _old} ->
+        :ok
+    end
+  end
+
+  defp put_swap_path(_path, nil), do: :ok
 
   @spec register_file_path(String.t()) :: :ok
   defp register_file_path(abs_path) do
@@ -5797,6 +5820,7 @@ defmodule Minga.Buffer.Process do
   defp register_buffer_move(state, path) do
     unregister_path(state.file_path)
     register_file_path(path)
+    put_swap_path(path, state.swap.directory)
     %{BufState.retarget_path(state, path) | swap: SwapState.published(state.swap)}
   end
 

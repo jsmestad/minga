@@ -221,6 +221,74 @@ defmodule Minga.Buffer.SwapRecoveryAdoptionTest do
       assert File.exists?(Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir))
     end
 
+    test "releasing a directory skips a suspended foreign writer and does not call released writers",
+         ctx do
+      local = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      foreign_path = Path.join(Path.dirname(ctx.path), "foreign.txt")
+      foreign_dir = Path.join(Path.dirname(ctx.path), "foreign-swap")
+      File.write!(foreign_path, "foreign file")
+      foreign = start_buffer(%{path: foreign_path}, swap_dir: foreign_dir)
+
+      :ok = Buffer.replace_content(local, "local unsaved text")
+      :ok = Buffer.replace_content(foreign, "foreign unsaved text")
+      write_swap_after_debounce(local)
+      write_swap_after_debounce(foreign)
+
+      local_swap = Swap.swap_path(ctx.path, swap_dir: ctx.swap_dir)
+      foreign_swap = Swap.swap_path(foreign_path, swap_dir: foreign_dir)
+      assert {:ok, _, "local unsaved text"} = Recovery.read(local_swap)
+      assert {:ok, _, "foreign unsaved text"} = Recovery.read(foreign_swap)
+
+      :sys.suspend(foreign)
+
+      try do
+        assert :ok = Buffer.release_swaps(ctx.swap_dir, 50)
+      after
+        :sys.resume(foreign)
+      end
+
+      refute File.exists?(local_swap)
+      assert {:ok, _, "foreign unsaved text"} = Recovery.read(foreign_swap)
+
+      :sys.suspend(local)
+
+      try do
+        assert :ok = Buffer.release_swaps(ctx.swap_dir, 50)
+      after
+        :sys.resume(local)
+      end
+    end
+
+    test "releasing writers uses their own directory and reports the current file after a move",
+         ctx do
+      foreign_dir = Path.join(Path.dirname(ctx.path), "foreign-swap")
+      foreign = start_buffer(ctx, swap_dir: foreign_dir)
+      local = start_buffer(ctx, swap_dir: ctx.swap_dir)
+      moved = Path.join(Path.dirname(ctx.path), "moved.txt")
+
+      :sys.suspend(local)
+
+      try do
+        assert {:error, [{ctx.path, :timeout}]} == Buffer.release_swaps(ctx.swap_dir, 50)
+      after
+        :sys.resume(local)
+      end
+
+      assert :ok = Buffer.retarget_path(local, moved)
+      :sys.suspend(local)
+
+      try do
+        assert {:error, [{moved, :timeout}]} == Buffer.release_swaps(ctx.swap_dir, 50)
+        assert :ok = Buffer.release_swaps(foreign_dir, 50)
+      after
+        :sys.resume(local)
+      end
+
+      assert :ok = Buffer.replace_content(foreign, "late edit after its own release")
+      write_swap_after_debounce(foreign)
+      assert swap_files(foreign_dir) == []
+    end
+
     test "a buffer that cannot answer in time keeps its swap and does not hold up the quit",
          ctx do
       buffer = start_buffer(ctx, swap_dir: ctx.swap_dir)
