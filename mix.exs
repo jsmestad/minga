@@ -71,7 +71,8 @@ defmodule Minga.MixProject do
         "assets" => "assets",
         "docs/exdoc" => "exdoc",
         "docs/images" => "images",
-        "docs/design/marks" => "marks"
+        "docs/design/marks" => "marks",
+        "docs/design/runs" => "runs"
       },
       extras: [
         # Start
@@ -106,6 +107,7 @@ defmodule Minga.MixProject do
         {"docs/design/surfaces.md", filename: "design-surfaces"},
         {"docs/design/anatomy.md", filename: "design-anatomy"},
         {"docs/design/terminal.md", filename: "design-terminal"},
+        {"docs/design/runs.md", filename: "design-runs"},
         {"docs/design/tui.md", filename: "design-tui"},
         {"docs/design/storyboard.md", filename: "design-storyboard"},
         {"docs/design/visual_rubric.md", filename: "design-visual-rubric"},
@@ -118,7 +120,9 @@ defmodule Minga.MixProject do
         "docs/adr/0006-the-spine.md",
         "docs/adr/0007-cua-is-a-key-profile.md",
         "docs/adr/0008-terminal-engine.md",
-        "docs/adr/0009-one-modeline-and-window-labels.md"
+        "docs/adr/0009-one-modeline-and-window-labels.md",
+        "docs/adr/0010-runs.md",
+        "docs/adr/0011-buffer-drawers.md"
       ],
       # The sidebar reads in task order. docs/REFERENCE.md lists the same groups, with the Changelog at the end.
       groups_for_extras: [
@@ -158,6 +162,7 @@ defmodule Minga.MixProject do
           "docs/design/surfaces.md",
           "docs/design/anatomy.md",
           "docs/design/terminal.md",
+          "docs/design/runs.md",
           "docs/design/tui.md",
           "docs/design/storyboard.md",
           "docs/design/visual_rubric.md"
@@ -171,7 +176,9 @@ defmodule Minga.MixProject do
           "docs/adr/0006-the-spine.md",
           "docs/adr/0007-cua-is-a-key-profile.md",
           "docs/adr/0008-terminal-engine.md",
-          "docs/adr/0009-one-modeline-and-window-labels.md"
+          "docs/adr/0009-one-modeline-and-window-labels.md",
+          "docs/adr/0010-runs.md",
+          "docs/adr/0011-buffer-drawers.md"
         ]
       ],
       before_closing_head_tag: %{
