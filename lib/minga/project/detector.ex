@@ -128,6 +128,16 @@ defmodule Minga.Project.Detector do
     |> walk_up(markers, broad?)
   end
 
+  @doc "Finds the nearest marked directory, starting at the given directory."
+  @spec detect_from_directory(String.t()) :: result()
+  def detect_from_directory(dir) when is_binary(dir),
+    do: walk_up(Path.expand(dir), default_markers(), &broad_folder?/1)
+
+  @doc "Checks the given directory for a project marker without searching its ancestors."
+  @spec detect_at_directory(String.t()) :: result()
+  def detect_at_directory(dir) when is_binary(dir),
+    do: find_marker(Path.expand(dir), default_markers(), &broad_folder?/1)
+
   @doc """
   Finds the project root for a file given a flat list of marker filenames.
 
@@ -153,8 +163,8 @@ defmodule Minga.Project.Detector do
 
   defp walk_up(dir, markers, broad?) do
     case find_marker(dir, markers, broad?) do
-      {:ok, type} ->
-        {:ok, dir, type}
+      {:ok, _, _} = found ->
+        found
 
       :none ->
         parent = Path.dirname(dir)
@@ -167,11 +177,10 @@ defmodule Minga.Project.Detector do
     end
   end
 
-  @spec find_marker(String.t(), [{String.t(), project_type()}], broad()) ::
-          {:ok, project_type()} | :none
+  @spec find_marker(String.t(), [{String.t(), project_type()}], broad()) :: result()
   defp find_marker(dir, markers, broad?) do
     Enum.find_value(markers, :none, fn {marker, type} ->
-      if marker_present?(dir, marker, broad?), do: {:ok, type}
+      if marker_present?(dir, marker, broad?), do: {:ok, dir, type}
     end)
   end
 
