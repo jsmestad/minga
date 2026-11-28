@@ -1435,6 +1435,37 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       assert {model.cursor_row, model.cursor_col} == {fresh.cursor_row, fresh.cursor_col}
     end
 
+    test "a wrapped window grows a line near the top and one near the bottom as two splices" do
+      content = Enum.map_join(0..119, "\n", &"line #{&1}")
+      editor = gui_state(content: content, rows: 12, cols: 30, filetype: :text)
+      buffer = editor.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      state = warm(editor)
+      base_rows = fresh_resident_frame(state.editor).rows
+      {before, state} = build_frame(state)
+      assert before.row_store_mode == {:resident, 120}
+
+      # Each insert makes its line wrap onto several rows, and the second also adds a line.
+      BufferProcess.move_to(buffer, {5, 0})
+      BufferProcess.insert_text(buffer, String.duplicate("a", 70))
+      BufferProcess.move_to(buffer, {100, 0})
+      BufferProcess.insert_text(buffer, String.duplicate("b", 70) <> "\nnew line\n")
+      {model, state} = build_frame(state)
+
+      assert [
+               %{start_index: 5, delete_count: 1, insert_rows: [_, _ | _] = top},
+               %{start_index: 100, delete_count: 1, insert_rows: [_, _, _ | _] = bottom}
+             ] = model.row_delta.splices
+
+      assert model.row_delta.base_row_count == 120
+      assert model.row_delta.result_row_count == 118 + length(top) + length(bottom)
+
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
     test "neither frame replaces the whole store" do
       state = warm(resident_state(300))
       buffer = state.editor.workspace.buffers.active
