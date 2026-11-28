@@ -153,10 +153,11 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     Process.cancel_timer(accepted.render.render_correlation.timer)
   end
 
-  test "current failures publish an error and request rendering", %{tmp_dir: root} do
-    state = state_with_tree(root)
-    %Frontend{} = frontend = state.frontend
-    state = %{state | frontend: %Frontend{frontend | backend: :tui}}
+  test "current failures publish an error and render without rewriting the backing buffer", %{
+    tmp_dir: root
+  } do
+    buffer = BufferSync.start_buffer(tree(root, [entry(root, "previously-rendered.ex")]))
+    state = tui_state_with_tree(root, nil, buffer)
     request = Refresh.request(ft_tree(state), state.extension_surfaces.events_registry)
     tracked = track(state, request)
 
@@ -165,6 +166,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
 
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason =~ "unreadable"
+    assert Minga.Buffer.content(buffer) =~ "previously-rendered.ex"
     assert file_tree(failed).refresh.phase == {:idle, 0}
     assert is_reference(failed.render.render_correlation.timer)
     Process.cancel_timer(failed.render.render_correlation.timer)
@@ -354,7 +356,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     recovered_root = Path.join(root, "recovered")
     Enum.each([old_root, recovered_root], &File.mkdir_p!/1)
     scheduler = start_scheduler()
-    state = tui_state_with_tree(old_root, scheduler)
+    buffer = BufferSync.start_buffer(tree(old_root, [entry(old_root, "old.ex")]))
+    state = tui_state_with_tree(old_root, scheduler, buffer)
 
     failing =
       Freshness.update_project_root(state, failed_root,
@@ -368,6 +371,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert_receive {:file_tree_scan_started, :failed_root, _worker}, @timeout
     failed_outcome = receive_outcome(scheduler, failed_id, :failed)
     assert :ok = EffectScheduler.claim(scheduler, failed_outcome)
+    assert Minga.Buffer.content(buffer) =~ "old.ex"
 
     assert {failed, %Outcome{value: {:failed, _reason}} = finalized_failure} =
              Refresh.apply(failing, failed_outcome)
@@ -376,6 +380,7 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert ft_tree(failed).root == Path.expand(failed_root)
     assert {:error, reason} = FileTreeState.status(file_tree(failed))
     assert reason != ""
+    assert Minga.Buffer.content(buffer) == ""
     Process.cancel_timer(failed.render.render_correlation.timer)
 
     watcher_id = watcher_request_token(file_tree(failed))
@@ -488,8 +493,8 @@ defmodule MingaEditor.FileTree.FreshnessTest do
     assert FileTreeState.status(file_tree(failed)) == {:error, reason}
   end
 
-  defp tui_state_with_tree(root, scheduler) do
-    state = state_with_tree(root, scheduler)
+  defp tui_state_with_tree(root, scheduler, buffer \\ nil) do
+    state = state_with_tree(root, scheduler, buffer)
     %Frontend{} = frontend = state.frontend
     %{state | frontend: %Frontend{frontend | backend: :tui}}
   end
