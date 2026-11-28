@@ -229,18 +229,19 @@ defmodule Minga.Buffer.KeptReview.Source do
       Enum.reduce_while(parts, 0, fn {offset, at, payload, declared}, consumed ->
         expected = if side == :written, do: point + consumed, else: point
 
-        if offset == consumed and at == expected and total == declared do
-          length = if is_binary(payload), do: byte_size(payload), else: payload
-          {:cont, consumed + length}
-        else
-          {:halt, :inexact}
-        end
+        if offset == consumed and at == expected and total == declared,
+          do: {:cont, consumed + payload_size(payload)},
+          else: {:halt, :inexact}
       end)
 
     if consumed == total, do: {:ok, point, total}, else: :inexact
   end
 
   defp complete(_fragmentary, _side), do: :inexact
+
+  @spec payload_size(binary() | pos_integer()) :: non_neg_integer()
+  defp payload_size(bytes) when is_binary(bytes), do: byte_size(bytes)
+  defp payload_size(length), do: length
 
   # Different deletions at one zero-width point have no proven relative order.
   # A source spanning a different source's point also has no independent inverse.

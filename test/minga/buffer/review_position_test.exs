@@ -74,11 +74,16 @@ defmodule Minga.Buffer.ReviewPositionTest do
     total = length(heads)
 
     for point <- 0..(Document.content_byte_size(document) + 1) do
-      expected =
-        Enum.find_value(ranked, fn {range, rank} -> if point in range, do: {rank, total} end)
+      expected = expected_rank(ranked, point, total)
 
       assert ReviewPosition.at(index, point) == expected,
              "unexpected review rank at byte #{point}"
     end
+  end
+
+  defp expected_rank(ranked, point, total) do
+    Enum.find_value(ranked, fn {range, rank} ->
+      if point in range, do: {rank, total}
+    end)
   end
 end
