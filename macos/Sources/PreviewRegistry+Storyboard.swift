@@ -305,9 +305,9 @@ enum StoryboardCapture {
         try await settledPNG(window: window, host: host).write(to: output.appendingPathExtension("before.png"))
         try await verify(targetPoint)
         for _ in 0..<24 {
-            let owned = try await SCShareableContent.currentProcess
+            let owned = try await ownWindowFrames()
             let visible = try Set(onScreen().compactMap(id))
-            for popup in owned.windows where popup.windowID != editorID && !before.contains(popup.windowID) && visible.contains(popup.windowID) {
+            for popup in owned where popup.windowID != editorID && !before.contains(popup.windowID) && visible.contains(popup.windowID) {
                 let bounds = popup.frame
                 guard bounds.width > 1, bounds.height > 1, bounds.width <= 400, bounds.height <= 100,
                       bounds.insetBy(dx: -100, dy: -100).contains(quartz(targetPoint)) else { continue }
@@ -346,6 +346,10 @@ enum StoryboardCapture {
             print("TOOLTIP_PROBE nearby_new_window=\(number) owner=\(String(describing: entry[kCGWindowOwnerPID as String])) bounds=\(bounds)")
         }
         throw Failure.notPresented("verified pointer dwell did not produce an OCR-positive, own-process shareable help window")
+    }
+
+    private nonisolated static func ownWindowFrames() async throws -> [(windowID: CGWindowID, frame: CGRect)] {
+        try await SCShareableContent.currentProcess.windows.map { ($0.windowID, $0.frame) }
     }
 
     /// The application effects a real app applies from the same packets; the rest have no visible effect in a still.
