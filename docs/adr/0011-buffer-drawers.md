@@ -1,6 +1,6 @@
 # ADR-0011: A drawer that shows a buffer is a window the BEAM lays out in rows
 
-**Status:** Proposed (2026-11-27), revised 2026-11-28 after Spike B. Extends [ADR-0001](0001-frontend-owns-row-fit.md). Design: [runs.md](../design/runs.md). First user: the run drawer. The terminal drawer (ADR-0008) is the second.
+**Status:** Accepted (2026-11-28). The follow rule in decision 4 needs the buffer change in slice S1 ([#4389](https://github.com/jsmestad/minga/issues/4389)) before it is true. Extends [ADR-0001](0001-frontend-owns-row-fit.md). Design: [runs.md](../design/runs.md). First user: the run drawer. The terminal drawer (ADR-0008) is the second.
 
 ## Decision
 

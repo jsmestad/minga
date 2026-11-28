@@ -2,9 +2,9 @@
 
 A run is a command you start from the editor and do not type into: `:!make`, the project's tests, a build. This page says where a run's output goes, what you can do with it, and what Minga does when one fails. The interactive shell is a different surface, covered in [terminal.md](terminal.md).
 
-**Status:** proposed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed.
+**Status:** designed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Accepted on 2026-11-28.
 
-**Which page governs.** Until ADR-0010 and ADR-0011 are accepted, [terminal.md](terminal.md), [keys.md](keys.md), [surfaces.md](surfaces.md), ADR-0006 and ADR-0008 govern wherever this page disagrees with them. That includes `*minga-shell*`, `SPC a w`, approvals, command blocks and the failed-block menu, which belong to issue #4061. Build from this page only through the runs tickets (#4385 to #4389). Sentences marked *(open)* below depend on an owner decision or a spike listed in the workstream page and are not settled. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
+**Which page governs.** This page governs runs, the run buffer and its drawer, and Minga's commands: where they appear, their approvals as pending blocks, and the actions on a command block. [terminal.md](terminal.md) governs the interactive terminal. [keys.md](keys.md) and [surfaces.md](surfaces.md) still govern keys and chrome; where this page names a key they do not list yet, the key lands with its slice. Sentences marked *(open)* below depend on a decision or a ticket listed in the workstream page and are not settled. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
 
 The design went through seven review rounds with a Minga UX specialist, a macOS designer and a Doom/Neovim power user, and one architecture review. Two decisions were the owner's: a failed check opens the run drawer by default, and no "current run" is stored.
 
@@ -15,7 +15,7 @@ Minga has two kinds of command surface, split by one question: does the command 
 - **A run** is a non-interactive command with a known command line: `:!cmd`, a test command, a project command, and every command Minga's agent runs. The BEAM owns a run record for it.
 - **A terminal** (`SPC o t`, [ADR-0008](../adr/0008-terminal-engine.md), not shipped) is an interactive shell in a PTY.
 
-Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Approvals would be pending blocks in it, and `*minga-shell*` as a separate buffer would be withdrawn at slice S5 if ADR-0010 is accepted *(open: the owner of Minga's commands is being settled with #4061)*. One buffer per project is *(open: Spike B, #4387)*.
+Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Minga's commands are blocks in it, and an approval is a pending block; there is no separate `*minga-shell*` buffer. One buffer per project is *(conditional: it needs [#4397](https://github.com/jsmestad/minga/issues/4397); Spike B, #4387)*.
 
 `*run*` is a buffer, not a list view. The editor renderer draws it in uniform rows at the buffer's row pitch, with the Vim cursor, like any buffer (ADR-0001). Nothing in it has its own row height.
 
@@ -65,7 +65,7 @@ The new keys (`SPC c c`, `SPC c C`, `SPC p c`, `SPC c o`, `SPC c s`, `SPC ~`, `S
 | A pending approval | The answer prompt | `↩` on the block | Its Needs-you shape |
 | A block | Folded / unfolded | `za`, `zM`, `zR` | Its chevron; double-click the header row |
 | A held view | The newest output | `G` | "↓ N new lines" at the bottom edge |
-| Anywhere | Minga's commands | *(proposed; keys.md and #4061 govern `SPC a w` today)* `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
+| Anywhere | Minga's commands | `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
 | The drawer | Full height | `SPC ,` → `*run*` | same |
 
 `]q` from a file moves the drawer's cursor to that entry when the drawer is visible. `↩` on an entry sets the list index. `]q` and `[q` always echo "N of M · message"; the owning run is prefixed only when it is not the run the segment names. The first `]q` or `[q` after the list changes owner always prefixes the owning run, so the jump explains itself and `:colder` is the way back.

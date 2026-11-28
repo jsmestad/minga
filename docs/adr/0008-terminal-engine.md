@@ -19,7 +19,7 @@ Each built-in terminal runs in its own native helper process, `minga-terminal`, 
 
 - Normal mode moves a Vim cursor over the scrollback, searches it, yanks from it and holds the view still while output arrives ("↓ 12 new lines").
 - OSC 133 command blocks give `]]`/`[[`, the `ic`/`ac` text objects, state glyphs with exit code and duration, and a failed-block menu that sends output to Minga or quickfix.
-- The authorship column marks who ran each command, and `*minga-shell*` shows Minga's own commands, read-only, with approval blocks.
+- The authorship column marks who ran each command, and Minga's own commands show read-only with approval blocks. (Amended by [ADR-0010](0010-runs.md): they are blocks in `*run*`, not a `*minga-shell*` buffer.)
 - The modeline shows cwd and the last exit status, and "Shell exited" keeps scrollback.
 
 The AGENTS.md ownership rules decide where those features live: cursor motion, selection, search and text objects are BEAM semantics, and frontends must not duplicate them. The resident-store principle says the BEAM ships the whole navigable model and frontends present it. So the BEAM must hold the terminal's text and structure. The engine choice is about who parses the VT stream and how the result reaches the BEAM.

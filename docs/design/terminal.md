@@ -1,8 +1,8 @@
 # The built-in terminal
 
-This page and issue #4061 govern `*minga-shell*`, command blocks, approvals and the failed-block menu. [runs.md](runs.md) and [ADR-0010](../adr/0010-runs.md) (Proposed) propose moving Minga's commands into a run buffer. Until ADR-0010 is accepted, do not build from runs.md where it disagrees with this page.
+This page governs the interactive terminal. Minga's own commands do not run in a terminal buffer: they are run blocks in `*run*`, with their approvals and block actions, as [runs.md](runs.md) and [ADR-0010](../adr/0010-runs.md) (Accepted) describe. Issue #4061 covers blocks for the commands you type here.
 
-A terminal is a buffer. It uses the same modes, marks, drawers and yes/no grammar as everything else, and it is where Minga runs its commands, so you can watch them. This is the interaction contract for #19 and #122. The emulator engine is libghostty-vt in a helper process, with the BEAM owning the terminal buffer; see [ADR-0008](../adr/0008-terminal-engine.md).
+A terminal is a buffer. It uses the same modes, marks, drawers and yes/no grammar as everything else, This is the interaction contract for #19 and #122. The emulator engine is libghostty-vt in a helper process, with the BEAM owning the terminal buffer; see [ADR-0008](../adr/0008-terminal-engine.md).
 
 ## Opening and closing
 
@@ -29,9 +29,9 @@ With shell integration (OSC 133 for prompts and commands, OSC 7 for the cwd), ea
 ## Who ran it
 
 - The authorship column uses the same strands as code: your commands get your thin blue strand, Minga's commands get the purple ribbon.
-- Minga's commands run in one shared, visible `*minga-shell*` buffer. `SPC a w` shows it in a split.
-- `*minga-shell*` is read-only to keystrokes. It opens in Normal and has no TERMINAL mode, so you cannot type into Minga's shell by accident. You can scroll, search, yank, and interrupt the running command with ⌃C, ⌘. or `SPC a s`.
-- A command that needs approval appears as a pending block with the needs-you glyph. `↩` on it, or a click, asks in the minibuffer: "Run mix ecto.reset? y once · a always · t this turn · n deny". Asking in the minibuffer keeps `y` as yank in the scrollback. `esc` defers: the prompt closes, the request stays pending and needs-you stays lit, so a request is never denied by accident. `n` is the deliberate deny.
+- Minga's commands do not run here. Each is a block in the project's `*run*` buffer, marked with the purple ribbon. `SPC a w` shows `*run*` in a split at Minga's newest block. See [runs.md](runs.md).
+- `*run*` is read-only. It has no TERMINAL mode, so you cannot type into one of Minga's commands by accident. You can scroll, search and yank.
+- A command that needs approval appears in `*run*` as a pending block with the needs-you glyph. `↩` on it, or a click, asks in the minibuffer: "Run mix ecto.reset? y once · a always · t this turn · n deny". Asking in the minibuffer keeps `y` as yank in the scrollback. `esc` defers: the prompt closes, the request stays pending and needs-you stays lit, so a request is never denied by accident. `n` is the deliberate deny.
 
 ## Failed blocks
 

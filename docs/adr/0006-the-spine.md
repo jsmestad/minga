@@ -56,7 +56,7 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 
 - **Minga's changes in a file** use `]h` / `[h`, which pair with the `ih` / `ah` text object. They replace `]e` (`lib/minga/keymap/normal_prefixes.ex:56`) with no alias, since Minga is pre-release; `]e` / `[e` then move between diagnostics, as in Doom. `SPC a t` is retired.
 - **Sibling subagents** are stepped with `]]` / `[[` inside the peek buffer, the same keys that mean "next block" in every read-only buffer; normal-mode `]t` keeps "next class/module" (`normal_prefixes.ex:54`).
-- **`esc` at the `*minga-shell*` approval prompt defers.** The request stays pending and needs-you stays lit; `n` is the deliberate deny.
+- **`esc` at the approval prompt for one of Minga's commands defers.** The request stays pending and needs-you stays lit; `n` is the deliberate deny.
 - **One drawer at a time.** Opening another replaces it, and closing returns to the previous one. Splits are how you see two things at once.
 - **Markdown in the conversation** arrives as BEAM-styled spans that each frontend draws. Glamour is not used.
 - **Theme fixes.** `agent.assistant_label` uses the minga role and `agent.status_thinking` the working role. Light-theme values below 3:1 (Latte's needs-you, warning and waiting; AstroDark's waiting) are raised when the new roles land.

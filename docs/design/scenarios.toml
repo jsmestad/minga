@@ -63,7 +63,7 @@
 #   code        completion, hover, signature help, diagnostics, code actions, rename, references
 #   git         status, blame, hunks, conflicts, commit
 #   minga       tasks, conversation, composer, queue, review, subagents, approvals
-#   terminal    the built-in terminal and *minga-shell*
+#   terminal    the built-in terminal and Minga's commands
 #   files       switcher, file tree, buffers, pinned files
 #   windows     splits, drawers, focus, narrow windows
 #   settings    config, themes, keybindings, extensions, help
@@ -1587,7 +1587,7 @@ exits = [
 [[scenario]]
 id = "terminal.minga_shell"
 journey = "terminal"
-title = "*minga-shell* with Minga's commands and a pending approval"
+title = "Minga's commands and a pending approval, shown in *run*"
 surfaces = ["editor", "split:minga_shell", "minibuffer", "modeline"]
 states = ["working", "needs_you", "failed"]
 frontends = ["macos", "tui"]

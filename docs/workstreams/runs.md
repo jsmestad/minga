@@ -1,6 +1,6 @@
 # Runs workstream
 
-**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed. Epic: [#4385](https://github.com/jsmestad/minga/issues/4385). Filed so far: Spike A [#4386](https://github.com/jsmestad/minga/issues/4386), Spike B [#4387](https://github.com/jsmestad/minga/issues/4387), S0 [#4388](https://github.com/jsmestad/minga/issues/4388), S1 [#4389](https://github.com/jsmestad/minga/issues/4389). S2 to S6 are not ticketed.
+**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Accepted on 2026-11-28. Epic: [#4385](https://github.com/jsmestad/minga/issues/4385). Filed so far: Spike A [#4386](https://github.com/jsmestad/minga/issues/4386), Spike B [#4387](https://github.com/jsmestad/minga/issues/4387), S0 [#4388](https://github.com/jsmestad/minga/issues/4388), S1 [#4389](https://github.com/jsmestad/minga/issues/4389). S2 to S6 are not ticketed.
 
 This page is the plan: what has to be decided, what has to be proven before code is built on it, and the slices in order. Each slice ships complete. None leaves a foundation the next one has to rework.
 
@@ -24,7 +24,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 - #4060 slice 1 (Zig 0.17) lands before S1 writes `minga-run`. S1 writes its PTY and process-group code as a module `minga-terminal` can link.
 - #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It merged on 2026-11-28.
 - S1 defines the block-state and strand fields in the protocol once. #4061 reuses them.
-- #4061 gains a dependency on S2 if ADR-0010 is accepted. S5 depends on nothing from #4060.
+- #4061 depends on S2, for the shared command-block target. S5 depends on nothing from #4060.
 - S0 (#4388) changes rendering code Spine tickets share; see its coordination note.
 
 ## A prerequisite Spike B found
@@ -39,7 +39,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 ## Decisions needed before S1
 
 1. **Accept S0 as a prerequisite.** `*run*` folds its blocks and marks dropped output with a virtual row. A window with folds, decoration fold regions, virtual lines or block decorations is not in the resident store today; it uses the windowed path. The resident-scroll workstream lists folded residence as a deferred remnant. Without it, `*run*` would be the one buffer that scrolls the old way.
-2. **Accept or change ADR-0010 and ADR-0011.** They fix the run record's owner, the shared runner, the PTY helper and how a buffer drawer is laid out.
+2. **Accept or change ADR-0010 and ADR-0011. Done: both accepted on 2026-11-28, ADR-0010 with two conditions (#4397 and the row ceiling).** They fix the run record's owner, the shared runner, the PTY helper and how a buffer drawer is laid out.
 3. **Head and tail at the cap.** The design keeps the first 2,000 and last 8,000 lines of a run. Confirm, or pick another split.
 
 ## Decisions needed before S4
@@ -143,7 +143,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 
 | Document | Change | With |
 |---|---|---|
-| `docs/design/terminal.md`, ADR-0008 | Only if ADR-0010 is accepted and the owner question with #4061 is settled: `*minga-shell*` withdrawn; the terminal reuses the run helper's PTY code and the block value | S5 |
+| `docs/design/terminal.md`, ADR-0008 | Done on acceptance (2026-11-28): `*minga-shell*` withdrawn. Still to do: the terminal reuses the run helper's PTY code and the block value | S5 |
 | `docs/design/keys.md`, `docs/AGENTIC-KEYMAP.md`, `doom_conventions.tsv` | The run keys and a "Run buffer" table | S1 and S2 |
 | `docs/design/surfaces.md` | The run segment in the modeline order; switcher and which-key sections | S2, S6 |
 | `docs/design/marks.md`, `themes.md`, `anatomy.md` | Strand in a block buffer, entry marks, Working takes its author's role, in-buffer button height | S1 |
