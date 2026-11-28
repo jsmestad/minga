@@ -1,37 +1,64 @@
 defmodule MingaEditor.NativeOpenTest do
-  # Not async: directory opens switch the application-wide Project process.
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   @moduletag :tmp_dir
 
   alias Minga.Project
-  alias MingaEditor.UI.Picker.FileSource
+  alias Minga.Project.SlowFileFind
+  alias MingaEditor.UI.Picker
 
-  test "a native directory open uses the Finder project-switch and file-picker behavior", %{
-    tmp_dir: tmp_dir
-  } do
-    previous_root = Project.workspace_root()
+  test "opening a directory from Finder finds and opens files in the editor's project",
+       %{tmp_dir: tmp_dir} do
+    events = :"native_open_events_#{System.unique_integer([:positive])}"
+    start_supervised!({Registry, keys: :duplicate, name: events})
 
-    on_exit(fn ->
-      case previous_root do
-        nil ->
-          Project.close()
-          assert Project.root() == nil
-
-        root ->
-          assert {:ok, _snapshot} = Project.activate(root)
-      end
-    end)
+    project_server =
+      start_supervised!(
+        {Project,
+         name: nil,
+         subscribe: false,
+         command_frecency: %{},
+         file_find_module: SlowFileFind,
+         events_registry: events}
+      )
 
     project = Path.join(tmp_dir, "project")
     File.mkdir!(project)
-    ctx = start_editor("initial")
+    relative_path = "finder-private.txt"
+    path = Path.join(project, relative_path)
+    File.write!(path, "private Finder result")
+    ctx = start_editor("initial", project_server: project_server, events_registry: events)
 
     assert :ok = MingaEditor.open_native(project, false, ctx.editor)
 
-    state = editor_state(ctx)
-    assert {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
-    assert picker_ui.source == FileSource
-    assert Project.root() == project
+    assert %{title: "Find file"} = picker_state(ctx)
+    assert Project.root(project_server) == project
+
+    Minga.Events.subscribe(:project_rebuilt, events)
+    %{rebuild_pid: worker} = :sys.get_state(project_server)
+    :ok = SlowFileFind.complete(worker, {:ok, [relative_path]})
+
+    assert_receive {:minga_event, :project_rebuilt,
+                    %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                   1_000
+
+    wait_until(
+      ctx,
+      fn _state ->
+        case picker_state(ctx) do
+          %Picker{} = picker ->
+            match?(%{id: %{path: ^relative_path}}, Picker.selected_item(picker))
+
+          nil ->
+            false
+        end
+      end,
+      max_attempts: 100,
+      message: "expected Find file to present the private project's discovery result"
+    )
+
+    send_key_sync(ctx, 13)
+    refute picker_open?(ctx)
+    assert Minga.Buffer.file_path(active_window_buffer(ctx)) == path
   end
 end

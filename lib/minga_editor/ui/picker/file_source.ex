@@ -10,7 +10,6 @@ defmodule MingaEditor.UI.Picker.FileSource do
 
   alias Minga.Project.Root
   alias Minga.Project.WorkspaceSnapshot
-  alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias Minga.Language
   alias Minga.Log
@@ -82,47 +81,56 @@ defmodule MingaEditor.UI.Picker.FileSource do
   @doc "Returns whether a completed project fetch still belongs to the active activation."
   @spec current_fetch?(
           {:project_activation, WorkspaceSnapshot.activation_id()} | nil,
-          Source.fetch_meta() | nil
+          Source.fetch_meta() | nil,
+          GenServer.server()
         ) :: boolean()
-  def current_fetch?({:project_activation, activation_id}, nil),
-    do: current_activation?(activation_id)
+  def current_fetch?({:project_activation, activation_id}, nil, project),
+    do: current_activation?(activation_id, project)
 
-  def current_fetch?(identity, %{project_activation_id: activation_id}) do
-    identity_matches?(identity, activation_id) and current_activation?(activation_id)
+  def current_fetch?(identity, %{project_activation_id: activation_id}, project) do
+    identity_matches?(identity, activation_id) and current_activation?(activation_id, project)
   end
 
-  def current_fetch?(nil, nil), do: true
-  def current_fetch?(_identity, _meta), do: false
+  def current_fetch?(nil, nil, _project), do: true
+  def current_fetch?(_identity, _meta, _project), do: false
 
   @doc "Returns whether a project candidate belongs to the active workspace activation."
-  @spec current_candidate?(ProjectFileCandidate.t()) :: boolean()
-  def current_candidate?(%ProjectFileCandidate{activation_id: nil}), do: false
+  @spec current_candidate?(ProjectFileCandidate.t(), GenServer.server()) :: boolean()
+  def current_candidate?(%ProjectFileCandidate{activation_id: nil}, _project), do: false
 
-  def current_candidate?(%ProjectFileCandidate{activation_id: activation_id}),
-    do: current_activation?(activation_id)
+  def current_candidate?(%ProjectFileCandidate{activation_id: activation_id}, project),
+    do: current_activation?(activation_id, project)
 
   @typep inventory :: {Root.t(), WorkspaceSnapshot.activation_id(), [String.t()]}
   @typep candidate_result ::
            {:ok, {[Item.t()], WorkspaceSnapshot.activation_id()}} | {:error, String.t()}
 
   @spec candidate_result(Context.t() | nil) :: candidate_result()
-  defp candidate_result(ctx) do
+  defp candidate_result(%Context{project_server: project} = ctx),
+    do: candidate_result(ctx, project)
+
+  defp candidate_result(nil), do: candidate_result(nil, Minga.Project)
+
+  @spec candidate_result(Context.t() | nil, GenServer.server()) :: candidate_result()
+  defp candidate_result(ctx, project) do
     ctx
-    |> accepted_inventory()
-    |> ranked_candidates()
+    |> accepted_inventory(project)
+    |> ranked_candidates(project)
   end
 
-  @spec accepted_inventory(Context.t() | nil) :: {:ok, inventory()} | {:error, String.t()}
-  defp accepted_inventory(ctx) do
-    with {:ok, workspace} <- active_workspace(),
+  @spec accepted_inventory(Context.t() | nil, GenServer.server()) ::
+          {:ok, inventory()} | {:error, String.t()}
+  defp accepted_inventory(ctx, project) do
+    with {:ok, workspace} <- active_workspace(project),
          {:ok, root, activation_id} <- project_identity(ctx, workspace) do
       admit_inventory(root, activation_id, workspace)
     end
   end
 
-  @spec ranked_candidates({:ok, inventory()} | {:error, String.t()}) :: candidate_result()
-  defp ranked_candidates({:ok, {root, activation_id, paths}}) do
-    frecency_map = build_frecency_map()
+  @spec ranked_candidates({:ok, inventory()} | {:error, String.t()}, GenServer.server()) ::
+          candidate_result()
+  defp ranked_candidates({:ok, {root, activation_id, paths}}, project) do
+    frecency_map = build_frecency_map(project)
     git_status_map = build_git_status_map(root.path)
     score_map = build_score_map(frecency_map, git_status_map)
 
@@ -134,7 +142,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
     {:ok, {items, activation_id}}
   end
 
-  defp ranked_candidates({:error, _message} = error), do: error
+  defp ranked_candidates({:error, _message} = error, _project), do: error
 
   # The picker reads only the Project-owned cache.
   # A managed `:project_rebuilt` event refreshes an open picker after an empty cache fills.
@@ -245,7 +253,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
     do: SwitcherNextSteps.run(item, state)
 
   def on_select(%Item{id: %ProjectFileCandidate{} = candidate}, state) do
-    if current_candidate?(candidate) do
+    if current_candidate?(candidate, state.interaction.project_server) do
       Log.debug(:editor, "[file_picker] on_select path=#{candidate.path}")
       open_selected_file(ProjectFileCandidate.resolve(candidate), candidate, state)
     else
@@ -254,9 +262,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
   end
 
   @impl true
-  @spec selection_disposition(Item.t(), term()) :: Source.selection_disposition()
-  def selection_disposition(%Item{id: %ProjectFileCandidate{} = candidate}, _context) do
-    if current_candidate?(candidate),
+  @spec selection_disposition(Item.t(), GenServer.server()) :: Source.selection_disposition()
+  def selection_disposition(%Item{id: %ProjectFileCandidate{} = candidate}, project) do
+    if current_candidate?(candidate, project),
       do: :accept,
       else: {:reject, stale_candidate_message()}
   end
@@ -362,16 +370,16 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp record_selection(_candidate, %{buffer_lifecycle: %{buffer_add_context: :preview}}),
     do: :ok
 
-  defp record_selection(%ProjectFileCandidate{root: root, path: path}, _state) do
-    Minga.Project.record_file_for_root(root, path)
+  defp record_selection(%ProjectFileCandidate{root: root, path: path}, state) do
+    Minga.Project.record_file_for_root(state.interaction.project_server, root, path)
   catch
     :exit, _ -> :ok
   end
 
-  # Build a map of relative_path → frecency_score from Project.frecency_scores/0.
-  @spec build_frecency_map() :: %{String.t() => non_neg_integer()}
-  defp build_frecency_map do
-    Minga.Project.frecency_scores()
+  # Rank against the same project that supplied the inventory.
+  @spec build_frecency_map(GenServer.server()) :: %{String.t() => non_neg_integer()}
+  defp build_frecency_map(project) do
+    Minga.Project.frecency_scores(project)
   catch
     :exit, _ -> %{}
   end
@@ -428,7 +436,7 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp git_status_annotation(:conflict), do: "!"
   defp git_status_annotation(_), do: nil
 
-  @spec project_identity(Context.t() | EditorState.t() | nil, WorkspaceSnapshot.t() | nil) ::
+  @spec project_identity(Context.t() | nil, WorkspaceSnapshot.t() | nil) ::
           {:ok, Root.t(), WorkspaceSnapshot.activation_id()} | {:error, String.t()}
   defp project_identity(
          %Context{
@@ -461,12 +469,12 @@ defmodule MingaEditor.UI.Picker.FileSource do
        ),
        do: {:ok, root, activation_id}
 
-  defp project_identity(%EditorState{}, workspace), do: workspace_identity(workspace)
   defp project_identity(_ctx, workspace), do: workspace_identity(workspace)
 
-  @spec active_workspace() :: {:ok, WorkspaceSnapshot.t() | nil} | {:error, String.t()}
-  defp active_workspace do
-    {:ok, Minga.Project.snapshot(Minga.Project)}
+  @spec active_workspace(GenServer.server()) ::
+          {:ok, WorkspaceSnapshot.t() | nil} | {:error, String.t()}
+  defp active_workspace(project) do
+    {:ok, Minga.Project.snapshot(project)}
   catch
     :exit, _ -> {:error, "Project service is unavailable"}
   end
@@ -490,9 +498,9 @@ defmodule MingaEditor.UI.Picker.FileSource do
   defp identity_matches?(activation_id, activation_id), do: true
   defp identity_matches?(_expected, _actual), do: false
 
-  @spec current_activation?(WorkspaceSnapshot.activation_id()) :: boolean()
-  defp current_activation?(activation_id) do
-    case active_workspace() do
+  @spec current_activation?(WorkspaceSnapshot.activation_id(), GenServer.server()) :: boolean()
+  defp current_activation?(activation_id, project) do
+    case active_workspace(project) do
       {:ok, %WorkspaceSnapshot{activation_id: ^activation_id}} -> true
       _inactive_or_changed -> false
     end

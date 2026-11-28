@@ -1301,7 +1301,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec activate_dropped_directory(state(), Minga.Project.Root.t()) :: state()
   defp activate_dropped_directory(state, root) do
-    case Minga.Project.activate(Minga.Project, root) do
+    case Minga.Project.activate(state.interaction.project_server, root) do
       {:ok, %Minga.Project.WorkspaceSnapshot{root: installed_root}} ->
         state
         |> FileTreeFreshness.update_project_root(installed_root.path)

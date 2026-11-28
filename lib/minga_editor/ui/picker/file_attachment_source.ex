@@ -25,7 +25,7 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
   @spec open(State.t(), origin()) :: State.t()
   def open(state, origin \\ nil) do
     context =
-      case Project.snapshot(Project) do
+      case Project.snapshot(state.interaction.project_server) do
         %WorkspaceSnapshot{} = workspace ->
           session = FindFileSession.new(File.cwd!(), Path.expand("~"), workspace)
           FindFileSession.project_context(session)
@@ -52,7 +52,7 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
   def fetch_identity(context), do: FileSource.fetch_identity(context)
 
   @doc "Refreshes inventory only for the project that launched the file list."
-  @spec refresh_inventory?(map() | nil, String.t() | nil) :: boolean()
+  @spec refresh_inventory?(map() | nil, String.t() | nil, GenServer.server()) :: boolean()
   def refresh_inventory?(
         %{
           find_file_session: %FindFileSession{
@@ -60,11 +60,12 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
             project_activation_id: id
           }
         },
-        root
+        root,
+        project
       ),
-      do: FileSource.current_fetch?({:project_activation, id}, nil)
+      do: FileSource.current_fetch?({:project_activation, id}, nil, project)
 
-  def refresh_inventory?(_context, _root), do: false
+  def refresh_inventory?(_context, _root, _project), do: false
 
   @impl true
   @spec enrich([Item.t()]) :: [Item.t()]
@@ -90,7 +91,7 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
   @impl true
   @spec async_fetch(Context.t()) :: {:ok, [Item.t()], Source.fetch_meta()} | {:error, String.t()}
   def async_fetch(%Context{picker_ui: %{context: %{file: candidate, origin: origin}}} = context) do
-    with {:ok, snapshot} <- capture(candidate) do
+    with {:ok, snapshot} <- capture(candidate, context.project_server) do
       targets = destination_items(origin, context, snapshot)
 
       case targets do
@@ -137,12 +138,12 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
     do: %{item | meta: Map.put(meta, :origin, origin)}
 
   @impl true
-  @spec selection_disposition(Item.t(), Context.t()) :: Source.selection_disposition()
-  def selection_disposition(%Item{id: %ProjectFileCandidate{} = candidate}, _context),
-    do: current_file(candidate)
+  @spec selection_disposition(Item.t(), GenServer.server()) :: Source.selection_disposition()
+  def selection_disposition(%Item{id: %ProjectFileCandidate{} = candidate}, project),
+    do: current_file(candidate, project)
 
-  def selection_disposition(%Item{meta: %{file: candidate}}, _context),
-    do: current_file(candidate)
+  def selection_disposition(%Item{meta: %{file: candidate}}, project),
+    do: current_file(candidate, project)
 
   def selection_disposition(_item, _context), do: {:reject, "File snapshot is unavailable."}
 
@@ -153,10 +154,10 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
 
   def on_select(%Item{} = item, state), do: SelectionAttachmentTargetSource.on_select(item, state)
 
-  @spec capture(ProjectFileCandidate.t()) ::
+  @spec capture(ProjectFileCandidate.t(), GenServer.server()) ::
           {:ok, DraftAttachment.text_snapshot()} | {:error, String.t()}
-  defp capture(candidate) do
-    with :accept <- current_file(candidate),
+  defp capture(candidate, project) do
+    with :accept <- current_file(candidate, project),
          {:ok, path} <- ProjectFileCandidate.resolve(candidate),
          {:ok, bytes} <- SecureFile.read(path, DraftAttachment.max_bytes()),
          :ok <- text_bytes(bytes) do
@@ -178,9 +179,10 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
       else: {:error, "The selected file is not UTF-8 text."}
   end
 
-  @spec current_file(ProjectFileCandidate.t()) :: :accept | {:reject, String.t()}
-  defp current_file(candidate) do
-    if FileSource.current_candidate?(candidate),
+  @spec current_file(ProjectFileCandidate.t(), GenServer.server()) ::
+          :accept | {:reject, String.t()}
+  defp current_file(candidate, project) do
+    if FileSource.current_candidate?(candidate, project),
       do: :accept,
       else: {:reject, "Project changed. Reopen the file attachment picker."}
   end

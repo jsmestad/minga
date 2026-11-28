@@ -17,7 +17,7 @@ defmodule MingaEditor.FindFileWorkflow do
     launch_directory = File.cwd!()
     home_directory = Path.expand("~")
 
-    case project_snapshot() do
+    case project_snapshot(state.interaction.project_server) do
       {:ok, %WorkspaceSnapshot{} = workspace} ->
         session = FindFileSession.new(launch_directory, home_directory, workspace)
         PickerUI.open(state, FileSource, FindFileSession.project_context(session))
@@ -32,9 +32,10 @@ defmodule MingaEditor.FindFileWorkflow do
     end
   end
 
-  @spec project_snapshot() :: {:ok, WorkspaceSnapshot.t() | nil} | {:error, term()}
-  defp project_snapshot do
-    {:ok, Project.snapshot(Project)}
+  @spec project_snapshot(GenServer.server()) ::
+          {:ok, WorkspaceSnapshot.t() | nil} | {:error, term()}
+  defp project_snapshot(project) do
+    {:ok, Project.snapshot(project)}
   catch
     :exit, reason -> {:error, reason}
   end
