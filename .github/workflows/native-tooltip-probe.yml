@@ -3,7 +3,6 @@ name: Native tooltip capability probe
 on:
   push:
     branches: [diag/4053-native-tooltip]
-    paths: [.github/workflows/native-tooltip-probe.yml, macos/Sources/PreviewRegistry+Storyboard.swift]
 
 jobs:
   tooltip:
