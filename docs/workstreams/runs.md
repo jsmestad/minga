@@ -22,7 +22,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 ## Ordering against the Spine
 
 - #4060 slice 1 (Zig 0.17) lands before S1 writes `minga-run`. S1 writes its PTY and process-group code as a module `minga-terminal` can link.
-- #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It is open on 2026-11-28.
+- #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It merged on 2026-11-28.
 - S1 defines the block-state and strand fields in the protocol once. #4061 reuses them.
 - #4061 gains a dependency on S2 if ADR-0010 is accepted. S5 depends on nothing from #4060.
 - S0 (#4388) changes rendering code Spine tickets share; see its coordination note.
@@ -127,6 +127,8 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 - **Done when:** a check that fails while you type in Insert mode does not move the layout; the same failure in idle Normal mode opens the drawer within half a second without moving the cursor row; the rerun passing closes it; a drawer you clicked stays; a check started by a save hook never opens it.
 
 ### S5: Minga's commands
+
+**Owner agreed (2026-11-28):** `Minga.Run` owns agent command execution, and agent commands use the PTY by default with a pipe for stdout as a per-command fallback. First step of this slice: run the agent's most common commands both ways and compare what the model receives, including the untested pipe-with-controlling-terminal case. Who draws the pending approval block and who owns command-block actions is recommended in ADR-0010 but not agreed; #4052 has merged, so that decision is due before this slice or #4061 starts.
 
 - **Delivers:** the agent's shell commands are runs in the same buffer, with the minga strand, the word "Minga", and approvals as pending blocks. `SPC a w`.
 - **Work:** `MingaAgent.Tools.Shell` becomes a client of `Minga.Run` (colour stripped from what the model reads); approval routing from the Editor to the agent; the ⌘. order; the ADR-0008 amendment; delete `minga-shell-output-reader` and the hook runner's shell mode.
