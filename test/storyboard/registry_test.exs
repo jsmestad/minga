@@ -50,6 +50,34 @@ defmodule Minga.Storyboard.RegistryTest do
     end
   end
 
+  @tag scenario: "code.hover.focused"
+  test "scrolling focused hover exposes the final link from both code and diagnostics" do
+    for entry <- ["code.hover.focused", "code.diagnostics.hover"] do
+      session = Registry.drive(entry)
+
+      try do
+        focused =
+          if entry == "code.diagnostics.hover", do: Session.press(session, "K"), else: session
+
+        assert focused |> Session.model() |> Registry.classify() == "code.hover.focused"
+        model = focused |> Session.press("j j j j j j") |> Session.model()
+
+        assert %{visible?: true, focused?: true, actions?: true, content_lines: lines} =
+                 model.ui.hover_popup
+
+        assert Enum.any?(lines, fn line ->
+                 Enum.any?(
+                   line.segments,
+                   &match?(%{text: "String reference", style: {:link, _, false}}, &1)
+                 )
+               end),
+               "the final documentation link was not reachable from #{entry}"
+      after
+        Session.stop(session)
+      end
+    end
+  end
+
   describe "built scenarios" do
     for entry <- Registry.built() do
       @id entry.id

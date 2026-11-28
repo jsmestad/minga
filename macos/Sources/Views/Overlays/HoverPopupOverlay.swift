@@ -61,7 +61,7 @@ public struct HoverPopupOverlay: View {
                         // The document's bottom inset keeps its last line fully visible at the end of the scroll.
                         VStack(spacing: 0) {
                             Rectangle()
-                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            LinearGradient(colors: [theme.popupBg, .clear], startPoint: .top, endPoint: .bottom)
                                 .frame(height: Spacing.md)
                         }
                     }

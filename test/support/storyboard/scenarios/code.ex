@@ -119,10 +119,10 @@ defmodule Minga.Test.Storyboard.Scenarios.Code do
       Entry.built("code.hover.focused",
         start: [content: "greet(name)\n", hover_source: [markdown: @hover_doc]],
         reach: "K K",
-        recognize: &("Examples" in hover_lines(&1, true)),
+        recognize: &focused_hover?/1,
         checks: [
           Check.new(
-            "focused hover offers the complete document and retains the action hint",
+            "the focused hover opens on the signature and retains the action hint",
             &focused_hover/1
           )
         ]
@@ -162,18 +162,15 @@ defmodule Minga.Test.Storyboard.Scenarios.Code do
     model
   end
 
+  @spec focused_hover?(Model.t()) :: boolean()
+  defp focused_hover?(model) do
+    Enum.any?(hover_lines(model, true), &String.contains?(&1, "greet(name :: String.t())"))
+  end
+
   @spec focused_hover(Model.t()) :: Model.t()
   defp focused_hover(model) do
-    assert "Examples" in hover_lines(model, true)
-
-    assert Enum.any?(model.ui.hover_popup.content_lines, fn line ->
-             Enum.any?(
-               line.segments,
-               &match?(%{text: "String reference", style: {:link, _, false}}, &1)
-             )
-           end)
-
-    %{actions?: true} = model.ui.hover_popup
+    assert focused_hover?(model)
+    assert %{actions?: true, open_label: nil} = model.ui.hover_popup
     model
   end
 
