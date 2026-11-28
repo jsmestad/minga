@@ -652,6 +652,15 @@ defmodule Minga.Bench.RunBufferStream do
         wait_until(deadline)
         late_us = System.monotonic_time(:microsecond) - deadline
         {flush, layout, version} = flush(ctx, layout, version, {kind, end_primitive}, n, config)
+
+        # RUN_BENCH_SERIAL=1: wait until the Editor has handled this edit's change event (and so,
+        # on the synchronous path, rendered it) before the next write. Each edit then gets its
+        # own frame. This stands in for a resident store that fetches one range per edit.
+        if System.get_env("RUN_BENCH_SERIAL") == "1" do
+          :sys.get_state(ctx.buffer)
+          :sys.get_state(ctx.editor)
+        end
+
         {Map.put(flush, :late_us, late_us), {layout, version, [late_us | late]}}
       end)
 
