@@ -221,7 +221,7 @@ No literal colours. New or newly used roles: the muted selection (unfocused curs
 
 ## 13. Frames
 
-Hand-drawn in HTML and rendered with headless Chrome. They are not captures of Minga, and they are not yet storyboard boards. Colours are the default theme's values, used as stand-ins for roles.
+Hand-drawn in HTML and rendered with headless Chrome at twice the frame's point size (2200 by 1360 pixels for a 1100 by 680 pt window), so the small marks are legible: state shapes, strands, the severity bar and the current-entry arrow. They are not captures of Minga, and they are not yet storyboard boards. Colours are the default theme's values, used as stand-ins for roles.
 
 | Frame | Shows |
 |---|---|
