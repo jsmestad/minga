@@ -60,6 +60,170 @@ defmodule Minga.Buffer.EditDelta do
     end)
   end
 
+  @typedoc """
+  One replaced run of lines, in the coordinates of the document before any of the deltas:
+  `delete_count` lines starting at `base_start` become `insert_count` lines.
+  """
+  @type line_splice ::
+          {base_start :: non_neg_integer(), delete_count :: non_neg_integer(),
+           insert_count :: pos_integer()}
+
+  # A changed run of lines in current coordinates, with the net number of lines the edits added to it.
+  @typep hunk :: {first :: non_neg_integer(), last :: non_neg_integer(), net :: integer()}
+
+  @max_line_hunks 16
+
+  @doc """
+  Returns the disjoint line ranges, in current coordinates and ascending, that ordered deltas changed.
+
+  Unlike `affected_line_range/2` this keeps edits in different places apart, so a caller reads only the
+  lines each edit touched. `prior_ranges` are ranges that were already pending before the deltas; each is
+  carried through the deltas. Ranges that touch are merged, and no more than #{@max_line_hunks} are returned:
+  past that, the closest neighbours are merged.
+  """
+  @spec affected_line_ranges([t()], [line_range()]) :: [line_range()]
+  def affected_line_ranges(deltas, prior_ranges \\ [])
+      when is_list(deltas) and is_list(prior_ranges) do
+    prior_ranges
+    |> Enum.map(fn {first, last} -> {first, last, 0} end)
+    |> Enum.sort()
+    |> merge_touching()
+    |> apply_to_hunks(deltas)
+    |> limit_hunks()
+    |> Enum.map(fn {first, last, _net} -> {first, last} end)
+  end
+
+  @doc """
+  Returns the line splices that turn the document before ordered deltas into the document after them.
+
+  The splices are ascending, disjoint, and all address the document before the deltas, so they can be
+  applied in order with a running shift. The lines a splice inserts start at `base_start` plus the net
+  lines added by the splices before it.
+  """
+  @spec line_splices([t()]) :: [line_splice()]
+  def line_splices(deltas) when is_list(deltas) do
+    {splices, _shift} =
+      []
+      |> apply_to_hunks(deltas)
+      |> limit_hunks()
+      |> Enum.map_reduce(0, fn {first, last, net}, shift ->
+        insert_count = last - first + 1
+        {{first - shift, insert_count - net, insert_count}, shift + net}
+      end)
+
+    splices
+  end
+
+  @doc "Returns the current-coordinate line ranges that ascending line splices insert."
+  @spec inserted_line_ranges([line_splice()]) :: [line_range()]
+  def inserted_line_ranges(splices) when is_list(splices) do
+    {ranges, _shift} =
+      Enum.map_reduce(splices, 0, fn {base_start, delete_count, insert_count}, shift ->
+        first = base_start + shift
+        {{first, first + insert_count - 1}, shift + insert_count - delete_count}
+      end)
+
+    ranges
+  end
+
+  @doc """
+  Clamps ascending line ranges to a document of `line_count` lines and merges the ones that now touch.
+
+  A range that starts past the end (the edit removed the last lines) becomes the last line.
+  """
+  @spec clamp_line_ranges([line_range()], non_neg_integer()) :: [line_range()]
+  def clamp_line_ranges(ranges, line_count) when is_list(ranges) and is_integer(line_count) do
+    last_line = max(line_count - 1, 0)
+
+    ranges
+    |> Enum.map(fn {first, last} ->
+      bounded_first = min(first, last_line)
+      {bounded_first, max(min(last, last_line), bounded_first), 0}
+    end)
+    |> merge_touching()
+    |> Enum.map(fn {first, last, _net} -> {first, last} end)
+  end
+
+  @spec apply_to_hunks([hunk()], [t()]) :: [hunk()]
+  defp apply_to_hunks(hunks, deltas) do
+    # Merging only widens ranges, so limiting as we go is safe, and it keeps a long run of edits from
+    # costing the number of edits times the number of hunks.
+    Enum.reduce(deltas, hunks, fn delta, hunks ->
+      hunks = apply_to_hunks_once(delta, hunks)
+
+      if Enum.count_until(hunks, 2 * @max_line_hunks + 1) > 2 * @max_line_hunks,
+        do: limit_hunks(hunks),
+        else: hunks
+    end)
+  end
+
+  @spec apply_to_hunks_once(t(), [hunk()]) :: [hunk()]
+  defp apply_to_hunks_once(
+         %__MODULE__{
+           start_position: {start, _},
+           old_end_position: {old_end, _},
+           new_end_position: {new_end, _}
+         } = delta,
+         hunks
+       ) do
+    shift = new_end - old_end
+    {delta_first, delta_last} = delta_range(delta)
+
+    {before, rest} = Enum.split_while(hunks, fn {_first, last, _net} -> last < start end)
+
+    {overlapping, following} =
+      Enum.split_while(rest, fn {first, _last, _net} -> first <= old_end end)
+
+    merged =
+      Enum.reduce(overlapping, {delta_first, delta_last, shift}, fn {first, last, net},
+                                                                    {acc_first, acc_last, acc_net} ->
+        {moved_first, moved_last} = transform_range({first, last}, start, old_end, new_end)
+        {min(acc_first, moved_first), max(acc_last, moved_last), acc_net + net}
+      end)
+
+    shifted = Enum.map(following, fn {first, last, net} -> {first + shift, last + shift, net} end)
+    merge_touching(before ++ [merged | shifted])
+  end
+
+  @spec merge_touching([hunk()]) :: [hunk()]
+  defp merge_touching(hunks) do
+    hunks
+    |> Enum.reduce([], fn
+      {first, last, net}, [{prev_first, prev_last, prev_net} | done]
+      when first <= prev_last + 1 ->
+        [{prev_first, max(prev_last, last), prev_net + net} | done]
+
+      hunk, done ->
+        [hunk | done]
+    end)
+    |> Enum.reverse()
+  end
+
+  # Past the limit, merge the two neighbours with the fewest unchanged lines between them, repeatedly.
+  @spec limit_hunks([hunk()]) :: [hunk()]
+  defp limit_hunks(hunks) do
+    if Enum.count_until(hunks, @max_line_hunks + 1) > @max_line_hunks,
+      do: hunks |> merge_closest_pair() |> limit_hunks(),
+      else: hunks
+  end
+
+  @spec merge_closest_pair([hunk()]) :: [hunk()]
+  defp merge_closest_pair(hunks) do
+    {_gap, index} =
+      hunks
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.with_index()
+      |> Enum.map(fn {[{_first, last, _net}, {next_first, _next_last, _next_net}], index} ->
+        {next_first - last, index}
+      end)
+      |> Enum.min()
+
+    {head, [{first, _last, net}, {_next_first, next_last, next_net} | tail]} =
+      Enum.split(hunks, index)
+
+    head ++ [{first, next_last, net + next_net} | tail]
+  end
+
   @doc "Creates a delta for an insertion at a position (no text removed)."
   @spec insertion(
           non_neg_integer(),

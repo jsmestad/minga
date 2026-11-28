@@ -1235,7 +1235,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   end
 
   describe "uncommitted consume retry" do
-    test "two ordered edits union their snapshots and compose once on both rows" do
+    test "two ordered edits keep their own snapshots and compose once on both rows" do
       state = warm(resident_state(300))
       buffer = state.editor.workspace.buffers.active
 
@@ -1304,6 +1304,197 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
         drain_buffer_calls(buffer, acc)
     after
       0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "two edits far apart in one frame (#4397)" do
+    test "an insert near the top and one near the bottom send their own rows and nothing between" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      base_rows = fresh_resident_frame(state.editor).rows
+      {_before_model, state} = build_frame(state)
+
+      BufferProcess.move_to(buffer, {20, 0})
+      BufferProcess.insert_text(buffer, "above a\nabove b\n")
+      BufferProcess.move_to(buffer, {282, 0})
+      BufferProcess.insert_text(buffer, "below\n")
+
+      calls = trace_buffer_calls(buffer, fn -> build_frame(state) end)
+      {model, state} = calls.result
+
+      # Both splices address the 300 rows the frontend holds. The second one's rows come from two lines
+      # further down, where the first insert moved them.
+      assert [
+               %{start_index: 20, delete_count: 1, insert_rows: [_, _, _] = top},
+               %{start_index: 280, delete_count: 1, insert_rows: [_, _] = bottom}
+             ] = model.row_delta.splices
+
+      assert Enum.map(top, & &1.buf_line) == [20, 21, 22]
+      assert Enum.map(bottom, & &1.buf_line) == [282, 283]
+      assert String.starts_with?(hd(top).text, "above a")
+      assert String.starts_with?(hd(bottom).text, "below")
+      assert model.row_delta.base_row_count == 300
+      assert model.row_delta.result_row_count == 303
+
+      # One buffer call reads both ranges together with the edits. No second fetch can go stale.
+      assert Enum.count(calls.messages, &match?({:renderer_consume, _}, &1)) == 1
+      refute Enum.any?(calls.messages, &match?({:render_lines, _, _, _}, &1))
+
+      # Applying the delta to the rows the frontend held gives the same rows as a fresh render.
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "removing a block in the middle while a line is appended keeps every other row" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      base_rows = fresh_resident_frame(state.editor).rows
+      {_before_model, state} = build_frame(state)
+
+      BufferProcess.delete_lines(buffer, 100, 199)
+      BufferProcess.move_to(buffer, {199, 0})
+      BufferProcess.insert_text(buffer, "appended\n")
+
+      {model, state} = build_frame(state)
+
+      assert [
+               %{start_index: 100, delete_count: 101, insert_rows: [_]},
+               %{start_index: 299, delete_count: 1, insert_rows: [_, _]}
+             ] = model.row_delta.splices
+
+      assert model.row_delta.result_row_count == 201
+
+      # Applying the delta to the rows the frontend held gives the same rows as a fresh render.
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "search highlights reach the rows of every changed range" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      search = %Minga.Mode.SearchState{input: "line", direction: :forward}
+
+      workspace =
+        MingaEditor.Session.State.transition_mode(state.editor.workspace, :search, search)
+
+      state = %{state | editor: %{state.editor | workspace: workspace}}
+      {_searching, state} = build_frame(state)
+      base_rows = fresh_resident_frame(state.editor).rows
+
+      BufferProcess.move_to(buffer, {3, 0})
+      BufferProcess.insert_text(buffer, "x")
+      BufferProcess.move_to(buffer, {200, 0})
+      BufferProcess.insert_text(buffer, "y")
+      {model, state} = build_frame(state)
+
+      assert [%{start_index: 3}, %{start_index: 200, insert_rows: [far]}] =
+               model.row_delta.splices
+
+      assert Enum.any?(far.spans, &(&1.bg not in [nil, 0]))
+
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "the caret column is right when the cursor's line is not the first changed range" do
+      for {first_edit, cursor} <- [{{2, 0}, {8, 15}}, {{20, 0}, {8, 15}}] do
+        state = warm(resident_state(300))
+        buffer = state.editor.workspace.buffers.active
+
+        BufferProcess.move_to(buffer, first_edit)
+        BufferProcess.insert_text(buffer, "x")
+        BufferProcess.move_to(buffer, cursor)
+        BufferProcess.insert_text(buffer, "y")
+        {model, state} = build_frame(state)
+
+        fresh = fresh_resident_frame(state.editor)
+        assert model.accessibility_cursor == fresh.accessibility_cursor
+        assert {model.cursor_row, model.cursor_col} == {fresh.cursor_row, fresh.cursor_col}
+      end
+    end
+
+    test "the caret column is right when the cursor rests between two edits" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+
+      BufferProcess.move_to(buffer, {2, 0})
+      BufferProcess.insert_text(buffer, "x")
+      BufferProcess.move_to(buffer, {40, 0})
+      BufferProcess.insert_text(buffer, "y")
+      BufferProcess.move_to(buffer, {10, 7})
+      {model, state} = build_frame(state)
+
+      fresh = fresh_resident_frame(state.editor)
+      assert model.accessibility_cursor == fresh.accessibility_cursor
+      assert {model.cursor_row, model.cursor_col} == {fresh.cursor_row, fresh.cursor_col}
+    end
+
+    test "a wrapped window grows a line near the top and one near the bottom as two splices" do
+      content = Enum.map_join(0..119, "\n", &"line #{&1}")
+      editor = gui_state(content: content, rows: 12, cols: 30, filetype: :text)
+      buffer = editor.workspace.buffers.active
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      state = warm(editor)
+      base_rows = fresh_resident_frame(state.editor).rows
+      {before, state} = build_frame(state)
+      assert before.row_store_mode == {:resident, 120}
+
+      # Each insert makes its line wrap onto several rows, and the second also adds a line.
+      BufferProcess.move_to(buffer, {5, 0})
+      BufferProcess.insert_text(buffer, String.duplicate("a", 70))
+      BufferProcess.move_to(buffer, {100, 0})
+      BufferProcess.insert_text(buffer, String.duplicate("b", 70) <> "\nnew line\n")
+      {model, state} = build_frame(state)
+
+      assert [
+               %{start_index: 5, delete_count: 1, insert_rows: [_, _ | _] = top},
+               %{start_index: 100, delete_count: 1, insert_rows: [_, _, _ | _] = bottom}
+             ] = model.row_delta.splices
+
+      assert model.row_delta.base_row_count == 120
+      assert model.row_delta.result_row_count == 118 + length(top) + length(bottom)
+
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "neither frame replaces the whole store" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      {_before_model, state} = build_frame(state)
+      test_pid = self()
+      handler = {__MODULE__, :distant_edits_hydration, make_ref()}
+
+      :telemetry.attach(
+        handler,
+        [:minga, :render, :full_hydration],
+        fn _event, _measurements, metadata, _config ->
+          # Telemetry runs in the process that emits it; other tests hydrate concurrently.
+          if self() == test_pid, do: send(test_pid, {:hydrated, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      BufferProcess.move_to(buffer, {5, 3})
+      BufferProcess.insert_text(buffer, "x")
+      BufferProcess.move_to(buffer, {250, 0})
+      BufferProcess.insert_text(buffer, "new line\n")
+      {model, _state} = build_frame(state)
+
+      assert [%{start_index: 5, delete_count: 1}, %{start_index: 250, delete_count: 1}] =
+               model.row_delta.splices
+
+      refute_received {:hydrated, _metadata}
     end
   end
 

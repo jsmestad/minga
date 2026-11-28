@@ -11,7 +11,11 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuildTest do
   alias MingaEditor.UI.FontRegistry
 
   test "hydration rejects ranged and incomplete sources before composition" do
-    for source <- [{:range, 0, ["visible"]}, {:range, 120, ["visible"]}, {:complete, ["visible"]}] do
+    for source <- [
+          {:ranges, [{0, ["visible"]}]},
+          {:ranges, [{120, ["visible"]}]},
+          {:complete, ["visible"]}
+        ] do
       inputs = %{
         source: source,
         plan: {:hydrate, :composition_context},
@@ -37,10 +41,14 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuildTest do
   end
 
   test "splice plans reject source that does not cover the changed lines" do
-    for plan <- [{:splice, 50, 1, 3}, {:splices, [49, 51]}] do
+    for plan <- [
+          {:splices, [{50, 1, 3}]},
+          {:splices, [{49, 1, 1}, {51, 1, 1}]},
+          {:splices, [{50, 1, 1}, {60, 1, 1}]}
+        ] do
       assert_raise ArgumentError, "resident splice source does not cover inserted rows", fn ->
         ResidentBuild.run(nil, %{
-          source: {:range, 50, ["only one line"]},
+          source: {:ranges, [{50, ["only one line"]}]},
           plan: plan,
           keyframe?: false
         })
@@ -54,7 +62,9 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuildTest do
     first = group(0, 1, ["a", "b", "c"])
     second = group(1, 2, ["de"])
     {base, _, _} = run_groups(nil, {:hydrate, :initial}, 3, original)
-    {updated, result, _} = run_groups(base, {:splices, [0, 1]}, 3, [first, second])
+
+    {updated, result, _} =
+      run_groups(base, {:splices, [{0, 1, 1}, {1, 1, 1}]}, 3, [first, second])
 
     assert %{base_row_count: 5, result_row_count: 6, splices: [one, two]} = result.row_delta
     assert {one.start_index, one.delete_count, RowSplice.insert_count(one)} == {0, 1, 3}
@@ -79,7 +89,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuildTest do
       ])
 
     {grown, result, _} =
-      run_groups(base, {:splice, 0, 1, 2}, 3, [group(0, 1, ["ab"]), group(1, 3, ["cd"])])
+      run_groups(base, {:splices, [{0, 1, 2}]}, 3, [group(0, 1, ["ab"]), group(1, 3, ["cd"])])
 
     assert %{base_row_count: 4, result_row_count: 4, splices: [splice]} = result.row_delta
     assert {splice.start_index, splice.delete_count, RowSplice.insert_count(splice)} == {0, 2, 2}
@@ -87,8 +97,96 @@ defmodule MingaEditor.RenderModel.Window.ResidentBuildTest do
     assert {:ok, continuation} = ResidentStore.payload_at(grown.store, 3)
     assert VisualRow.source_position(continuation, 0) == {:ok, {2, 2}}
 
-    {restored, _, _} = run_groups(grown, {:splice, 0, 2, 1}, 2, [group(0, 1, ["ab", "cd"])])
+    {restored, _, _} = run_groups(grown, {:splices, [{0, 2, 1}]}, 2, [group(0, 1, ["ab", "cd"])])
     assert ResidentStore.payloads(restored.store) == ResidentStore.payloads(base.store)
+  end
+
+  describe "two structural edits far apart in one frame" do
+    setup do
+      original = for line <- 0..5, do: group(line, line + 1, ["line #{line}"])
+      {base, _, _} = run_groups(nil, {:hydrate, :initial}, 6, original)
+      %{base: base}
+    end
+
+    test "each edit is its own splice, and the rows between them are kept, not rebuilt", %{
+      base: base
+    } do
+      # Line 1 becomes three lines and line 5 becomes two. The second splice addresses the store before
+      # the first one grew it, and reads its new lines two lines further down.
+      inserted = [
+        group(1, 11, ["one a"]),
+        group(2, 12, ["one b"]),
+        group(3, 13, ["one c"]),
+        group(7, 14, ["five a"]),
+        group(8, 15, ["five b"])
+      ]
+
+      {updated, result, _} =
+        run_groups(base, {:splices, [{1, 1, 3}, {5, 1, 2}]}, 9, inserted)
+
+      assert %{base_row_count: 6, result_row_count: 9, splices: [one, two]} = result.row_delta
+      assert {one.start_index, one.delete_count, RowSplice.insert_count(one)} == {1, 1, 3}
+      assert {two.start_index, two.delete_count, RowSplice.insert_count(two)} == {5, 1, 2}
+      assert result.source_splices == [{1, 1, 3}, {5, 1, 2}]
+      assert result.rasterized == 5
+
+      for {before, later} <- [{0, 0}, {2, 4}, {3, 5}, {4, 6}] do
+        assert ResidentStore.entry_at(base.store, before) ==
+                 ResidentStore.entry_at(updated.store, later)
+      end
+
+      assert ResidentStore.line_count(updated.store) == 9
+      assert ResidentStore.visual_rank(updated.store, 7) == 7
+    end
+
+    test "a large deletion and an insertion elsewhere stay two splices", %{base: base} do
+      {updated, result, _} =
+        run_groups(base, {:splices, [{0, 3, 1}, {5, 1, 2}]}, 5, [
+          group(0, 21, ["joined"]),
+          group(3, 22, ["five a"]),
+          group(4, 23, ["five b"])
+        ])
+
+      assert %{base_row_count: 6, result_row_count: 5, splices: [one, two]} = result.row_delta
+      assert {one.start_index, one.delete_count, RowSplice.insert_count(one)} == {0, 3, 1}
+      assert {two.start_index, two.delete_count, RowSplice.insert_count(two)} == {5, 1, 2}
+      assert ResidentStore.entry_at(base.store, 3) == ResidentStore.entry_at(updated.store, 1)
+      assert ResidentStore.entry_at(base.store, 4) == ResidentStore.entry_at(updated.store, 2)
+    end
+
+    test "the plan keeps distant edits apart instead of spanning them", %{base: base} do
+      deltas = [line_delta(1, 1, 3), line_delta(7, 7, 8)]
+
+      assert ResidentBuild.plan(base, plan_inputs(deltas, 9)) ==
+               {:splices, [{1, 1, 3}, {5, 1, 2}]}
+    end
+
+    test "an in-place edit beside a structural edit elsewhere is still two splices", %{base: base} do
+      deltas = [line_delta(0, 0, 0), line_delta(4, 4, 6)]
+
+      assert ResidentBuild.plan(base, plan_inputs(deltas, 8)) ==
+               {:splices, [{0, 1, 1}, {4, 1, 3}]}
+    end
+
+    test "edits whose line counts do not reach the new document hydrate", %{base: base} do
+      assert {:hydrate, _reason} =
+               ResidentBuild.plan(base, plan_inputs([line_delta(1, 1, 3)], 6))
+    end
+  end
+
+  defp line_delta(start, old_end, new_end) do
+    Minga.Buffer.EditDelta.replacement(0, 0, {start, 0}, {old_end, 0}, "", {new_end, 0})
+  end
+
+  defp plan_inputs(deltas, line_count) do
+    %{
+      compose_fp: 1,
+      highlight_fp: nil,
+      reset?: false,
+      hydration_reason: nil,
+      edit_deltas: deltas,
+      line_count: line_count
+    }
   end
 
   defp run_groups(previous, plan, count, groups) do

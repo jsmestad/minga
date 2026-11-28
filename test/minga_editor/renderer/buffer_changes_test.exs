@@ -83,7 +83,8 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
 
     assert first_snapshot == second_snapshot
     assert first_snapshot.first_line == 0
-    assert first_snapshot.lines == ["Ynew", "zero", "one", "two", "Xthree"]
+    assert first_snapshot.lines == ["Ynew", "zero"]
+    assert [{4, _offset, ["Xthree"]}] = first_snapshot.extra_ranges
   end
 
   test "materialization does not reconstruct broad input" do

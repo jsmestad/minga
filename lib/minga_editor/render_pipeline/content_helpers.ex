@@ -91,8 +91,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         state,
         preview_matches,
         Map.get(params, :visible_line_map),
-        lines,
-        first_line
+        [{first_line, lines} | Map.get(params, :extra_sources, [])]
       )
 
     confirm_match = if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil)
@@ -193,16 +192,20 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     {ctx, state}
   end
 
-  defp visible_search_matches(_state, [_ | _] = matches, _map, _lines, _first), do: matches
+  defp visible_search_matches(_state, [_ | _] = matches, _map, _sources), do: matches
 
-  defp visible_search_matches(state, [], %DisplayMap{} = page, _lines, _first) do
-    Enum.flat_map(DisplayMap.source_runs(page), fn {first, lines} ->
+  defp visible_search_matches(state, [], %DisplayMap{} = page, _sources),
+    do: search_matches_in(state, DisplayMap.source_runs(page))
+
+  # A resident frame with edits in several places has one source per place. Rows are built from all of
+  # them, so matches are found in all of them.
+  defp visible_search_matches(state, [], _map, sources), do: search_matches_in(state, sources)
+
+  defp search_matches_in(state, sources) do
+    Enum.flat_map(sources, fn {first, lines} ->
       SearchHighlight.search_matches_for_lines(state, lines, first)
     end)
   end
-
-  defp visible_search_matches(state, [], _map, lines, first),
-    do: SearchHighlight.search_matches_for_lines(state, lines, first)
 
   @spec extract_hover_row(state()) :: non_neg_integer() | nil
   defp extract_hover_row(state) do

@@ -156,16 +156,6 @@ defmodule MingaEditor.RenderPipeline.Content do
          state,
          %WindowScroll{wrap_on: true} = scroll,
          _ctx,
-         {:splice, _, _, count} = plan
-       )
-       when count > 0 do
-    prepare_resident_range(state, scroll, plan)
-  end
-
-  defp prepare_planned_source(
-         state,
-         %WindowScroll{wrap_on: true} = scroll,
-         _ctx,
          {:splices, _} = plan
        ) do
     prepare_resident_range(state, scroll, plan)
@@ -189,6 +179,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       cursor_col: scroll.cursor_col,
       lines: scroll.lines,
       first_line: scroll.first_line,
+      extra_sources: for({first, _offset, lines} <- scroll.extra_sources, do: {first, lines}),
       preview_matches: scroll.preview_matches,
       gutter_w: scroll.gutter_w,
       content_w: scroll.content_w,

@@ -363,6 +363,63 @@ struct ResidentRowStoreTests {
         #expect(reference.rows(in: 0..<8).rows == committed.rows(in: 0..<8).rows)
     }
 
+    @Test("two unequal splices in one batch both address the rows held before the frame")
+    func unequalSplicesAgainstTheBase() throws {
+        // Two edits far apart in one frame: a line near the top becomes three, and one near the bottom
+        // becomes two. The second splice's index is not adjusted for the rows the first one added.
+        let original = rows(0..<300)
+        var store = try ResidentRowStore(rows: original, mode: .sequential)
+        let top = rows(1_000..<1_003, bufferLine: 20)
+        let bottom = rows(2_000..<2_002, bufferLine: 282)
+
+        try store.applyBatch(
+            [
+                ResidentRowSplice(startIndex: 20, deleteCount: 1, insertedRows: top),
+                ResidentRowSplice(startIndex: 280, deleteCount: 1, insertedRows: bottom)
+            ],
+            baseRowCount: 300,
+            resultRowCount: 303
+        )
+
+        var expected: [UInt64] = []
+        expected += original[0..<20].map { $0.rowId }
+        expected += top.map { $0.rowId }
+        expected += original[21..<280].map { $0.rowId }
+        expected += bottom.map { $0.rowId }
+        expected += original[281..<300].map { $0.rowId }
+        let actual: [UInt64] = store.rows(in: 0..<store.count).rows.map { $0.rowId }
+        #expect(actual == expected)
+        #expect(store.row(at: 282)?.rowId == bottom[0].rowId)
+        #expect(store.row(at: 283)?.bufLine == 283)
+        #expect(store.validateInvariants())
+    }
+
+    @Test("a large removal and an append in one batch keep every other row")
+    func removalAndAppendInOneBatch() throws {
+        let original = rows(0..<300)
+        var store = try ResidentRowStore(rows: original, mode: .sequential)
+        let joined = rows(1_000..<1_001, bufferLine: 100)
+        let appended = rows(2_000..<2_002, bufferLine: 199)
+
+        try store.applyBatch(
+            [
+                ResidentRowSplice(startIndex: 100, deleteCount: 101, insertedRows: joined),
+                ResidentRowSplice(startIndex: 299, deleteCount: 1, insertedRows: appended)
+            ],
+            baseRowCount: 300,
+            resultRowCount: 201
+        )
+
+        var expected: [UInt64] = []
+        expected += original[0..<100].map { $0.rowId }
+        expected += joined.map { $0.rowId }
+        expected += original[201..<299].map { $0.rowId }
+        expected += appended.map { $0.rowId }
+        let actual: [UInt64] = store.rows(in: 0..<store.count).rows.map { $0.rowId }
+        #expect(actual == expected)
+        #expect(store.validateInvariants())
+    }
+
     @Test("sequential replacement keeps the identity fast path after a structural shift")
     func sequentialReplacementAfterStructuralShift() throws {
         var store = try ResidentRowStore(rows: rows(0..<300), mode: .sequential)

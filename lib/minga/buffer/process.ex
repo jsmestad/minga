@@ -1181,13 +1181,16 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:render_snapshot, first_line, count})
   end
 
-  @doc "Atomically consumes renderer changes and snapshots their affected line range."
-  @spec renderer_consume(
-          GenServer.server(),
-          {non_neg_integer(), non_neg_integer()} | nil
-        ) :: RendererConsume.t()
-  def renderer_consume(server, prior_affected_range \\ nil) do
-    GenServer.call(server, {:renderer_consume, prior_affected_range})
+  @doc """
+  Atomically consumes renderer changes and snapshots the line ranges they changed.
+
+  `prior_affected_ranges` are ranges still pending from an earlier consume. Each changed range is read
+  separately, so two edits far apart do not copy the lines between them.
+  """
+  @spec renderer_consume(GenServer.server(), [{non_neg_integer(), non_neg_integer()}]) ::
+          RendererConsume.t()
+  def renderer_consume(server, prior_affected_ranges \\ []) when is_list(prior_affected_ranges) do
+    GenServer.call(server, {:renderer_consume, prior_affected_ranges})
   end
 
   @doc "Fetches only a requested line range when the buffer is still at `expected_version`."
@@ -2541,7 +2544,7 @@ defmodule Minga.Buffer.Process do
     {:reply, result, %{state | change_log: change_log}}
   end
 
-  def handle_call({:renderer_consume, prior_affected_range}, _from, state) do
+  def handle_call({:renderer_consume, prior_affected_ranges}, _from, state) do
     {changes, change_log} = ChangeLog.take_unseen_changes(state.change_log, :renderer)
     lease = renderer_review_lease(state)
     {review_damage, remaining_damage} = ReviewDamage.consume(state.review_damage, lease)
@@ -2554,7 +2557,7 @@ defmodule Minga.Buffer.Process do
       line_count: Document.line_count(state.document),
       change_sequence: ChangeLog.sequence(change_log),
       changes: changes,
-      snapshot: renderer_changed_snapshot(state, changes, prior_affected_range),
+      snapshot: renderer_changed_snapshot(state, changes, prior_affected_ranges),
       review_lease: lease,
       review_damage: review_damage
     }
@@ -6286,20 +6289,34 @@ defmodule Minga.Buffer.Process do
   @spec renderer_changed_snapshot(
           BufState.t(),
           {:ok, [Minga.Buffer.EditDelta.t()]} | :reset_required,
-          {non_neg_integer(), non_neg_integer()} | nil
+          [{non_neg_integer(), non_neg_integer()}]
         ) :: RenderSnapshot.t() | nil
-  defp renderer_changed_snapshot(_state, :reset_required, _prior_range), do: nil
+  defp renderer_changed_snapshot(_state, :reset_required, _prior_ranges), do: nil
 
-  defp renderer_changed_snapshot(state, {:ok, changes}, prior_range) do
-    case EditDelta.affected_line_range(changes, prior_range) do
-      nil ->
+  defp renderer_changed_snapshot(state, {:ok, changes}, prior_ranges) do
+    document = state.document
+
+    changes
+    |> EditDelta.affected_line_ranges(prior_ranges)
+    |> EditDelta.clamp_line_ranges(Document.line_count(document))
+    |> case do
+      [] ->
         nil
 
-      {first_line, last_line} ->
-        line_count = Document.line_count(state.document)
-        bounded_first = min(first_line, line_count - 1)
-        bounded_last = min(max(last_line, bounded_first), line_count - 1)
-        bounded_render_snapshot(state, bounded_first, bounded_last - bounded_first + 1)
+      [{first_line, last_line} | rest] ->
+        extra_ranges =
+          Enum.map(rest, fn {first, last} ->
+            {first, Position.point_for(document, {first, 0}),
+             snapshot_lines(document, first, last - first + 1)}
+          end)
+
+        {cursor_line, _col} = Document.cursor(document)
+
+        %{
+          bounded_render_snapshot(state, first_line, last_line - first_line + 1)
+          | extra_ranges: extra_ranges,
+            cursor_text: document |> snapshot_lines(cursor_line, 1) |> List.first()
+        }
     end
   end
 
