@@ -1,6 +1,6 @@
 # Runs workstream
 
-**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed. No tickets are filed yet.
+**Status:** Not started. The design is [docs/design/runs.md](../design/runs.md). The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed. Epic: [#4385](https://github.com/jsmestad/minga/issues/4385). Filed so far: Spike A [#4386](https://github.com/jsmestad/minga/issues/4386), Spike B [#4387](https://github.com/jsmestad/minga/issues/4387), S0 [#4388](https://github.com/jsmestad/minga/issues/4388), S1 [#4389](https://github.com/jsmestad/minga/issues/4389). S2 to S6 are not ticketed.
 
 This page is the plan: what has to be decided, what has to be proven before code is built on it, and the slices in order. Each slice ships complete. None leaves a foundation the next one has to rework.
 
@@ -8,7 +8,7 @@ This page is the plan: what has to be decided, what has to be proven before code
 
 | After | You get | Can you stop using an outside terminal for tests? |
 |---|---|---|
-| S0 | Folded buffers scroll locally like unfolded ones | n/a |
+| S0 | Folded and decorated buffers scroll locally like plain ones | n/a |
 | S1 | `:!` and test keys open a drawer under your file with coloured, foldable, stoppable output. Your window is never taken | No: there is no jump from the file to an error |
 | S2 | A run segment in the modeline, `SPC c c` to run, `SPC c C` to rerun, a stop list, `SPC ~` to hide the drawer | No |
 | S3 | `]q` jumps to the next error from anywhere. The red-green loop is 8 keys | **Yes** |
@@ -20,7 +20,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 
 ## Decisions needed before S1
 
-1. **Accept S0 as a prerequisite.** `*run*` folds its blocks, and folded buffers are not in the resident store today; they use the windowed path. The resident-scroll workstream lists folded residence as a deferred remnant. Without it, `*run*` would be the one buffer that scrolls the old way.
+1. **Accept S0 as a prerequisite.** `*run*` folds its blocks and marks dropped output with a virtual row. A window with folds, decoration fold regions, virtual lines or block decorations is not in the resident store today; it uses the windowed path. The resident-scroll workstream lists folded residence as a deferred remnant. Without it, `*run*` would be the one buffer that scrolls the old way.
 2. **Accept or change ADR-0010 and ADR-0011.** They fix the run record's owner, the shared runner, the PTY helper and how a buffer drawer is laid out.
 3. **Head and tail at the cap.** The design keeps the first 2,000 and last 8,000 lines of a run. Confirm, or pick another split.
 
@@ -60,9 +60,9 @@ Done when: numbers in the ticket, the bench script under `bench/`, and a yes or 
 
 Each slice lists what it delivers, the main work, and how to tell it is done. Ticket each one from this page when its turn comes; do not ticket S3 onward in detail until spike results are in.
 
-### S0: folded residence
+### S0: folded and decorated residence
 
-- **Delivers:** a folded buffer is resident and scrolls locally on both frontends.
+- **Delivers:** an unwrapped buffer with folds, decoration fold regions, virtual lines or block decorations is resident and scrolls locally on both frontends. A buffer that is both wrapped and folded is a follow-up.
 - **Work:** fold-aware promotion in the resident store; fold open and close as a `layout_generation` change or a row splice, whichever the measurement supports; conformance transcripts for folded buffers.
 - **Done when:** a 20,000-line file with 50 folds scrolls locally on macOS and the TUI, the windowed path no longer serves folded panes, and the keystroke latency job does not move.
 
