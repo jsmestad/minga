@@ -59,7 +59,7 @@ defmodule Minga.Buffer.KeptReview.Source do
 
   defp bind_placements(%__MODULE__{kind: :replace, new: new} = source, content, placements) do
     case complete(rebound_written(source, content, placements), :written) do
-      {:ok, point, ^new} -> [%{source | point: point}]
+      {:ok, point, total} when total == byte_size(new) -> [%{source | point: point}]
       _uncertain -> []
     end
   end
@@ -73,7 +73,7 @@ defmodule Minga.Buffer.KeptReview.Source do
     end)
   end
 
-  @spec rebound_written(t(), binary(), [Provenance.kept_placement()]) :: [part()]
+  @spec rebound_written(t(), binary(), [Provenance.kept_placement()]) :: [part(binary())]
   defp rebound_written(source, content, placements) do
     Enum.sort(
       for {:visible, {_, _, at, total}, point, count} <- placements,
@@ -138,9 +138,15 @@ defmodule Minga.Buffer.KeptReview.Source do
   end
 
   defp project_operation(:replace, id, fragments, content) do
-    with {:ok, point, new} <- complete(written_parts(fragments, content), :written),
-         {:ok, old_point, old} <- complete(removed_parts(fragments), :removed),
-         :ok <- follows_written(point, new, old_point) do
+    written = written_extents(fragments, byte_size(content))
+
+    with {:ok, point, written_total} <- complete(written, :written),
+         removed = removed_parts(fragments),
+         {:ok, old_point, _removed_total} <- complete(removed, :removed),
+         :ok <- follows_written(point, written_total, old_point) do
+      new = :binary.copy(binary_part(content, point, written_total))
+      old = join_removed(removed)
+
       [%__MODULE__{kind: :replace, id: id, offset: 0, point: point, old: old, new: new}]
     else
       :inexact -> []
@@ -148,8 +154,11 @@ defmodule Minga.Buffer.KeptReview.Source do
   end
 
   defp project_operation(:delete, id, fragments, _content) do
-    case complete(removed_parts(fragments), :removed) do
-      {:ok, point, old} ->
+    removed = removed_parts(fragments)
+
+    case complete(removed, :removed) do
+      {:ok, point, _total} ->
+        old = join_removed(removed)
         [%__MODULE__{kind: :delete, id: id, offset: 0, point: point, old: old, new: ""}]
 
       :inexact ->
@@ -159,7 +168,7 @@ defmodule Minga.Buffer.KeptReview.Source do
 
   @typep chunk :: {non_neg_integer(), non_neg_integer(), pos_integer(), [binary()]}
 
-  @spec join_written_part(part(), [chunk()]) :: [chunk()]
+  @spec join_written_part(part(binary()), [chunk()]) :: [chunk()]
   defp join_written_part({offset, point, bytes, _total}, [{left, start, length, parts} | rest])
        when offset == left + length and point == start + length,
        do: [{left, start, length + byte_size(bytes), [bytes | parts]} | rest]
@@ -171,14 +180,23 @@ defmodule Minga.Buffer.KeptReview.Source do
   defp join([bytes]), do: :binary.copy(bytes)
   defp join(parts), do: parts |> Enum.reverse() |> :erlang.iolist_to_binary()
 
-  @spec follows_written(non_neg_integer(), binary(), non_neg_integer()) :: :ok | :inexact
-  defp follows_written(point, new, old_point) do
-    if point + byte_size(new) == old_point, do: :ok, else: :inexact
+  @spec follows_written(non_neg_integer(), pos_integer(), non_neg_integer()) :: :ok | :inexact
+  defp follows_written(point, total, old_point) do
+    if point + total == old_point, do: :ok, else: :inexact
   end
 
-  @typep part :: {non_neg_integer(), non_neg_integer(), binary(), pos_integer()}
+  @typep part(payload) :: {non_neg_integer(), non_neg_integer(), payload, pos_integer()}
 
-  @spec written_parts([Provenance.keep_source()], binary()) :: [part()]
+  @spec written_extents([Provenance.keep_source()], non_neg_integer()) :: [part(pos_integer())]
+  defp written_extents(fragments, size) do
+    Enum.sort(
+      for {:written, {_, _, offset, total}, point, length} <- fragments,
+          point + length <= size,
+          do: {offset, point, length, total}
+    )
+  end
+
+  @spec written_parts([Provenance.keep_source()], binary()) :: [part(binary())]
   defp written_parts(fragments, content) do
     size = byte_size(content)
 
@@ -189,7 +207,7 @@ defmodule Minga.Buffer.KeptReview.Source do
     )
   end
 
-  @spec removed_parts([Provenance.keep_source()]) :: [part()]
+  @spec removed_parts([Provenance.keep_source()]) :: [part(binary())]
   defp removed_parts(fragments) do
     Enum.sort(
       for {:removed, {_, _, offset, total}, point, bytes} <- fragments,
@@ -197,21 +215,29 @@ defmodule Minga.Buffer.KeptReview.Source do
     )
   end
 
-  @spec complete([part()], :written | :removed) :: {:ok, non_neg_integer(), binary()} | :inexact
+  @spec join_removed([part(binary())]) :: binary()
+  defp join_removed([{_, _, bytes, _}]), do: :binary.copy(bytes)
+
+  defp join_removed(parts) do
+    parts |> Enum.map(fn {_, _, bytes, _} -> bytes end) |> :erlang.iolist_to_binary()
+  end
+
+  @spec complete([part(binary() | pos_integer())], :written | :removed) ::
+          {:ok, non_neg_integer(), pos_integer()} | :inexact
   defp complete([{0, point, _, total} | _] = parts, side) do
-    result =
-      Enum.reduce_while(parts, {0, []}, fn {offset, at, bytes, length}, {consumed, acc} ->
+    consumed =
+      Enum.reduce_while(parts, 0, fn {offset, at, payload, declared}, consumed ->
         expected = if side == :written, do: point + consumed, else: point
 
-        if offset == consumed and at == expected and total == length,
-          do: {:cont, {consumed + byte_size(bytes), [bytes | acc]}},
-          else: {:halt, :inexact}
+        if offset == consumed and at == expected and total == declared do
+          length = if is_binary(payload), do: byte_size(payload), else: payload
+          {:cont, consumed + length}
+        else
+          {:halt, :inexact}
+        end
       end)
 
-    case result do
-      {^total, acc} -> {:ok, point, join(acc)}
-      _inexact -> :inexact
-    end
+    if consumed == total, do: {:ok, point, total}, else: :inexact
   end
 
   defp complete(_fragmentary, _side), do: :inexact
