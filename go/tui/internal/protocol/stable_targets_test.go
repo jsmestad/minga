@@ -49,6 +49,10 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		// Which-key clicks name the open panel's path and the row's raw key, never a row index.
 		"GUIActionWhichKeyPress": false,
 		"GUIActionWhichKeyBack":  false,
+		// Act menu traffic carries the exact offer, painted ribbon, or typed target.
+		"GUIActionActMenuAction":   false,
+		"GUIActionReviewRibbonAct": false,
+		"GUIActionActMenuTarget":   false,
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), "events.go", nil, 0)
 	if err != nil {

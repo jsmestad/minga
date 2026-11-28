@@ -467,7 +467,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.built("minga.review.diff_inline",
         start: review_start(true),
         reach: "=",
-        recognize: &review_text_has?(&1, "      @@ "),
+        recognize: &inline_review_diff?/1,
         checks: [
           Check.new("the inline diff includes original and changed text", fn model ->
             assert review_text_has?(model, "      - ")
@@ -582,7 +582,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.built("minga.act_menu",
         start: act_menu_start(1),
         reach: "g g ] h g .",
-        recognize: &Model.open?(&1, :act_menu),
+        recognize: &match?(%Model{mode: :normal, ui: %{act_menu: %{query: ""}}}, &1),
         checks: [
           Check.new("Keep is safe by default, and preview has its own group", fn model ->
             assert %{
@@ -603,7 +603,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.built("minga.act_menu.filtered",
         start: act_menu_start(1),
         reach: "g g ] h g . /conversation",
-        recognize: &match?(%{ui: %{act_menu: %{query: "conversation"}}}, &1),
+        recognize: &match?(%Model{ui: %{act_menu: %{query: <<_, _::binary>>}}}, &1),
         checks: [
           Check.new("Filtering projects only the matching action and selects it", fn model ->
             assert %{
@@ -620,7 +620,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       Entry.built("minga.act_menu.selection",
         start: act_menu_start(2),
         reach: "g g V j j j g .",
-        recognize: &match?(%{ui: %{act_menu: %{lead: [%{label: "Keep 2 changes"} | _]}}}, &1),
+        recognize: &match?(%Model{mode: :visual, ui: %{act_menu: %{query: ""}}}, &1),
         checks: [
           Check.new("Two separate edits are offered together without leaving Visual", fn model ->
             assert %{lead: [%{label: "Keep 2 changes"}, %{label: "Reject 2 changes"}]} =
@@ -658,6 +658,15 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
       review_task: [open?: open?] ++ @review_task
     ]
   end
+
+  @spec inline_review_diff?(Model.t()) :: boolean()
+  defp inline_review_diff?(%Model{
+         ui: %{hover_popup: %{visible?: true, focused?: true, content_lines: lines}}
+       }) do
+    Enum.any?(lines, &match?(%{line_type: {:code_header, "diff"}}, &1))
+  end
+
+  defp inline_review_diff?(%Model{} = model), do: review_text_has?(model, "      @@ ")
 
   @spec review_text_has?(Model.t(), String.t()) :: boolean()
   defp review_text_has?(%Model{review_text: text}, expected) when is_binary(text),
