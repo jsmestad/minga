@@ -8,7 +8,7 @@ This page is the plan: what has to be decided, what has to be proven before code
 
 | After | You get | Can you stop using an outside terminal for tests? |
 |---|---|---|
-| R | Two edits in different places of a buffer, landing in one frame, re-send only their own rows. Not ticketed yet | n/a |
+| R | Two edits in different places of a buffer, landing in one frame, re-send only their own rows. [#4397](https://github.com/jsmestad/minga/issues/4397) | n/a |
 | S0 | Folded and decorated buffers scroll locally like plain ones | n/a |
 | S1 | `:!` and test keys open a drawer under your file with coloured, foldable, stoppable output. Your window is never taken | No: there is no jump from the file to an error |
 | S2 | A run segment in the modeline, `SPC c c` to run, `SPC c C` to rerun, a stop list, `SPC ~` to hide the drawer | No |
@@ -34,7 +34,7 @@ S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as on
 - **Order:** R, then S0, then S1. A folded window keeps up today only because it takes the windowed path. S0 makes it resident, so S0 before R would move `*run*` onto the path that freezes.
 - **Done when:** `bench/run_buffer_stream.exs` (branch `spike/run-buffer-throughput-4387`) without `RUN_BENCH_SERIAL` shows every flush carried by a row delta, no frame over 16 ms p95 and the Editor mailbox bounded, for scenarios B and C at 50,000 rows; and frame time is measured on both real frontends, which Spike B did not do.
 - **If it cannot be done inside the row-delta path:** one buffer per run, and the design returns to review.
-- Not ticketed. It changes rendering code the Spine shares, so it needs the same coordination as S0 ([#4388](https://github.com/jsmestad/minga/issues/4388)).
+- Ticket: [#4397](https://github.com/jsmestad/minga/issues/4397). It changes rendering code the Spine shares, so it needs the same coordination as S0 ([#4388](https://github.com/jsmestad/minga/issues/4388)).
 
 ## Decisions needed before S1
 
@@ -128,7 +128,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 
 ### S5: Minga's commands
 
-**Owner agreed (2026-11-28):** `Minga.Run` owns agent command execution, and agent commands use the PTY by default with a pipe for stdout as a per-command fallback. First step of this slice: run the agent's most common commands both ways and compare what the model receives, including the untested pipe-with-controlling-terminal case. Who draws the pending approval block and who owns command-block actions is recommended in ADR-0010 but not agreed; #4052 has merged, so that decision is due before this slice or #4061 starts.
+**Owner agreed (2026-11-28):** `Minga.Run` owns agent command execution, and agent commands use the PTY by default with a pipe for stdout as a per-command fallback. First step of this slice: run the agent's most common commands both ways and compare what the model receives, including the untested pipe-with-controlling-terminal case. The agent's Session keeps the approval decision and the run buffer only shows it, and command-block actions are one act-menu target with a run source (S2) and a terminal source (#4061).
 
 - **Delivers:** the agent's shell commands are runs in the same buffer, with the minga strand, the word "Minga", and approvals as pending blocks. `SPC a w`.
 - **Work:** `MingaAgent.Tools.Shell` becomes a client of `Minga.Run` (colour stripped from what the model reads); approval routing from the Editor to the agent; the ⌘. order; the ADR-0008 amendment; delete `minga-shell-output-reader` and the hook runner's shell mode.
