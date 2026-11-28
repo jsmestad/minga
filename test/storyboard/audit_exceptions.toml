@@ -811,6 +811,16 @@ reason = "Existing editor inks also sampled in the hosted minga.reject_all.confi
 issue = 4137
 
 [[exception]]
+scenario = ["minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#40a02b on #eff1f5", "#df8e1d on #eff1f5"]
+reason = "The existing green and amber syntax inks miss 4.5:1 against the Latte editor background outside the menu."
+issue = 4137
+
+[[exception]]
 scenario = "minga.act_menu.selection"
 frontend = "macos"
 part = "editor.code"

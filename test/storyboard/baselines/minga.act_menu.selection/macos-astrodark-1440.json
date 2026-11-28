@@ -36,7 +36,7 @@
   {
    "baseline": 21,
    "frame": [
-    355.5,
+    360,
     9.5,
     78,
     15
@@ -60,7 +60,7 @@
    "frame": [
     58,
     43.5,
-    22.5,
+    23,
     15
    ],
    "part": "breadcrumb.segment",
@@ -69,7 +69,7 @@
   {
    "baseline": 55,
    "frame": [
-    94.5,
+    95,
     43.5,
     102,
     15
@@ -80,9 +80,9 @@
   {
    "baseline": 55,
    "frame": [
-    210.5,
+    211,
     43.5,
-    71.5,
+    72,
     15
    ],
    "part": "breadcrumb.segment",
@@ -91,7 +91,7 @@
   {
    "baseline": 55,
    "frame": [
-    296,
+    297,
     43.5,
     149,
     15
@@ -102,9 +102,9 @@
   {
    "baseline": 55,
    "frame": [
-    459,
+    460,
     43.5,
-    13.5,
+    14,
     15
    ],
    "part": "breadcrumb.segment",
@@ -113,7 +113,7 @@
   {
    "baseline": 55,
    "frame": [
-    486.5,
+    488,
     43.5,
     78,
     15
@@ -125,8 +125,8 @@
    "frame": [
     99,
     146,
-    456,
-    363
+    420,
+    357
    ],
    "part": "actMenu.panel"
   },
@@ -135,7 +135,7 @@
    "frame": [
     111,
     158,
-    275.5,
+    276,
     17
    ],
    "part": "actMenu.title",
@@ -144,9 +144,9 @@
   {
    "baseline": 171.5,
    "frame": [
-    488.5,
+    452,
     161,
-    54.5,
+    55,
     14
    ],
    "part": "actMenu.filter",
@@ -156,16 +156,16 @@
    "frame": [
     111,
     196,
-    212,
+    194,
     82
    ],
    "part": "actMenu.decision"
   },
   {
    "frame": [
-    331,
+    313,
     196,
-    212,
+    194,
     82
    ],
    "part": "actMenu.decision"
@@ -175,7 +175,7 @@
    "frame": [
     145,
     202,
-    100.5,
+    101,
     16
    ],
    "part": "actMenu.label",
@@ -184,9 +184,9 @@
   {
    "baseline": 214.5,
    "frame": [
-    365,
+    347,
     202,
-    108.5,
+    109,
     16
    ],
    "part": "actMenu.label",
@@ -206,7 +206,7 @@
   {
    "baseline": 214.5,
    "frame": [
-    343,
+    325,
     204,
     7,
     14
@@ -219,8 +219,8 @@
    "frame": [
     145,
     222,
-    153,
-    14
+    112,
+    28
    ],
    "part": "actMenu.detail",
    "text": "Leaves Minga\u2019s edits in place"
@@ -228,18 +228,18 @@
   {
    "baseline": 232.5,
    "frame": [
-    365,
+    347,
     222,
-    119.5,
-    28
+    138,
+    14
    ],
    "part": "actMenu.detail",
-   "text": "Undoes Minga\u2019s edits. Yours stay."
+   "text": "Undoes only Minga\u2019s edits"
   },
   {
    "baseline": 268.5,
    "frame": [
-    263,
+    245,
     258,
     48,
     14
@@ -250,7 +250,7 @@
   {
    "baseline": 268.5,
    "frame": [
-    483,
+    447,
     258,
     48,
     14
@@ -272,17 +272,17 @@
   {
    "frame": [
     99,
-    305,
-    456,
-    27
+    309,
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 322.5,
+   "baseline": 325,
    "frame": [
     141,
-    311,
+    313.5,
     55,
     15
    ],
@@ -290,10 +290,10 @@
    "text": "Show diff"
   },
   {
-   "baseline": 322.5,
+   "baseline": 325,
    "frame": [
     111,
-    312,
+    314.5,
     7,
     14
    ],
@@ -301,10 +301,10 @@
    "text": "="
   },
   {
-   "baseline": 322.5,
+   "baseline": 325,
    "frame": [
-    536,
-    312,
+    500,
+    314.5,
     7,
     14
    ],
@@ -314,17 +314,17 @@
   {
    "frame": [
     99,
-    332,
-    456,
-    27
+    333,
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 349.5,
+   "baseline": 349,
    "frame": [
     141,
-    338,
+    337.5,
     109,
     15
    ],
@@ -332,10 +332,10 @@
    "text": "Open conversation"
   },
   {
-   "baseline": 349.5,
+   "baseline": 349,
    "frame": [
     111,
-    339,
+    338.5,
     7,
     14
    ],
@@ -343,10 +343,10 @@
    "text": "o"
   },
   {
-   "baseline": 374.5,
+   "baseline": 372.5,
    "frame": [
     111,
-    365,
+    363,
     40,
     13
    ],
@@ -356,28 +356,28 @@
   {
    "frame": [
     99,
-    378,
-    456,
-    27
+    380,
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 395.5,
+   "baseline": 396,
    "frame": [
     141,
-    384,
-    99.5,
+    384.5,
+    100,
     15
    ],
    "part": "actMenu.label",
    "text": "Copy file:line link"
   },
   {
-   "baseline": 395.5,
+   "baseline": 396,
    "frame": [
     111,
-    385,
+    385.5,
     7,
     14
    ],
@@ -387,28 +387,28 @@
   {
    "frame": [
     99,
-    405,
-    456,
-    27
+    404,
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 422.5,
+   "baseline": 420,
    "frame": [
     141,
-    411,
-    213.5,
+    408.5,
+    214,
     15
    ],
    "part": "actMenu.label",
    "text": "Attach file diagnostics to Agent draft"
   },
   {
-   "baseline": 422.5,
+   "baseline": 420,
    "frame": [
     111,
-    412,
+    409.5,
     7,
     14
    ],
@@ -416,21 +416,21 @@
    "text": "d"
   },
   {
-   "baseline": 422.5,
+   "baseline": 420,
    "frame": [
-    481.5,
-    412,
-    61.5,
+    445,
+    409.5,
+    62,
     14
    ],
    "part": "actMenu.shortcut",
    "text": "SPC a x d"
   },
   {
-   "baseline": 447.5,
+   "baseline": 443.5,
    "frame": [
     111,
-    438,
+    434,
     50,
     13
    ],
@@ -441,27 +441,27 @@
    "frame": [
     99,
     451,
-    456,
-    27
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 468.5,
+   "baseline": 467,
    "frame": [
     141,
-    457,
-    121.5,
+    455.5,
+    122,
     15
    ],
    "part": "actMenu.label",
    "text": "Ask Minga about this"
   },
   {
-   "baseline": 468.5,
+   "baseline": 467,
    "frame": [
     111,
-    458,
+    456.5,
     7,
     14
    ],
@@ -469,10 +469,10 @@
    "text": "a"
   },
   {
-   "baseline": 468.5,
+   "baseline": 467,
    "frame": [
-    495,
-    458,
+    459,
+    456.5,
     48,
     14
    ],
@@ -482,17 +482,17 @@
   {
    "frame": [
     99,
-    478,
-    456,
-    27
+    475,
+    420,
+    24
    ],
    "part": "actMenu.row"
   },
   {
-   "baseline": 495.5,
+   "baseline": 491,
    "frame": [
     141,
-    484,
+    479.5,
     100,
     15
    ],
@@ -500,10 +500,10 @@
    "text": "Rewrite selection"
   },
   {
-   "baseline": 495.5,
+   "baseline": 491,
    "frame": [
     111,
-    485,
+    480.5,
     7,
     14
    ],
@@ -511,10 +511,10 @@
    "text": "e"
   },
   {
-   "baseline": 495.5,
+   "baseline": 491,
    "frame": [
-    495,
-    485,
+    459,
+    480.5,
     48,
     14
    ],
@@ -524,7 +524,7 @@
   {
    "frame": [
     0,
-    908,
+    904,
     1440,
     24
    ],
@@ -533,7 +533,7 @@
   {
    "frame": [
     6,
-    908,
+    904,
     50,
     24
    ],
@@ -543,7 +543,7 @@
   {
    "frame": [
     64,
-    908,
+    904,
     86,
     24
    ],
@@ -552,9 +552,9 @@
   },
   {
    "frame": [
-    1384.5,
-    908,
-    25.5,
+    1384,
+    904,
+    26,
     24
    ],
    "part": "modeline.segment",
@@ -563,7 +563,7 @@
   {
    "frame": [
     1418,
-    908,
+    904,
     16,
     24
    ],
@@ -573,7 +573,7 @@
   {
    "frame": [
     6,
-    911,
+    907,
     50,
     18
    ],
@@ -581,10 +581,10 @@
    "text": "V-LINE"
   },
   {
-   "baseline": 923.5,
+   "baseline": 919.5,
    "frame": [
     12,
-    913,
+    909,
     38,
     14
    ],
@@ -596,7 +596,7 @@
  "size": "1440",
  "theme": "astrodark",
  "window": {
-  "height": 932,
+  "height": 928,
   "width": 1440
  }
 }

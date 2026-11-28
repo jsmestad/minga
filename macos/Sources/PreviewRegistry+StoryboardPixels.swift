@@ -43,11 +43,21 @@ struct StoryboardPixels {
     /// The surface and the inks under a part given in window points, or nil for an empty frame. The surface is the
     /// most common colour; each ink is the farthest colour in its direction from the surface that covers a few pixels,
     /// so an icon and the words beside it come out as two inks and their antialiased edges as none.
-    func sample(_ frame: CGRect, excluding covered: [CGRect] = []) -> (inks: [String], bg: String)? {
+    func sample(_ frame: CGRect, excluding covered: [CGRect] = [], singleInk: Bool = false) -> (inks: [String], bg: String)? {
         guard let histogram = histogram(frame, excluding: covered),
               let bg = histogram.counts.max(by: { $0.value < $1.value })?.key else { return nil }
         let counts = histogram.counts
         let visible = counts.filter { $0.key != bg && Self.distance($0.key, bg) > 24 }
+        if singleInk {
+            // A small monochrome glyph may have three strong pixels without any three identical RGB values.
+            // Use the third strongest actual pixel so one isolated pixel cannot pass the contrast check.
+            var remaining = 3
+            for (color, count) in visible.sorted(by: { Self.distance($0.key, bg) > Self.distance($1.key, bg) }) {
+                remaining -= count
+                if remaining <= 0 { return ([Self.hex(color)], Self.hex(bg)) }
+            }
+            return nil
+        }
         let floor = max(3, (visible.values.max() ?? 0) / 20)
         let candidates = visible.filter { $0.value >= floor }
             .sorted { Self.distance($0.key, bg) > Self.distance($1.key, bg) }

@@ -325,7 +325,8 @@ enum StoryboardCapture {
         guard let pixels else { return [] }
         return parts.compactMap { part in
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : []) else { return nil }
+                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : [],
+                                             singleInk: part.name == "actMenu.key") else { return nil }
             return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
         }
     }
