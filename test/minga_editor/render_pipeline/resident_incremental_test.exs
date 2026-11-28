@@ -1343,8 +1343,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       # Applying the delta to the rows the frontend held gives the same rows as a fresh render.
       fresh = fresh_resident_frame(state.editor)
 
-      assert Enum.map(apply_row_update(base_rows, model), & &1.text) ==
-               Enum.map(fresh.rows, & &1.text)
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
     end
 
     test "removing a block in the middle while a line is appended keeps every other row" do
@@ -1369,8 +1369,70 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       # Applying the delta to the rows the frontend held gives the same rows as a fresh render.
       fresh = fresh_resident_frame(state.editor)
 
-      assert Enum.map(apply_row_update(base_rows, model), & &1.text) ==
-               Enum.map(fresh.rows, & &1.text)
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "search highlights reach the rows of every changed range" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+      search = %Minga.Mode.SearchState{input: "line", direction: :forward}
+
+      workspace =
+        MingaEditor.Session.State.transition_mode(state.editor.workspace, :search, search)
+
+      state = %{state | editor: %{state.editor | workspace: workspace}}
+      {_searching, state} = build_frame(state)
+      base_rows = fresh_resident_frame(state.editor).rows
+
+      BufferProcess.move_to(buffer, {3, 0})
+      BufferProcess.insert_text(buffer, "x")
+      BufferProcess.move_to(buffer, {200, 0})
+      BufferProcess.insert_text(buffer, "y")
+      {model, state} = build_frame(state)
+
+      assert [%{start_index: 3}, %{start_index: 200, insert_rows: [far]}] =
+               model.row_delta.splices
+
+      assert Enum.any?(far.spans, &(&1.bg not in [nil, 0]))
+
+      fresh = fresh_resident_frame(state.editor)
+
+      assert Enum.map(apply_row_update(base_rows, model), &{&1.text, &1.spans}) ==
+               Enum.map(fresh.rows, &{&1.text, &1.spans})
+    end
+
+    test "the caret column is right when the cursor's line is not the first changed range" do
+      for {first_edit, cursor} <- [{{2, 0}, {8, 15}}, {{20, 0}, {8, 15}}] do
+        state = warm(resident_state(300))
+        buffer = state.editor.workspace.buffers.active
+
+        BufferProcess.move_to(buffer, first_edit)
+        BufferProcess.insert_text(buffer, "x")
+        BufferProcess.move_to(buffer, cursor)
+        BufferProcess.insert_text(buffer, "y")
+        {model, state} = build_frame(state)
+
+        fresh = fresh_resident_frame(state.editor)
+        assert model.accessibility_cursor == fresh.accessibility_cursor
+        assert {model.cursor_row, model.cursor_col} == {fresh.cursor_row, fresh.cursor_col}
+      end
+    end
+
+    test "the caret column is right when the cursor rests between two edits" do
+      state = warm(resident_state(300))
+      buffer = state.editor.workspace.buffers.active
+
+      BufferProcess.move_to(buffer, {2, 0})
+      BufferProcess.insert_text(buffer, "x")
+      BufferProcess.move_to(buffer, {40, 0})
+      BufferProcess.insert_text(buffer, "y")
+      BufferProcess.move_to(buffer, {10, 7})
+      {model, state} = build_frame(state)
+
+      fresh = fresh_resident_frame(state.editor)
+      assert model.accessibility_cursor == fresh.accessibility_cursor
+      assert {model.cursor_row, model.cursor_col} == {fresh.cursor_row, fresh.cursor_col}
     end
 
     test "neither frame replaces the whole store" do
@@ -1383,7 +1445,10 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
       :telemetry.attach(
         handler,
         [:minga, :render, :full_hydration],
-        fn _event, _measurements, metadata, _config -> send(test_pid, {:hydrated, metadata}) end,
+        fn _event, _measurements, metadata, _config ->
+          # Telemetry runs in the process that emits it; other tests hydrate concurrently.
+          if self() == test_pid, do: send(test_pid, {:hydrated, metadata})
+        end,
         nil
       )
 

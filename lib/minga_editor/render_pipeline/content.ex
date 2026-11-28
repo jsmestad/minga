@@ -179,6 +179,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       cursor_col: scroll.cursor_col,
       lines: scroll.lines,
       first_line: scroll.first_line,
+      extra_sources: for({first, _offset, lines} <- scroll.extra_sources, do: {first, lines}),
       preview_matches: scroll.preview_matches,
       gutter_w: scroll.gutter_w,
       content_w: scroll.content_w,

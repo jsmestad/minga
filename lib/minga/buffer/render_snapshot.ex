@@ -27,7 +27,7 @@ defmodule Minga.Buffer.RenderSnapshot do
     :decorations,
     :change_sequence
   ]
-  defstruct [{:extra_ranges, []} | @enforce_keys]
+  defstruct [{:extra_ranges, []}, {:cursor_text, nil} | @enforce_keys]
 
   @typedoc """
   A further changed line range read in the same buffer call: its first line, that line's byte offset,
@@ -37,6 +37,8 @@ defmodule Minga.Buffer.RenderSnapshot do
           {first_line :: non_neg_integer(), first_line_byte_offset :: non_neg_integer(),
            lines :: [String.t()]}
 
+  # `cursor_text` is the text of the cursor's line, set on a changed snapshot. The changed ranges need not
+  # include that line, and the renderer needs it to place the caret.
   @type t :: %__MODULE__{
           cursor: Minga.Buffer.Document.position(),
           line_count: pos_integer(),
@@ -53,7 +55,8 @@ defmodule Minga.Buffer.RenderSnapshot do
           options: %{atom() => term()},
           decorations: Minga.Core.Decorations.t(),
           change_sequence: non_neg_integer(),
-          extra_ranges: [extra_range()]
+          extra_ranges: [extra_range()],
+          cursor_text: String.t() | nil
         }
 
   @doc "Returns every line range the snapshot holds, ascending."

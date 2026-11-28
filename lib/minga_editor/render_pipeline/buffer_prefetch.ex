@@ -1048,7 +1048,7 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
          cursor_line: cursor_line,
          cursor_byte_col: cursor_byte_col
        }) do
-    text = cursor_line_text(lines, cursor_line, first_line)
+    text = unwrapped_cursor_text(snapshot, lines, cursor_line, first_line)
     {viewport, first_line, snapshot, lines, text, Unicode.display_col(text, cursor_byte_col)}
   end
 
@@ -1544,6 +1544,28 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           {boolean(), non_neg_integer()}
   defp gutter_dimensions(_state, _buf, line_number_style, line_count) do
     {true, Gutter.total_width(line_number_style, line_count)}
+  end
+
+  # A frame that carries edits fetches only the lines the edits changed. When the cursor's line is not one of
+  # them, its text comes from the changed snapshot, which reads it in the same buffer call.
+  @spec unwrapped_cursor_text(
+          RenderSnapshot.t(),
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          String.t()
+  defp unwrapped_cursor_text(snapshot, lines, cursor_line, first_line) do
+    in_lines? = cursor_line >= first_line and cursor_line < first_line + length(lines)
+
+    case snapshot do
+      %RenderSnapshot{cursor: {^cursor_line, _col}, cursor_text: text}
+      when is_binary(text) and not in_lines? ->
+        text
+
+      _other ->
+        cursor_line_text(lines, cursor_line, first_line)
+    end
   end
 
   @spec cursor_line_text([String.t()], non_neg_integer(), non_neg_integer()) :: String.t()

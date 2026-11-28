@@ -6310,9 +6310,12 @@ defmodule Minga.Buffer.Process do
              snapshot_lines(document, first, last - first + 1)}
           end)
 
+        {cursor_line, _col} = Document.cursor(document)
+
         %{
           bounded_render_snapshot(state, first_line, last_line - first_line + 1)
-          | extra_ranges: extra_ranges
+          | extra_ranges: extra_ranges,
+            cursor_text: document |> snapshot_lines(cursor_line, 1) |> List.first()
         }
     end
   end

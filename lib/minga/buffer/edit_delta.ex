@@ -145,7 +145,17 @@ defmodule Minga.Buffer.EditDelta do
   end
 
   @spec apply_to_hunks([hunk()], [t()]) :: [hunk()]
-  defp apply_to_hunks(hunks, deltas), do: Enum.reduce(deltas, hunks, &apply_to_hunks_once/2)
+  defp apply_to_hunks(hunks, deltas) do
+    # Merging only widens ranges, so limiting as we go is safe, and it keeps a long run of edits from
+    # costing the number of edits times the number of hunks.
+    Enum.reduce(deltas, hunks, fn delta, hunks ->
+      hunks = apply_to_hunks_once(delta, hunks)
+
+      if Enum.count_until(hunks, 2 * @max_line_hunks + 1) > 2 * @max_line_hunks,
+        do: limit_hunks(hunks),
+        else: hunks
+    end)
+  end
 
   @spec apply_to_hunks_once(t(), [hunk()]) :: [hunk()]
   defp apply_to_hunks_once(
