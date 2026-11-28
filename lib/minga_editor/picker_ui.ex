@@ -43,6 +43,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FetchEffect
+  alias MingaEditor.UI.Picker.FileAttachmentSource
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.FilesystemContext
   alias MingaEditor.UI.Picker.FilesystemQuery
@@ -394,9 +395,9 @@ defmodule MingaEditor.PickerUI do
 
   @spec current_source_fetch?(state(), PickerState.t(), term() | nil, Source.fetch_meta() | nil) ::
           boolean()
-  defp current_source_fetch?(_state, %{source: source}, fetch_identity, meta)
-       when source in [FileSource, MingaEditor.UI.Picker.FileAttachmentSource],
-       do: FileSource.current_fetch?(fetch_identity, meta)
+  defp current_source_fetch?(state, %{source: source}, fetch_identity, meta)
+       when source in [FileSource, FileAttachmentSource],
+       do: FileSource.current_fetch?(fetch_identity, meta, state.interaction.project_server)
 
   defp current_source_fetch?(
          state,
@@ -1019,7 +1020,7 @@ defmodule MingaEditor.PickerUI do
   @spec open_in_split(state(), Picker.item(), module(), PickerState.callback_source()) ::
           state() | {state(), action()}
   defp open_in_split(state, item, source, callback_source) do
-    context = picker_state(state).context
+    context = selection_context(state, source)
 
     case Source.selection_disposition(source, item, context, callback_source) do
       :accept ->
@@ -1475,7 +1476,7 @@ defmodule MingaEditor.PickerUI do
           PickerState.callback_source()
         ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
   defp select_single_item(state, item, source, callback_source) do
-    context = picker_state(state).context
+    context = selection_context(state, source)
 
     case Source.selection_disposition(source, item, context, callback_source) do
       :accept ->
@@ -1493,6 +1494,12 @@ defmodule MingaEditor.PickerUI do
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, message)
     end
   end
+
+  @spec selection_context(state(), module()) :: term()
+  defp selection_context(state, source) when source in [FileSource, FileAttachmentSource],
+    do: state.interaction.project_server
+
+  defp selection_context(state, _source), do: picker_state(state).context
 
   @spec stay_open_selection(EditorState.t(), module(), term()) :: EditorState.t()
   defp stay_open_selection(

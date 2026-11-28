@@ -281,9 +281,13 @@ defmodule MingaEditor.Handlers.FileEventHandler do
          } = state,
          root
        ) do
-    if MingaEditor.UI.Picker.FileAttachmentSource.refresh_inventory?(context, root),
-      do: PickerUI.refresh_items(state),
-      else: state
+    if MingaEditor.UI.Picker.FileAttachmentSource.refresh_inventory?(
+         context,
+         root,
+         state.interaction.project_server
+       ),
+       do: PickerUI.refresh_items(state),
+       else: state
   end
 
   defp maybe_refresh_file_picker(state, _root), do: state
