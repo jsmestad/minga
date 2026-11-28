@@ -2,7 +2,9 @@
 
 A run is a command you start from the editor and do not type into: `:!make`, the project's tests, a build. This page says where a run's output goes, what you can do with it, and what Minga does when one fails. The interactive shell is a different surface, covered in [terminal.md](terminal.md).
 
-**Status:** reviewed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
+**Status:** proposed, not built. The decisions are [ADR-0010](../adr/0010-runs.md) and [ADR-0011](../adr/0011-buffer-drawers.md), both Proposed.
+
+**Which page governs.** Until ADR-0010 and ADR-0011 are accepted, [terminal.md](terminal.md), [keys.md](keys.md), [surfaces.md](surfaces.md), ADR-0006 and ADR-0008 govern wherever this page disagrees with them. That includes `*minga-shell*`, `SPC a w`, approvals, command blocks and the failed-block menu, which belong to issue #4061. Build from this page only through the runs tickets (#4385 to #4389). Sentences marked *(open)* below depend on an owner decision or a spike listed in the workstream page and are not settled. The plan is in [the runs workstream](https://github.com/jsmestad/minga/blob/main/docs/workstreams/runs.md). Today `:!` and the test commands write into a plain buffer through `Minga.CommandOutput`.
 
 The design went through seven review rounds with a Minga UX specialist, a macOS designer and a Doom/Neovim power user, and one architecture review. Two decisions were the owner's: a failed check opens the run drawer by default, and no "current run" is stored.
 
@@ -13,7 +15,7 @@ Minga has two kinds of command surface, split by one question: does the command 
 - **A run** is a non-interactive command with a known command line: `:!cmd`, a test command, a project command, and every command Minga's agent runs. The BEAM owns a run record for it.
 - **A terminal** (`SPC o t`, [ADR-0008](../adr/0008-terminal-engine.md), not shipped) is an interactive shell in a PTY.
 
-Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Approvals are pending blocks in it. `*minga-shell*` as a separate buffer is withdrawn.
+Each project has one run buffer, `*run*`: a read-only special buffer of run blocks, one per run, in start order. Approvals would be pending blocks in it, and `*minga-shell*` as a separate buffer would be withdrawn at slice S5 if ADR-0010 is accepted *(open: the owner of Minga's commands is being settled with #4061)*. One buffer per project is *(open: Spike B, #4387)*.
 
 `*run*` is a buffer, not a list view. The editor renderer draws it in uniform rows at the buffer's row pitch, with the Vim cursor, like any buffer (ADR-0001). Nothing in it has its own row height.
 
@@ -21,7 +23,7 @@ Documents this changes when it is built: `docs/design/terminal.md`, ADR-0008, `d
 
 ## 1. Keys from anywhere
 
-All are free in `lib/minga/keymap/defaults.ex` today. Doom meanings were read from Doom's own bindings file (`doomemacs/modules`, `modules/config/default/+evil-bindings.el`, HEAD on 2026-11-27).
+The new keys (`SPC c c`, `SPC c C`, `SPC p c`, `SPC c o`, `SPC c s`, `SPC ~`, `SPC w p`) are free in `lib/minga/keymap/defaults.ex` today; none has a row in `doom_conventions.tsv` yet, and the last column says what its row would be. `SPC p T`, `SPC m t …` and `]q` / `[q` are shipped. Doom meanings were read from Doom's own bindings file (`doomemacs/modules`, `modules/config/default/+evil-bindings.el`, HEAD on 2026-11-27).
 
 | Key | Action | Doom | tsv row |
 |---|---|---|---|
@@ -31,10 +33,10 @@ All are free in `lib/minga/keymap/defaults.ex` today. Doom meanings were read fr
 | `SPC p T`, `SPC m t …` | Test commands, unchanged; `SPC m t r` reruns the last test | Test project | matches (shipped) |
 | `SPC c o` | Run output, three states: hidden → show and focus; visible, not focused → focus; focused → close and return focus | not bound | new |
 | `SPC c s` | Stop a run of yours | Send to REPL | diverges |
-| `SPC ~` | Show or hide the last drawer without moving focus | Toggle last popup | matches |
+| `SPC ~` | Show or hide the last drawer without moving focus *(open: not in any decision list; its relation to "closing a drawer returns to the one it replaced" in surfaces.md is undefined)* | Toggle last popup | matches |
 | `SPC m t o` | Show test output: becomes an alias of `SPC c o` | n/a | alias |
 | `SPC w p` | Previous window | evil's window map; `p` not verified | to verify |
-| `]q` / `[q` | Next / previous error, from any window | bound outside that file | to verify |
+| `]q` / `[q` | Next / previous quickfix location, shipped (`quickfix_next`, `quickfix_previous`). A run becomes one more source for that list | bound outside that file | shipped |
 
 - `:!cmd` is a run; `:{range}!cmd` is a synchronous filter; `:r !cmd` inserts.
 - `SPC c C` reruns the last run you started with a run key, a test key, the Run prompt or `r`. A `:!` command is never its target, so a reflex rerun cannot repeat `:!git push`. The echo area names what it reran.
@@ -63,7 +65,7 @@ All are free in `lib/minga/keymap/defaults.ex` today. Doom meanings were read fr
 | A pending approval | The answer prompt | `↩` on the block | Its Needs-you shape |
 | A block | Folded / unfolded | `za`, `zM`, `zR` | Its chevron; double-click the header row |
 | A held view | The newest output | `G` | "↓ N new lines" at the bottom edge |
-| Anywhere | Minga's commands | `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
+| Anywhere | Minga's commands | *(proposed; keys.md and #4061 govern `SPC a w` today)* `SPC a w`: `*run*` in a split, scrolled to Minga's newest block, your blocks folded | Act menu › Show Minga's commands; the Minga menu |
 | The drawer | Full height | `SPC ,` → `*run*` | same |
 
 `]q` from a file moves the drawer's cursor to that entry when the drawer is visible. `↩` on an entry sets the list index. `]q` and `[q` always echo "N of M · message"; the owning run is prefixed only when it is not the run the segment names. The first `]q` or `[q` after the list changes owner always prefixes the owning run, so the jump explains itself and `:colder` is the way back.
@@ -94,14 +96,14 @@ Which run takes the quickfix list:
 
 - A run is keyed by command and cwd. Rerunning the same key stops the earlier run of that key. Nothing else stops a run implicitly.
 - Your keys never stop a run Minga started.
-- Caps are per run (10,000 lines, 8 MB, 4,000 columns per line). A run past its line cap keeps its first 2,000 and last 8,000 lines, with one marker between them that says how many lines it dropped. The marker is a virtual row (a block decoration), not buffer text, so `yic` and search do not see it. Entries are extracted before the cut and survive it with their messages, up to 1,000 per run. Fix with Minga attaches the retained output and every entry. The buffer keeps the last 5 finished runs per author, and fewer when retained lines would pass 50,000 (the oldest finished run goes first), so `*run*` stays inside the resident store's row ceiling. A running run is never evicted.
+- Caps are per run (10,000 lines, 8 MB, 4,000 columns per line). A run past its line cap keeps its first 2,000 and last 8,000 lines *(open: owner decision 3)*, with one marker between them that says how many lines it dropped. The marker is a virtual row (a block decoration), not buffer text, so `yic` and search do not see it. Entries are extracted before the cut and survive it with their messages, up to 1,000 per run. Fix with Minga attaches the retained output and every entry. The buffer keeps the last 5 finished runs per author, and fewer when retained lines would pass 50,000 (the oldest finished run goes first), so `*run*` stays inside the resident store's row ceiling. A running run is never evicted.
 - Run records and the open drawer are not restored on relaunch. Command history, the last command and the drawer's remembered height are. Quitting stops your running runs by process group. The quit prompt lists them ("mix phx.server · 14m") and says they stop.
 
 ## 5. Errors and the quickfix core
 
 - Matchers belong to the run record: a table per filetype and per command, extensible in config, producing entries with severity and message.
 - An entry's location is the deepest frame inside the project. The test head is a link on the same block, drawn as a link.
-- The quickfix list core ships with this work: the list stack, `]q` / `[q`, `:cnext`, `:cprev`, `:cfirst`, `:clast`, `:cc N`, `:cnfile`, `:cpfile`, `:colder`, `:cnewer`, wrapping across files. A new list's index sits before its first entry. The quickfix drawer, `⌃Q` from pickers and `:cdo` stay in #4059.
+- Quickfix already exists: `MingaEditor.Quickfix` (`lib/minga_editor/quickfix.ex`) is a pure list with sources for task review, search and diagnostics, `]q` / `[q` are bound, and `:cdo` parses. This work extends that module. It does not add a second list. The extension: runs as a source, the list stack, `]q` / `[q`, `:cnext`, `:cprev`, `:cfirst`, `:clast`, `:cc N`, `:cnfile`, `:cpfile`, `:colder`, `:cnewer`, wrapping across files. A new list's index sits before its first entry. The quickfix drawer, `⌃Q` from pickers and `:cdo` stay in #4059.
 - Watch mode: a command's matcher may declare a cycle-start pattern. Each cycle start replaces that run's list in place, resets its index and re-arms follow. Without a declared pattern, a running run never takes the list. A cycle is treated as a run for errors. A watch run takes the quickfix list at the first entry of a cycle, under the same blocking rule. From that entry until the next cycle start, the run counts as failed for attention order, the segment and the reveal, and its header reads "Working · 2 errors". A cycle start with no entries after it counts as a pass for self-close, and `]q` says "No errors · npm test".
 - Progress: a matcher may supply a done count and a total. Only then does anything show progress.
 - The generic matcher reads `path:line[:col]` and grouped output (a row that is an existing path, followed by `N:` rows, as `rg` prints on a terminal).
@@ -111,7 +113,7 @@ Which run takes the quickfix list:
 
 - Record: id, command, cwd, author, kind (`check` or `output`), how it was started (key, prompt, `:!`, hook, Minga), times, state, exit code, reason, range, entries, last-output time, progress, superseded-by.
 - States use `marks.md` shapes and words only: Working, Done, Failed with its reason, Stopped, Needs you. A run's Working shape takes the role of its author. The Working shape is the `marks.md` orbit (an arc and a satellite), not a ring, so it differs from the hollow dot of Stopped without colour or motion.
-- Block header: one buffer row. The fold chevron (`▸` folded, `▾` open) and the state shape are buttons one row tall and three cells wide, and the frontend extends each hit area to at least 24 pt where the font makes three cells narrower; `anatomy.md` records this exception to the 24 pt hit height for marks inside a buffer. The rule between blocks is a hairline on the top edge of the header row and adds no height. The header row's buffer text is the command and nothing else. The chevron, state shape, state word, reason, cwd, "Minga" and duration are drawn on that row as decorations and are not buffer text, so `yy` on a header yanks the command. Decorations in order: the state shape, three cells, a button that carries the run's id (the act-menu click); the state word and reason, inline before the command; cwd, "Minga" and the summary line, after the command; the duration, right-aligned with two cells of clearance and hidden when the command leaves no room. A long command is clipped at the right like any unwrapped line. Inside the buffer the Working shape is static; only the modeline's moves. Search and `:g` see buffer text only. "Copy as report" in the act menu yields `$ command`, the output, then the state line.
+- Block header: one buffer row. The fold chevron (`▸` folded, `▾` open) and the state shape are buttons one row tall and three cells wide, and the frontend extends each hit area to at least 24 pt where the font makes three cells narrower. `anatomy.md` does not allow this yet; slice S1 adds the exception for marks inside a buffer. The rule between blocks is a hairline on the top edge of the header row and adds no height. The header row's buffer text is the command and nothing else. The chevron, state shape, state word, reason, cwd, "Minga" and duration are drawn on that row as decorations and are not buffer text, so `yy` on a header yanks the command. Decorations in order: the state shape, three cells, a button that carries the run's id (the act-menu click); the state word and reason, inline before the command; cwd, "Minga" and the summary line, after the command; the duration, right-aligned with two cells of clearance and hidden when the command leaves no room. A long command is clipped at the right like any unwrapped line. Inside the buffer the Working shape is static; only the modeline's moves. Search and `:g` see buffer text only. "Copy as report" in the act menu yields `$ command`, the output, then the state line.
 - Each block is one fold. A Done check starts folded and shows the runner's summary line after the command; when the runner prints none, its last non-empty line. Folds open by themselves for search hits, error jumps and `]]`.
 - No dimming by age and no failure tint.
 - SGR colour maps to theme roles; carriage returns fold; other escapes are dropped. A link at rest has a 1 pt underline in the muted role; hover gives the link role and the pointing hand.
@@ -138,7 +140,7 @@ The first columns are the code gutter's sign column and fold column, three cells
 ## 7. The drawer
 
 - Header (chrome, drawn at 24 pt at every row pitch; for the Room test the frontend reports the drawer's chrome cost as a whole number of rows, rounded up): `Runs`, a run stepper `‹ 3 of 4 ›`, state counts that are buttons, the error stepper with its severity sign `‹ 2 of 3 ›`. The run stepper disables at its ends. The error stepper wraps as `]q` does and reads "– of 3" before the first entry.
-- Hints: `g. actions`, `x stop`, `r rerun`, `f fix`, `q close`. They act on the block under the cursor. In the TUI they show only while the drawer has focus (`anatomy.md`). An unfocused drawer shows no hints on either frontend, as the tasks drawer does today: its keys work only with focus, so showing them would teach something false. On macOS the hints also appear while the pointer is over the drawer's header, so a mouse user closes it in one click on `q close`. From the keyboard, `SPC ~` hides it from anywhere, and `esc` in Normal mode closes a drawer that opened by itself and that you have not touched (`surfaces.md`: `esc` closes anything transient); `esc` never closes a drawer you opened. Both frontends show the same steppers and counts whether or not the drawer has focus.
+- Hints: `g. actions`, `x stop`, `r rerun`, `f fix`, `q close`. They act on the block under the cursor. In the TUI they show only while the drawer has focus (`anatomy.md`). An unfocused drawer shows no hints on either frontend, as the tasks drawer does today: its keys work only with focus, so showing them would teach something false. *(open: owner decision 6)* On macOS the hints would also appear while the pointer is over the drawer's header, so a mouse user closes it in one click on `q close`. From the keyboard, `SPC ~` hides it from anywhere, and *(open: owner decisions 5 and 6; no reviewer has seen either)* from a file window, `esc` in Normal mode closes a drawer that opened by itself and that you have not touched, and never one you opened. `surfaces.md` already gives `esc` in Normal mode to dismissing an echo-area notice, and a failure writes one, so the order of the two is undecided. Both frontends show the same steppers and counts whether or not the drawer has focus.
 - Narrowing, in order, each step only when the header no longer fits: hint labels drop and keys stay; the word "Errors" drops and the severity sign stays; state counts collapse to shapes with numbers.
 - The unfocused drawer draws its cursor row in the muted selection (one role, no outline, used by every unfocused window) with a hollow cursor on the character it is on. The focused one draws the block cursor and the accent tint.
 - An output run you started reveals the drawer at its first output, without focus and with follow on, under the same Who, When and Room rules as a failed check (below). Its reveal window opens at the first output and expires 30 s later. Exit 0 with no output never opens it; the echo area says "Done · 0.3 s".
@@ -208,7 +210,7 @@ Act menu (`g.`), per `surfaces.md`: a header naming the target, a filter, the mo
 - Drop order for a running segment: progress, minutes, the word; then the segment drops before git. Drop order for a failed segment: the count, then the reason; the shape and "Failed" never drop.
 - A pass removes the segment and writes one echo line ("Tests passed · 4.2 s"). A run that ended while Minga was not frontmost keeps its segment until you return and press a key or click.
 - The resting segment shows no key. The hover is the Hover surface, two lines, aligned with the segment: the full command, then "Working · 3m · 15% · SPC c o". With several runs it lists each, one per line. The start message, holding ⌘, which-key and the menu bar also teach the key.
-- Which-key: the run entries are one section, "Run", inside the Code panel, declared in the keymap by the BEAM (a new which-key capability: sections within a group). A live value truncates in the middle at 32 characters and shows the cwd when it is not the project root.
+- Which-key: the run entries are one section, "Run", inside the Code panel, declared in the keymap by the BEAM with the existing `@which_key_sections` in `lib/minga/keymap/defaults.ex`, as `SPC a` already does. A live value truncates in the middle at 32 characters and shows the cwd when it is not the project root.
 - A finished run changes the modeline and the echo line and nothing else. One passive background notification and a Dock-icon progress bar for a long run need an ADR on principle 7, decided either way before this ships.
 
 ## 11. Accessibility
@@ -248,7 +250,7 @@ From the architecture review. These are constraints on the design above, not use
 - **The buffer.** `*run*` is buffer text through the existing resident-row path. Block ranges are a value inside the buffer state, written in the same call as the text. Strands, entry marks and the fold chevron reuse the existing gutter channels.
 - **Backpressure.** A worker asks for the next chunk only after its last append returns and flushes at most about 30 times a second per run, so a flood never fills the Editor mailbox. The segment's update rate is enforced by publishing `:run_changed` only when a quantized summary changes.
 - **Matchers.** A pure matcher spec plus a registry that config extends. The matcher and `kind` are chosen at run start and frozen on the record: a test key gives `check`, otherwise the matcher's declared kind, otherwise `output`. An unconfigured command still gets a generic `path:line[:col]` matcher.
-- **Quickfix core.** A pure value in editor state with one writer. Entries shift with edits to open buffers, so a jump lands on the right line after you have typed above it. `]e` stays LSP diagnostics; runs do not publish into diagnostics, which avoids counting a compile error twice.
+- **Quickfix core.** The existing `MingaEditor.Quickfix`, a pure value in editor state with one writer, extended as section 5 says. Entries shift with edits to open buffers, so a jump lands on the right line after you have typed above it. `]e` stays LSP diagnostics; runs do not publish into diagnostics, which avoids counting a compile error twice.
 - **Drawer state.** The run drawer is a drawer kind in the existing one-slot stack, and its content is a real window on `*run*`, laid out by the BEAM in rows inside the reported grid. The BEAM owns the pending reveal, the settle timer, opened-by, touched, the no-flap timestamps and follow. The frontend reports facts: a gesture in progress, pointer enter and leave on the drawer, scrolled away and back, foreground. Headless: no reveal.
 - **Scope.** One `*run*` and one "last run you started" per project root. One segment, for the active project, in the modeline (section 10). `:run_drawer_for_checks` is a config option.
 
