@@ -302,8 +302,8 @@ struct AgentPromptPresentationTests {
             renderer.render(snapshot: snapshot, fontManager: font, cursorBlinkVisible: true,
                 drawableProvider: { drawable }, viewportSize: CGSize(width: 640, height: 480), contentScale: 1,
                 promptPlacement: placement,
-                onTextPresented: { snapshot, layout in
-                    dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: nil, textLayout: layout, connectionID: dispatcher.connectionID)
+                onInteractionPresented: { snapshot, layout, geometry in
+                    dispatcher.promoteVisibleEditorPresentation(snapshot: snapshot, localTransform: nil, geometry: geometry, textLayout: layout, connectionID: dispatcher.connectionID)
                     waiter.succeed(snapshot)
                 })
         }

@@ -8,13 +8,12 @@ import (
 
 // Which-key and the picker are what the user just asked for, so they paint above every BEAM-placed footer band (whose layer z is its placement z, 150 to 301, plus 2; see overlayLayer).
 // An Agent activity card left open while Minga works must not cover them (#4157).
-// The picker's action menu opens from the picker, so it paints above it.
-// Which-key paints above both: the mode pill opens a picker's own keys over the picker.
+// The act menu takes over the complete backdrop, including the picker and which-key.
 // The steps leave room for each layer's shadow (its z minus 1) to stay above the layer below.
 const (
-	pickerLayerZ           = 1010
-	pickerActionMenuLayerZ = 1020
-	whichKeyLayerZ         = 1030
+	pickerLayerZ   = 1010
+	whichKeyLayerZ = 1030
+	actMenuLayerZ  = 1040
 )
 
 // floatingOverlayLayers returns the lipgloss layers for all active floating
@@ -35,9 +34,6 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 	}
 	if picker := m.floatingPickerLayer(); picker != nil {
 		layers = append(layers, popupShadow(picker)...)
-	}
-	if menu := m.floatingPickerActionMenuLayer(); menu != nil {
-		layers = append(layers, popupShadow(menu)...)
 	}
 	return layers
 }

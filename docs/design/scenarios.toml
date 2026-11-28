@@ -2267,15 +2267,15 @@ status = "designed"
 boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html", mouse = "Mouse_Video_ActMenu_Chips.dc.html", reference = "ActMenu_DirectionA.dc.html" }
 transient = true
 exits = [
-  { key = "y", click = "Keep", to = "minga.review.in_file" },
+  { key = "y", click = "Keep", to = "edit.plain", note = "the last pending change is decided" },
   { key = "=", click = "Show diff", to = "minga.review.diff_inline" },
   { key = "o", click = "Open conversation", to = "minga.conversation" },
-  { key = "n", click = "Reject", to = "minga.review.in_file", note = "destructive, last, never preselected" },
-  { key = "l", click = "Copy file:line link", to = "edit.plain" },
+  { key = "n", click = "Reject", to = "edit.plain", note = "the last pending change is decided; Reject is never preselected" },
+  { key = "l", click = "Copy file:line link", to = "minga.review.in_file" },
   { key = "a", click = "Ask Minga about this", to = "minga.inline_ask" },
   { key = "E", click = "Export to a buffer", to = "files.file_list", note = "in pickers: export the matches" },
   { key = "typing", click = "click the filter field, then type", to = "minga.act_menu.filtered" },
-  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "minga.review.in_file" },
 ]
 notes = "The same menu opens on a diagnostic, a file row, a task row, a terminal command block and in pickers (Batch7_act_targets, Batch7_act_picker); right-click opens it too."
 
@@ -2291,7 +2291,7 @@ boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html
 transient = true
 exits = [
   { key = "↩", click = "a row", to = "minga.conversation", note = "runs the highlighted action" },
-  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "minga.review.in_file" },
 ]
 
 [[scenario]]
@@ -2305,7 +2305,7 @@ status = "designed"
 boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html", reference = "ActMenu_DirectionA.dc.html" }
 transient = true
 exits = [
-  { key = "y", click = "Keep 2 changes", to = "minga.review.in_file" },
+  { key = "y", click = "Keep 2 changes", to = "edit.plain", note = "both pending changes are decided" },
   { key = "a", click = "Ask Minga about the selection", to = "minga.inline_ask" },
   { key = "e", click = "Rewrite selection", to = "minga.inline_edit" },
   { key = "n", click = "Reject 2 changes", to = "edit.prompt", note = "confirms first" },
@@ -2325,6 +2325,7 @@ exits = [
   { key = "=", click = "", to = "minga.review.buffer", keyboard_only = "toggles the diff off in Task Review" },
   { key = "esc", click = "click elsewhere", to = "minga.review.buffer" },
 ]
+notes = "Task Review expands the diff inline. The Act menu shows a focused preview over the file; Esc closes it and returns to the same pending change."
 
 [[scenario]]
 id = "files.file_list"

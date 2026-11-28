@@ -10,6 +10,9 @@ import "fmt"
 // expected JSON the Elixir fixture builder produced from the same model.
 func GoldenDecode(name string, payload []byte) (any, int, error) {
 	switch name {
+	case "GuiActMenuFields":
+		v, n, err := DecodeGuiActMenuFields(payload, 0, len(payload))
+		return v, n, err
 	case "GuiAgentChatComposerHints":
 		v, n, err := DecodeGuiAgentChatComposerHints(payload, 0, len(payload))
 		return v, n, err
@@ -105,9 +108,6 @@ func GoldenDecode(name string, payload []byte) (any, int, error) {
 		return v, n, err
 	case "GuiNotificationsFields":
 		v, n, err := DecodeGuiNotificationsFields(payload, 0, len(payload))
-		return v, n, err
-	case "GuiPickerActionMenu":
-		v, n, err := DecodeGuiPickerActionMenu(payload, 0, len(payload))
 		return v, n, err
 	case "GuiPickerEmpty":
 		v, n, err := DecodeGuiPickerEmpty(payload, 0, len(payload))

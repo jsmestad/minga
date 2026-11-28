@@ -1615,6 +1615,11 @@ defmodule Minga.Buffer.UndoHistory do
   @spec review_revision(t()) :: pos_integer()
   def review_revision(%__MODULE__{next_tick: tick}), do: tick
 
+  @doc "Whether this exact review offer still names the current history."
+  @spec current_review_offer?(t(), review_target()) :: boolean()
+  def current_review_offer?(%__MODULE__{next_tick: tick}, {tick, [_ | _]}), do: true
+  def current_review_offer?(%__MODULE__{}, _old), do: false
+
   @doc """
   Returns pending review regions intersecting the requested bytes in file order.
 

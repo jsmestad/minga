@@ -101,6 +101,29 @@ class RuleTest(unittest.TestCase):
             audit.tui_contrast(self.audit, {**FRAME, "frontend": "tui"}, frame)
         self.assertEqual(self.audit.findings[0]["pair"], "#7f7f7f on #ffffff")
 
+    def test_act_menu_shortcut_is_text_and_the_backdrop_is_still_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame = Path(tmp) / "tui-t-5x1.txt"
+            frame.write_text("# size: 5x1\n## text\na=──b\n## styles (row start-end fg bg attrs)\n"
+                             "0 0-4 #aaaaaa #ffffff -\n")
+            audit.tui_contrast(self.audit, {**FRAME, "frontend": "tui"}, frame, (1, 0, 3, 1))
+        self.assertEqual(self.rules(), {("text", "contrast"), ("actMenu.text", "contrast")})
+        inside = next(f for f in self.audit.findings if f["part"] == "actMenu.text")
+        self.assertEqual(inside["expected"], 4.5)
+
+    def test_act_menu_cannot_pass_with_unequal_buttons_or_unmeasured_text(self):
+        frame = {**FRAME, "scenario": "minga.act_menu"}
+        parts = [part("actMenu.panel", 40, 80, 400, 160),
+                 part("actMenu.title", 48, 84, 150, 18, text="48 lines"),
+                 part("actMenu.filter", 400, 84, 35, 18, text="Filter"),
+                 part("actMenu.label", 65, 117, 74, 18, text="Keep"),
+                 part("actMenu.decision", 50, 110, 182, 65),
+                 part("actMenu.decision", 240, 113, 182, 62)]
+        samples = [{"part": p["part"], "text": p["text"], "inks": ["#000000"], "bg": "#ffffff"}
+                   for p in parts if p.get("text") and p["part"] != "actMenu.label"]
+        audit.act_menu(self.audit, frame, parts, samples, mac=True)
+        self.assertEqual(self.rules(), {("actMenu.label", "pixels sampled"), ("actMenu.decision", "aligned decisions")})
+
     def test_a_wide_character_takes_two_cells(self):
         self.assertEqual(audit.cells("a漢b"), ["a", "漢", "", "b"])
 

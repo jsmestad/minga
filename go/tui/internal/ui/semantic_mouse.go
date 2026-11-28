@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"hash/maphash"
 	"net/url"
 	"slices"
 	"strconv"
@@ -663,16 +664,26 @@ func (c *presentedMouseClick) take() presentedMouseClick {
 }
 
 func (c presentedMouseClick) publicationChanged() bool {
-	return c.epoch != nil && c.epoch.Load() != c.observedEpoch
+	return c.epoch != nil && (c.observedEpoch&1 != 0 || c.epoch.Load() != c.observedEpoch)
 }
 
 // Bubble Tea invokes OnMouse from the last flushed View, synchronously before
 // Update receives the input. Each handler captures only what that view showed.
-func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg) tea.Cmd {
+func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPresentation, gutter []gutterActHit) (func(tea.MouseMsg) tea.Cmd, uint64) {
 	claim := m.presentedClick
 	if claim == nil {
-		return nil
+		return nil, 0
 	}
+	if menu.offer != 0 {
+		return func(msg tea.MouseMsg) tea.Cmd {
+			if click, ok := msg.(tea.MouseClickMsg); ok && (click.Button == tea.MouseLeft || click.Button == tea.MouseRight) {
+				claim.claimed = true
+				claim.packet = menu.click(click)
+			}
+			return nil
+		}, 0
+	}
+	actTarget, targetStamp := m.presentedActMenuTargetHandler(layers, gutter)
 	git := m.presentedGitStatusHandler(layers)
 	var agent func(tea.MouseClickMsg)
 	if !m.pickerVisible() {
@@ -684,11 +695,18 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 	queue := m.presentedAgentQueueHandler(layers)
 	peek := m.presentedSubagentPeekHandler(layers)
 	review := m.presentedReviewModelineHandler(layers)
-	if git == nil && agent == nil && queue == nil && peek == nil && review == nil {
-		return nil
+	if git == nil && agent == nil && queue == nil && peek == nil && review == nil && actTarget == nil {
+		return nil, 0
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
 		click, ok := msg.(tea.MouseClickMsg)
+		if ok && actTarget != nil && (click.Button == tea.MouseLeft || click.Button == tea.MouseRight) {
+			if packet, exact := actTarget(click); exact {
+				claim.claimed = true
+				claim.packet = packet
+				return nil
+			}
+		}
 		if ok && click.Button == tea.MouseLeft {
 			if git != nil {
 				git(click)
@@ -707,7 +725,143 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 			}
 		}
 		return nil
+	}, targetStamp
+}
+
+type gutterActHit struct {
+	x, y     int
+	glyph    string
+	window   uint16
+	revision uint64 // Authorship for a twist; text generation for a fold.
+	head     protocol.AuthoredGutterRegion
+	foldLine uint32
+	authored bool
+}
+
+type actMenuTargetKind uint8
+
+const (
+	actMenuTargetPicker actMenuTargetKind = iota
+	actMenuTargetTree
+	actMenuTargetApproval
+	actMenuTargetTask
+)
+
+type actMenuChromeHit struct {
+	box      uiRect
+	kind     actMenuTargetKind
+	key      string // A file-tree item ID, approval zone identity, or task row ID.
+	pickerID uint32
+}
+
+var actMenuHitSeed = maphash.MakeSeed()
+
+func (m Model) presentedActMenuTargetHandler(layers []*lipgloss.Layer, gutter []gutterActHit) (func(tea.MouseClickMsg) ([]byte, bool), uint64) {
+	if m.whichKeyVisible() {
+		return nil, 0
 	}
+	var rows []actMenuChromeHit
+	picker := m.zones.picker
+	pickerVisible := m.pickerVisible()
+	generation := picker.generation
+	if pickerVisible {
+		if generation == 0 {
+			return nil, 0
+		}
+		for slot, id := range picker.items {
+			if zone := m.zones.Get(pickerPointerZone(slot)); id != 0 && zone != nil {
+				rows = append(rows, actMenuChromeHit{box: actMenuZoneRect(zone), kind: actMenuTargetPicker, pickerID: id})
+			}
+		}
+		gutter = nil // The picker owns the full pointer surface while visible.
+	} else {
+		if tree, ok := m.fileTree(); ok && tree.Visible && tree.Generation != 0 && m.width >= 50 {
+			generation = tree.Generation
+			first := fileTreeScrollOffset(tree, m.layout.body.Height)
+			for index := first; index < min(first+m.layout.body.Height, len(tree.Rows)); index++ {
+				if zone := m.zones.Get(zoneIDFileTreeRow(index)); zone != nil && tree.Rows[index].ID != "" {
+					rows = append(rows, actMenuChromeHit{box: actMenuZoneRect(zone), kind: actMenuTargetTree, key: tree.Rows[index].ID})
+				}
+			}
+		}
+		if m.agentChatVisible() {
+			for id, zone := range m.zones.zones {
+				if strings.HasPrefix(id, zonePrefixAgentApproval) && m.layout.body.Contains(zone.StartX, zone.StartY) {
+					rows = append(rows, actMenuChromeHit{box: actMenuZoneRect(zone), kind: actMenuTargetApproval, key: id})
+				}
+			}
+		}
+		rows = m.appendTasksActMenuHits(rows)
+	}
+	if len(gutter) == 0 && len(rows) == 0 {
+		return nil, 0
+	}
+	var stamp uint64
+	if len(rows) != 0 {
+		// Order-independent for scanned transcript zones, but includes their
+		// bounds and exact identities for visually identical replacements.
+		stamp = uint64(generation)
+		for _, row := range rows {
+			stamp ^= maphash.Comparable(actMenuHitSeed, row)
+		}
+	}
+	// Do not capture Model: its maps may already hold the next commit.
+	gridY, drawer := m.layout.grid.Y, m.layout.drawer
+	return func(click tea.MouseClickMsg) ([]byte, bool) {
+		layerZ := 1 // Main body content.
+		switch {
+		case pickerVisible:
+			layerZ = pickerLayerZ
+		case drawer.Contains(click.X, click.Y):
+			layerZ = tasksDrawerLayerZ
+		}
+		for _, layer := range layers {
+			if layer.GetZ() <= layerZ {
+				continue
+			}
+			box := uiRect{X: layer.GetX(), Y: layer.GetY(), Width: layer.Width(), Height: layer.Height()}
+			if box.Contains(click.X, click.Y) {
+				return nil, false
+			}
+		}
+		for _, hit := range gutter {
+			if hit.x != click.X || hit.y != click.Y {
+				continue
+			}
+			if hit.head.Unit != 0 {
+				return protocol.EncodeGUIReviewRibbonAct(hit.window, hit.revision, hit.head, uint16(click.Y-gridY), uint16(click.X)), true
+			}
+			if click.Button == tea.MouseRight {
+				if hit.authored {
+					return nil, true // Do not retarget a non-head mark to the text under it.
+				}
+				return protocol.EncodeGUIActMenuFoldTarget(hit.window, hit.revision, hit.foldLine), true
+			}
+		}
+		if click.Button == tea.MouseRight {
+			for _, row := range rows {
+				if !row.box.Contains(click.X, click.Y) {
+					continue
+				}
+				switch row.kind {
+				case actMenuTargetPicker:
+					return protocol.EncodeGUIActMenuPickerTarget(generation, row.pickerID), true
+				case actMenuTargetTree:
+					return protocol.EncodeGUIActMenuFileTreeTarget(uint64(generation), row.key), true
+				case actMenuTargetApproval:
+					target, _ := agentApprovalZoneTarget(row.key)
+					return protocol.EncodeGUIActMenuAgentApprovalTarget(target), true
+				case actMenuTargetTask:
+					return protocol.EncodeGUIActMenuTasksTarget(row.key), true
+				}
+			}
+		}
+		return nil, false
+	}, stamp
+}
+
+func actMenuZoneRect(zone *zoneInfo) uiRect {
+	return uiRect{X: zone.StartX, Y: zone.StartY, Width: zone.EndX - zone.StartX + 1, Height: zone.EndY - zone.StartY + 1}
 }
 
 type gitStatusHits struct {

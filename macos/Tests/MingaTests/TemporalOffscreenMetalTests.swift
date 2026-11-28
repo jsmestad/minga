@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Metal
 import MingaProtocol
@@ -185,7 +186,7 @@ struct TemporalOffscreenMetalTests {
                 renderer.render(snapshot: snapshot, fontManager: font, drawableProvider: { drawable },
                     viewportSize: CGSize(width: width, height: height), contentScale: scale,
                     scrollOffset: SIMD2<Float>(state.localColumns * cellWidthPoints, 0), presentationWindowId: 1, presentationInputSeq: seq,
-                    onTextPresented: { presented, layout in
+                    onInteractionPresented: { presented, layout, _ in
                         textLayout = layout
                         waiter.succeed(presented)
                     })
@@ -563,13 +564,17 @@ struct TemporalOffscreenMetalTests {
         let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
         let drawable = ReadbackDrawable(texture: texture)
         let theme = authorshipTheme()
+        let snapshot = rendererSnapshot(frameState: frameState, themeColors: theme, windowContents: [1: content], windowGutters: [1: resolved])
+        var hitGeometry: PresentedEditorGeometry?
         let outcome = await waiter.awaitOutcome {
             renderer.render(
-                frameState: frameState, fontManager: fontManager,
-                windowContents: [1: content], windowGutters: [1: resolved], themeColors: theme,
+                snapshot: snapshot, fontManager: fontManager,
                 drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
                 contentScale: scale, presentationWindowId: 1, presentationInputSeq: 1,
-                onPresented: { waiter.succeed($0) }
+                onInteractionPresented: { snapshot, _, geometry in
+                    hitGeometry = geometry
+                    waiter.succeed(snapshot)
+                }
             )
         }
         guard case .presented = outcome,
@@ -581,6 +586,19 @@ struct TemporalOffscreenMetalTests {
         let x0 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterLeftMarginPt) * scale).rounded(.up))
         let x1 = Int((5 * cellW + Float(CoreTextMetalRenderer.gutterPixelPaddingPt) * scale).rounded(.down))
         let strand = Self.expectedColor(Self.authoredMinga)
+        let geometry = try #require(hitGeometry)
+        let pixelCenter = Double(x0 + x1) / 2
+        let hitX = pixelCenter / Double(scale)
+        let physicalColumn = UInt16(pixelCenter / Double(cellW))
+        #expect(geometry.ribbonHit(at: CGPoint(x: hitX, y: Double(cellH) / 4)) == .head(.reviewRibbonAct(
+            windowID: 1, gutterRevision: 7, kind: .pending, unit: 12, sourceLine: 0, byteColumn: 0,
+            screenRow: 0, screenColumn: physicalColumn
+        )))
+        #expect(geometry.ribbonHit(at: CGPoint(x: Double(x0 - 1) / Double(scale), y: Double(cellH) / 4)) == nil)
+        for screenRow in 1..<rows {
+            let y = (Double(screenRow) + 0.5) * Double(cellH) / Double(scale)
+            #expect(geometry.ribbonHit(at: CGPoint(x: hitX, y: y)) == .mark, "body, human, shared and kept marks never offer a review action")
+        }
         #expect(image.matching(x0: x0, y0: 0, x1: x1, y1: Int(cellH), reference: strand, thresholdSquared: 0.02) > 0)
         #expect(image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: Int(2 * cellH), reference: strand, thresholdSquared: 0.02) > 0)
         let join = Int(cellH)
@@ -620,8 +638,8 @@ struct TemporalOffscreenMetalTests {
             lineNumberWidth: original.lineNumberWidth, signColWidth: original.signColWidth,
             entryUpdate: .replace(original.entries),
             authorshipUpdate: .snapshot(revision: 7, regions: [
-                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 0, lastLine: 2),
-                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 4, firstColumn: 0, lastLine: 4)
+                Wire.AuthoredGutterRegion(role: .pending, unit: 12, firstLine: 0, firstColumn: 3, lastLine: 2),
+                Wire.AuthoredGutterRegion(role: .deletion, unit: 14, firstLine: 4, firstColumn: 7, lastLine: 4)
             ])
         )
         let resolved = try #require(authored.resolved(reusing: nil))
@@ -648,13 +666,18 @@ struct TemporalOffscreenMetalTests {
             let content = try windowWithGutter(windowId: 1, rows: visible)
             let texture = try #require(OffscreenReadback.makeDrawableTexture(device: device, width: width, height: height))
             let drawable = ReadbackDrawable(texture: texture, drawableID: Int(sequence))
+            let snapshot = rendererSnapshot(frameSeq: sequence, frameState: frameState, themeColors: theme, windowContents: [1: content], windowGutters: [1: resolved])
+            var hitGeometry: PresentedEditorGeometry?
             let outcome = await waiter.awaitOutcome {
                 renderer.render(
-                    frameState: frameState, fontManager: fontManager,
-                    windowContents: [1: content], windowGutters: [1: resolved], themeColors: theme,
+                    snapshot: snapshot, fontManager: fontManager,
                     drawableProvider: { drawable }, viewportSize: CGSize(width: width, height: height),
-                    contentScale: scale, presentationWindowId: 1, presentationInputSeq: sequence,
-                    onPresented: { waiter.succeed($0) }
+                    contentScale: scale, scrollOffset: SIMD2<Float>(0, line == 1 ? cellH / scale / 4 : 0),
+                    presentationWindowId: 1, presentationInputSeq: sequence,
+                    onInteractionPresented: { snapshot, _, geometry in
+                        hitGeometry = geometry
+                        waiter.succeed(snapshot)
+                    }
                 )
             }
             guard case .presented = outcome,
@@ -666,6 +689,53 @@ struct TemporalOffscreenMetalTests {
             let code = image.matching(x0: x0, y0: Int(cellH), x1: x1, y1: height, reference: strand, thresholdSquared: 0.02)
             #expect((top > 0) == (line == 1))
             #expect((code > 0) == (line != 3))
+            let geometry = try #require(hitGeometry)
+            let pixelCenter = Double(x0 + x1) / 2
+            let hitX = pixelCenter / Double(scale)
+            let rowHeight = Double(cellH) / Double(scale)
+            let topHit = geometry.ribbonHit(at: CGPoint(x: hitX, y: rowHeight / 2))
+            let codeHit = geometry.ribbonHit(at: CGPoint(x: hitX, y: rowHeight * 1.5))
+            let column = UInt16(pixelCenter / Double(cellW))
+            if line == 1 {
+                #expect(topHit == .head(.reviewRibbonAct(windowID: 1, gutterRevision: 7, kind: .pending, unit: 12, sourceLine: 0, byteColumn: 3, screenRow: 0, screenColumn: column)))
+                #expect(codeHit == .mark)
+                let spy = SpyEncoder()
+                let dispatcher = CommandDispatcher(cols: cols, rows: rows, guiState: GUIState())
+                let view = EditorNSView(encoder: spy, dispatcher: dispatcher, coreTextRenderer: renderer, fontManager: fontManager)
+                view.frame = CGRect(x: 0, y: 0, width: Double(width) / Double(scale), height: Double(height) / Double(scale))
+                dispatcher.promoteVisibleEditorPresentation(
+                    snapshot: snapshot, localTransform: nil, geometry: geometry, connectionID: dispatcher.connectionID
+                )
+
+                let priorActionCount = spy.actions.count
+
+                func mouse(_ type: NSEvent.EventType, x: CGFloat, y: CGFloat) throws -> NSEvent {
+                    let location = view.convert(CGPoint(x: x, y: y), to: nil)
+                    return try #require(NSEvent.mouseEvent(with: type, location: location,
+                                                    modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                }
+                let topY = rowHeight / 2
+                view.rightMouseDown(with: try mouse(.rightMouseDown, x: hitX, y: topY))
+                view.rightMouseUp(with: try mouse(.rightMouseUp, x: hitX, y: topY))
+                view.mouseDown(with: try mouse(.leftMouseDown, x: hitX, y: topY))
+                view.mouseUp(with: try mouse(.leftMouseUp, x: hitX, y: topY))
+                let bodyY = rowHeight * 1.5
+                view.rightMouseDown(with: try mouse(.rightMouseDown, x: hitX, y: bodyY))
+                view.rightMouseUp(with: try mouse(.rightMouseUp, x: hitX, y: bodyY))
+                let expected = OutboundAction.reviewRibbonAct(windowID: 1, gutterRevision: 7, kind: .pending, unit: 12, sourceLine: 0, byteColumn: 3, screenRow: 0, screenColumn: column)
+                #expect(Array(spy.actions.dropFirst(priorActionCount)) == [expected, expected])
+
+                let neighborX = Double(x0 - 1) / Double(scale)
+                view.rightMouseDown(with: try mouse(.rightMouseDown, x: neighborX, y: bodyY))
+                view.rightMouseUp(with: try mouse(.rightMouseUp, x: neighborX, y: bodyY))
+                #expect(spy.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE])
+            } else if line == 4 {
+                #expect(topHit == nil)
+                #expect(codeHit == .head(.reviewRibbonAct(windowID: 1, gutterRevision: 7, kind: .deletion, unit: 14, sourceLine: 4, byteColumn: 7, screenRow: 1, screenColumn: column)))
+            } else {
+                #expect(topHit == nil && codeHit == nil)
+            }
         }
     }
 

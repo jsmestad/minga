@@ -23,16 +23,22 @@ final class ReadbackDrawable: NSObject, CAMetalDrawable {
     let drawableID: Int
     let presentedTime: CFTimeInterval = 0
     private(set) var presentCount = 0
+    private var presentedHandlers: [MTLDrawablePresentedHandler] = []
 
     init(texture: MTLTexture, drawableID: Int = 1) {
         self.texture = texture
         self.drawableID = drawableID
     }
 
-    func present() { presentCount += 1 }
-    func present(at presentationTime: CFTimeInterval) { presentCount += 1; _ = presentationTime }
-    func present(afterMinimumDuration duration: CFTimeInterval) { presentCount += 1; _ = duration }
-    func addPresentedHandler(_ block: @escaping MTLDrawablePresentedHandler) { _ = block }
+    func present() {
+        presentCount += 1
+        let handlers = presentedHandlers
+        presentedHandlers.removeAll(keepingCapacity: true)
+        for handler in handlers { handler(self) }
+    }
+    func present(at presentationTime: CFTimeInterval) { present() }
+    func present(afterMinimumDuration duration: CFTimeInterval) { present() }
+    func addPresentedHandler(_ block: @escaping MTLDrawablePresentedHandler) { presentedHandlers.append(block) }
 }
 
 /// A single normalized (0...1) BGRA pixel color sample.

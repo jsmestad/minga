@@ -98,7 +98,8 @@ version = "2.0.0"
 # protocol_version 57 adds the window-addressed subagent peek (0xAF), its separate resident transcript (0xB0), and exact peek actions (0x77).
 # protocol_version 58 adds independent authored-region revisions to gui_gutter (0x7B).
 # protocol_version 59 requires gui_theme's shared You shade (0x81) and kept Minga ink (0x82) slots.
-protocol_version = 59
+# protocol_version 60 adds the shared act menu (0xB1), native file-location actions (0xB2), focus owner surface 16, and exact menu, ribbon and chrome target actions (0x78–0x7A).
+protocol_version = 60
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1189,6 +1190,25 @@ direction = "beam_to_frontend"
 consumers = ["swift", "go"]
 framing = "len32"
 
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_act_menu"
+value = 0xB1
+direction = "beam_to_frontend"
+consumers = ["swift", "go"]
+framing = "len32"
+
+# A one-way native effect after the BEAM validates and activates a file-row offer.
+# Payload: kind(u8: 0 reveal in Finder, 1 open directory in Terminal) + path(string16).
+[[opcodes]]
+category = "gui_semantic"
+name = "gui_file_location_action"
+value = 0xB2
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Finder and Terminal.app actions are specific to native macOS" }
+framing = "len16"
+
 # Sub-opcodes inside gui_action (0x07).
 [[gui_actions]]
 name = "select_tab"
@@ -1514,9 +1534,7 @@ value = 0x5F
 name = "picker_item_activate"
 value = 0x60
 
-[[gui_actions]]
-name = "picker_action_activate"
-value = 0x61
+# 0x61, formerly picker-only action activation, is retired. Use act_menu_action.
 
 # Opens or focuses the native search toolbar without synthesizing a query edit.
 # Every focus starts a fresh search session while preserving the authoritative
@@ -1660,6 +1678,25 @@ value = 0x76
 [[gui_actions]]
 name = "subagent_peek_action"
 value = 0x77
+
+# offer_id(u64) + action_id(u16). Action 0 dismisses this exact offer; 0xFFFF focuses its filter.
+[[gui_actions]]
+name = "act_menu_action"
+value = 0x78
+
+# window(u16) + gutter_revision(u64) + kind(u8: 0 text, 1 deletion) + unit(u64)
+# + source_line(u32) + byte_column(u32) + screen_row(u16) + screen_column(u16).
+[[gui_actions]]
+name = "review_ribbon_act"
+value = 0x79
+
+# kind(u8) first: picker item 0 (generation:u32, activation_id:u32);
+# fold 1 (window:u16, generation:u64, source_line:u32); file tree 2 (generation:u64, item_id:string16).
+# Approval 3 carries session_id, request_id, tool_call_id (each string16), exactly like an approval answer without the decision byte.
+# Tasks row 4 carries the visible row id (string16); an approval decision later needs the exact request.
+[[gui_actions]]
+name = "act_menu_target"
+value = 0x7A
 
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
@@ -2100,6 +2137,18 @@ fields = [
   { name = "first_line", type = "u32" },
   { name = "first_column", type = "u32" },
   { name = "last_line", type = "u32" },
+]
+
+[[structures]]
+name = "act_menu_row"
+fields = [
+  { name = "id", type = "u16" },
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
+  { name = "hint", type = "string16" },
+  { name = "detail", type = "string16" },
+  { name = "section", type = "string16" },
+  { name = "destructive", type = "u8" },
 ]
 
 [[structures]]
@@ -2953,19 +3002,7 @@ layout = "counted_array"
 count_type = "u16"
 element = "picker_item"
 
-[[sections]]
-opcode = "gui_picker"
-id = 0x04
-name = "action_menu"
-# picker_encoder.ex encode_action_menu/1: hidden menus encode just the visible
-# byte (0); a visible menu adds selected_index plus a u8-counted list of action
-# name strings.
-fields = [{ name = "visible", type = "u8" }]
-conditional_tail = { guard = "visible == 1", fields = [
-  { name = "selected_index", type = "u8" },
-  { name = "actions", type = "counted_array", count_type = "u8", element = "string16" },
-  { name = "activation_ids", type = "counted_array", count_type = "u8", element = "u32" },
-] }
+# Picker section 0x04 is retired. Actions are sent as the shared gui_act_menu.
 
 [[sections]]
 opcode = "gui_picker"
@@ -3304,6 +3341,21 @@ fields = [
   { name = "steps", type = "counted_array", count_type = "u16", element = "subagent_peek_step" },
   { name = "panes", type = "counted_array", count_type = "u8", element = "subagent_peek_pane" },
 ]
+
+[[command_fields]]
+opcode = "gui_act_menu"
+fields = [{ name = "visible", type = "u8" }]
+conditional_tail = { guard = "visible == 1", fields = [
+  { name = "offer_id", type = "u64" },
+  { name = "role", type = "u8" },
+  { name = "anchor_row", type = "u16" },
+  { name = "anchor_column", type = "u16" },
+  { name = "selected", type = "u16" },
+  { name = "title", type = "string16" },
+  { name = "query", type = "string16" },
+  { name = "lead", type = "counted_array", count_type = "u8", element = "act_menu_row" },
+  { name = "rows", type = "counted_array", count_type = "u16", element = "act_menu_row" },
+] }
 
 [[command_fields]]
 opcode = "gui_edit_timeline"

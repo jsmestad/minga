@@ -105,6 +105,7 @@ public final class GUIState {
         statusBarState.resetProtocolConnection()
         feedbackState.cancel()
         pickerState.hide()
+        actMenuState.update(nil)
         agentChatState.hide()
         agentQueueState.update(nil)
         agentHelpState.hide()
@@ -170,6 +171,9 @@ public final class GUIState {
 
     /// Picker (command palette) state.
     public let pickerState: PickerState
+
+    /// The frame-committed shared Act menu.
+    public let actMenuState = ActMenuState()
 
     /// Agent chat state.
     public let agentChatState = AgentChatState()

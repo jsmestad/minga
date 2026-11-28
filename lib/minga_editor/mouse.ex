@@ -361,14 +361,27 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec apply_context_position(state(), state(), text_target(), boolean()) :: state()
-  defp apply_context_position(_original, focused, _target, true), do: focused
+  defp apply_context_position(_original, focused, target, true),
+    do: open_context_menu(focused, target)
 
   defp apply_context_position(original, focused, target, false) do
     case move_target(target, target_position(target)) do
-      {:ok, _position} -> normalize_mode_for_targeted_gesture(focused)
-      {:error, _reason} -> original
+      {:ok, _position} ->
+        focused
+        |> normalize_mode_for_targeted_gesture()
+        |> open_context_menu(target)
+
+      {:error, _reason} ->
+        original
     end
   end
+
+  @spec open_context_menu(state(), text_target()) :: state()
+  defp open_context_menu(state, %TextTarget{window_id: 65_534}),
+    do: MingaEditor.Shell.Traditional.ActMenuWorkflow.open(state)
+
+  defp open_context_menu(state, _target),
+    do: MingaEditor.Shell.Traditional.ActMenuWorkflow.open_file(state, :caret)
 
   @spec handle_text_drag(state(), TextEvent.t(), TextTarget.t()) :: state()
   defp handle_text_drag(state, event, %TextTarget{} = target) do

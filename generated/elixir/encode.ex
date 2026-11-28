@@ -369,6 +369,22 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_act_menu_row(map()) :: iodata()
+  def encode_act_menu_row(model), do: encode_act_menu_row(model, :act_menu_row, [])
+
+  @spec encode_act_menu_row(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_act_menu_row(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:id | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :id)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:hint | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :hint)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:detail | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :detail)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:section | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :section)),
+      (fn value -> validate_uint!(command, [:destructive | path], value, 255); <<value::8>> end).(Map.fetch!(model, :destructive)),
+    ]
+  end
+
   @spec encode_modeline_segment(map()) :: iodata()
   def encode_modeline_segment(model), do: encode_modeline_segment(model, :modeline_segment, [])
 
@@ -1343,25 +1359,6 @@ defmodule Minga.Protocol.Encode do
     [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_picker_item(value, command, [index | path]) end)]
   end
 
-  @spec encode_gui_picker_action_menu(map()) :: iodata()
-  def encode_gui_picker_action_menu(model), do: encode_gui_picker_action_menu(model, :gui_picker, [:action_menu])
-
-  @spec encode_gui_picker_action_menu(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
-  defp encode_gui_picker_action_menu(model, command, path) do
-    [
-      (fn value -> validate_uint!(command, [:visible | path], value, 255); <<value::8>> end).(Map.fetch!(model, :visible)),
-      if Map.fetch!(model, :visible) == 1 do
-        [
-          (fn value -> validate_uint!(command, [:selected_index | path], value, 255); <<value::8>> end).(Map.fetch!(model, :selected_index)),
-          (fn items -> count = Enum.count(items); validate_uint!(command, [:actions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [index | [:actions | path]], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(value) end)] end).(Map.fetch!(model, :actions)),
-          (fn items -> count = Enum.count(items); validate_uint!(command, [:activation_ids | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> (fn value -> validate_uint!(command, [index | [:activation_ids | path]], value, 4294967295); <<value::32>> end).(value) end)] end).(Map.fetch!(model, :activation_ids)),
-        ]
-      else
-        []
-      end
-    ]
-  end
-
   @spec encode_gui_picker_mode_prefix(map()) :: iodata()
   def encode_gui_picker_mode_prefix(model), do: encode_gui_picker_mode_prefix(model, :gui_picker, [:mode_prefix])
 
@@ -1798,6 +1795,31 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:parent_window_id | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :parent_window_id)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:steps | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_subagent_peek_step(value, command, [index | [:steps | path]]) end)] end).(Map.fetch!(model, :steps)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:panes | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_subagent_peek_pane(value, command, [index | [:panes | path]]) end)] end).(Map.fetch!(model, :panes)),
+    ]
+  end
+
+  @spec encode_gui_act_menu(map()) :: iodata()
+  def encode_gui_act_menu(model), do: encode_gui_act_menu(model, :gui_act_menu, [])
+
+  @spec encode_gui_act_menu(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_act_menu(model, command, path) do
+    [
+      (fn value -> validate_uint!(command, [:visible | path], value, 255); <<value::8>> end).(Map.fetch!(model, :visible)),
+      if Map.fetch!(model, :visible) == 1 do
+        [
+          (fn value -> validate_uint!(command, [:offer_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :offer_id)),
+          (fn value -> validate_uint!(command, [:role | path], value, 255); <<value::8>> end).(Map.fetch!(model, :role)),
+          (fn value -> validate_uint!(command, [:anchor_row | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :anchor_row)),
+          (fn value -> validate_uint!(command, [:anchor_column | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :anchor_column)),
+          (fn value -> validate_uint!(command, [:selected | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :selected)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+          (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:query | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :query)),
+          (fn items -> count = Enum.count(items); validate_uint!(command, [:lead | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_act_menu_row(value, command, [index | [:lead | path]]) end)] end).(Map.fetch!(model, :lead)),
+          (fn items -> count = Enum.count(items); validate_uint!(command, [:rows | path], count, 65535); [<<count::16>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_act_menu_row(value, command, [index | [:rows | path]]) end)] end).(Map.fetch!(model, :rows)),
+        ]
+      else
+        []
+      end
     ]
   end
 

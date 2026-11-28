@@ -12,7 +12,7 @@ public struct PickerOverlay: View {
         case queryChanged(generation: UInt32, editSequence: UInt32, text: String)
         case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32)
         case activateItem(generation: UInt32, activationID: UInt32)
-        case activateAction(generation: UInt32, activationID: UInt32)
+        case openActMenu(generation: UInt32, activationID: UInt32)
         /// The result rows the list shows for one picker generation. The BEAM pages the picker by `rows`.
         case fitChanged(generation: UInt32, rows: UInt16)
     }
@@ -87,11 +87,6 @@ public struct PickerOverlay: View {
                         RoundedRectangle(cornerRadius: Radius.md)
                             .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
                     )
-                    .overlay(alignment: .center) {
-                        if let menu = state.actionMenu {
-                            actionMenuOverlay(menu)
-                        }
-                    }
                     .anatomyPart("picker.panel", enabled: state.empty != nil)
                     .padding(.top, Spacing.pixel)
 
@@ -110,9 +105,6 @@ public struct PickerOverlay: View {
                 updateAccessibilityFocus()
             }
             .onChange(of: currentActivationGeneration) { _, _ in
-                updateAccessibilityFocus()
-            }
-            .onChange(of: currentActionSelection) { _, _ in
                 updateAccessibilityFocus()
             }
         }
@@ -178,7 +170,6 @@ public struct PickerOverlay: View {
                 generation: state.queryGeneration,
                 acknowledgedEditSequence: state.acknowledgedQueryEditSeq,
                 placeholder: state.title.isEmpty ? "Search..." : state.title,
-                isEditable: state.actionMenu == nil,
                 style: InlineEditFieldStyle(
                     textColor: theme.popupFg,
                     selectionBackgroundColor: theme.accent.opacity(0.35),
@@ -297,6 +288,13 @@ public struct PickerOverlay: View {
                                 .buttonStyle(.plain)
                                 .focusable(false)
                                 .disabled(!item.activation.isAvailable)
+                                .overlay {
+                                    SecondaryClick {
+                                        guard item.activation.isAvailable else { return }
+                                        sendAction?(.openActMenu(generation: item.activation.generation, activationID: item.activation.activationID))
+                                    }
+                                    .accessibilityHidden(true)
+                                }
                                 .accessibilityIdentifier("picker-choice-\(item.activation.generation)-\(item.activation.activationID)")
                                 .accessibilityLabel(Text(item.displayLabel))
                                 .accessibilityValue(pickerItemAccessibilityValue(item))
@@ -327,87 +325,12 @@ public struct PickerOverlay: View {
         .accessibilityValue(resultsAccessibilityValue)
     }
 
-    // MARK: - Action menu (⌃.)
-
-    @ViewBuilder
-    private func actionMenuOverlay(_ menu: PickerActionMenu) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Actions")
-                    .font(Typography.font(.body, weight: .semibold))
-                    .foregroundStyle(theme.popupFg.opacity(0.6))
-                Spacer()
-                Text("⌃.")
-                    .font(Typography.font(.caption, design: .monospaced))
-                    .foregroundStyle(theme.popupFg.opacity(0.3))
-            }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-
-            Rectangle()
-                .fill(theme.popupBorder.opacity(0.3))
-                .frame(height: 1)
-
-            ForEach(menu.entries) { entry in
-                let isSelected = entry.id == menu.selectedIndex
-
-                Button {
-                    activate(entry)
-                } label: {
-                    HStack {
-                        Text(entry.label)
-                            .font(Typography.font(.emphasis))
-                            .foregroundStyle(isSelected ? theme.popupSelFg : theme.popupFg)
-                        Spacer()
-                    }
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.vertical, Spacing.sm)
-                    .background(
-                        isSelected
-                            ? RoundedRectangle(cornerRadius: Radius.sm).fill(theme.accent).padding(.horizontal, Spacing.xs)
-                            : nil
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .disabled(!entry.activation.isAvailable)
-                .accessibilityIdentifier("picker-action-\(entry.activation.generation)-\(entry.activation.activationID)")
-                .accessibilityLabel(Text(entry.label))
-                .accessibilityValue(entry.activation.isAvailable ? (isSelected ? "selected" : "available") : "unavailable")
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .accessibilityFocused(
-                    $accessibilityFocus,
-                    equals: .action(entry.activation.generation, entry.activation.activationID)
-                )
-            }
-        }
-        .frame(width: 200)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .fill(theme.popupBg)
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Radius.lg)
-                .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Actions choices")
-        .accessibilityValue(menu.entries.count == 1 ? "1 action" : "\(menu.entries.count) actions")
-    }
-
     private var pickerTitle: String {
         state.title.isEmpty ? "Picker" : state.title
     }
 
     private var currentActivationGeneration: UInt32 {
-        state.items.first?.activation.generation ?? state.actionMenu?.entries.first?.activation.generation ?? 0
-    }
-
-    private var currentActionSelection: String? {
-        guard let menu = state.actionMenu else { return nil }
-        return "\(currentActivationGeneration):\(menu.selectedIndex)"
+        state.items.first?.activation.generation ?? 0
     }
 
     private var resultsAccessibilityValue: String {
@@ -533,11 +456,6 @@ public struct PickerOverlay: View {
         sendAction?(.activateItem(generation: item.activation.generation, activationID: item.activation.activationID))
     }
 
-    private func activate(_ entry: PickerActionEntry) {
-        guard entry.activation.isAvailable else { return }
-        sendAction?(.activateAction(generation: entry.activation.generation, activationID: entry.activation.activationID))
-    }
-
     private var queryFieldAction: ViewActionHandler<PickerQueryField.Action>? {
         guard let sendAction else { return nil }
         return { action in
@@ -553,12 +471,6 @@ public struct PickerOverlay: View {
             accessibilityFocus = nil
             return
         }
-        if let menu = state.actionMenu,
-           let entry = menu.entries.first(where: { $0.id == menu.selectedIndex }),
-           entry.activation.isAvailable {
-            accessibilityFocus = .action(entry.activation.generation, entry.activation.activationID)
-            return
-        }
         guard let item = state.items.first(where: { $0.id == state.effectiveSelectedIndex }),
               item.activation.isAvailable else {
             accessibilityFocus = nil
@@ -571,7 +483,6 @@ public struct PickerOverlay: View {
 
 private enum PickerAccessibilityFocus: Hashable {
     case item(UInt32, UInt32)
-    case action(UInt32, UInt32)
 }
 
 // MARK: - Section header
@@ -822,7 +733,6 @@ private func pickerPreviewState() -> PickerState {
             Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
         ],
-        actionMenu: nil,
         modePrefix: ""
     )
     return state

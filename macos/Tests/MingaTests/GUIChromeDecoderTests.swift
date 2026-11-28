@@ -2112,7 +2112,7 @@ struct GUIBottomPanelDecoderTests {
 
 @Suite("GUI Picker Decoder")
 struct GUIPickerDecoderTests {
-    @Test("Decode gui_picker visible with items and action menu (sectioned)")
+    @Test("Decode gui_picker visible with items, skipping the retired menu section")
     func decodeVisible() throws {
         // Section 0x01: Header
         var header = Data()
@@ -2156,7 +2156,7 @@ struct GUIPickerDecoderTests {
         items.append(0) // status_tone none
         appendString16(&items, "") // no group
 
-        // Section 0x04: Action menu
+        // Section 0x04: retired picker menu; length-framed and ignored.
         var actionMenu = Data()
         actionMenu.append(1) // visible
         actionMenu.append(0) // selected
@@ -2183,7 +2183,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let q, let hasPreview, let decodedItems, let modePrefix, _, let queryGeneration, let acknowledgedQueryEditSeq, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -2213,10 +2213,6 @@ struct GUIPickerDecoderTests {
         #expect(decodedItems[1].status == "")
         #expect(decodedItems[1].statusTone == .absent)
         #expect(decodedItems[1].group == "")
-
-        #expect(decodedMenu != nil)
-        #expect(decodedMenu?.actions == ["Open", "Split Right"])
-        #expect(decodedMenu?.activationIDs == [31, 37])
     }
 
     @Test("Decode gui_picker empty section: the header and list keys of a picker that offers next steps")
@@ -2248,7 +2244,7 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _, let hints) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let decodedEmpty, let listKeys, _, let hints) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -2264,18 +2260,17 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let actionMenu, let modePrefix, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, let markedCount, _, _, _, let items, let modePrefix, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == false)
         #expect(modePrefix.isEmpty)
         #expect(markedCount == 0)
         #expect(items.isEmpty)
-        #expect(actionMenu == nil)
     }
 
-    @Test("Decode gui_picker visible without action menu (sectioned)")
-    func decodeNoActionMenu() throws {
+    @Test("Decode gui_picker with only ordinary picker sections")
+    func decodeOrdinarySections() throws {
         var header = Data()
         header.append(1) // visible
         appendU16(&header, 0); appendU16(&header, 0); appendU16(&header, 0)
@@ -2292,27 +2287,22 @@ struct GUIPickerDecoderTests {
         var items = Data()
         appendU16(&items, 0)
 
-        var actionMenu = Data()
-        actionMenu.append(0) // not visible
-
         var data = Data()
         data.append(OP_GUI_PICKER)
-        data.append(5)
+        data.append(4)
         data.append(contentsOf: buildSectionData(0x01, header))
         data.append(contentsOf: buildSectionData(0x02, query))
         data.append(contentsOf: buildSectionData(0x05, modePrefix))
         data.append(contentsOf: buildSectionData(0x03, items))
-        data.append(contentsOf: buildSectionData(0x04, actionMenu))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let am, let modePrefix, _, _, _, _, _, _, let movementKeys, _) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, _, let modePrefix, _, _, _, _, _, _, let movementKeys, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
         #expect(modePrefix == "")
-        #expect(am == nil)
         #expect(movementKeys.isEmpty)
     }
 
@@ -2338,13 +2328,87 @@ struct GUIPickerDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys, _) = cmd else {
+        guard case .guiPicker(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let movementKeys, _) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(movementKeys == [
             Wire.PickerMovementKey(codepoint: 106, modifiers: 0x02, delta: 1),
             Wire.PickerMovementKey(codepoint: 57_352, modifiers: 0, delta: -1)
         ])
+    }
+}
+
+@Suite("Shared Act menu decoder")
+struct GUIActMenuDecoderTests {
+    @Test("Menu keeps two decisions, ordering, filter and the distinction between keys and consequences")
+    func actMenuPayload() throws {
+        var payload = Data([1, 1, 2, 3, 4, 5, 6, 7, 8, 1])
+        appendU16(&payload, 0xFFFE)
+        appendU16(&payload, 0xFFFE)
+        appendU16(&payload, 18)
+        appendString16(&payload, "Minga’s edit")
+        appendString16(&payload, "keep")
+        payload.append(2)
+        let keep = Wire.ActMenu.Row(id: 18, key: "y", label: "Keep", hint: "]c", detail: "Keep three lines", section: "", destructive: false)
+        let reject = Wire.ActMenu.Row(id: 19, key: "n", label: "Reject", hint: "", detail: "Restore original text", section: "", destructive: true)
+        let diff = Wire.ActMenu.Row(id: 20, key: "=", label: "Show diff", hint: "g=", detail: "View before and after", section: "Inspect", destructive: false)
+        appendRow(keep, to: &payload)
+        appendRow(reject, to: &payload)
+        appendU16(&payload, 1)
+        appendRow(diff, to: &payload)
+
+        var data = Data([0xFF, OP_GUI_ACT_MENU])
+        appendU32(&data, UInt32(payload.count))
+        data.append(payload)
+        data.append(contentsOf: [OP_GUI_ACT_MENU, 0, 0, 0, 1, 0])
+        let (command, consumed) = try decodeCommand(data: data, offset: 1)
+        guard case .guiActMenu(let decoded?) = command else {
+            Issue.record("Expected a visible Act menu")
+            return
+        }
+        #expect(decoded.offerID == 0x0102_0304_0506_0708)
+        #expect(decoded.role == .minga)
+        #expect(decoded.anchor == .caret)
+        #expect(decoded.selectedID == 18)
+        #expect(decoded.title == "Minga’s edit")
+        #expect(decoded.query == "keep")
+        #expect(decoded.lead == [keep, reject])
+        #expect(decoded.rows == [diff])
+        #expect(consumed == 5 + payload.count)
+        let (hide, _) = try decodeCommand(data: data, offset: 1 + consumed)
+        guard case .guiActMenu(nil) = hide else {
+            Issue.record("Expected a distinct hide command after the menu")
+            return
+        }
+    }
+
+    @Test("approved file location actions are isolated in an exact path envelope")
+    func fileLocationAction() throws {
+        let path = "/tmp/Minga Notes"
+        var payload = Data([1])
+        appendString16(&payload, path)
+        var packet = Data([OP_GUI_FILE_LOCATION_ACTION])
+        appendU16(&packet, UInt16(payload.count))
+        packet.append(payload)
+        let (command, consumed) = try decodeCommand(data: packet, offset: 0)
+        guard case .guiFileLocationAction(let action) = command else {
+            Issue.record("Expected a native file location action")
+            return
+        }
+        #expect(action.kind == .openTerminal)
+        #expect(action.path == path)
+        #expect(consumed == packet.count)
+        packet[3] = 2
+        #expect(throws: ProtocolDecodeError.self) {
+            _ = try decodeCommand(data: packet, offset: 0)
+        }
+    }
+
+    private func appendRow(_ row: Wire.ActMenu.Row, to data: inout Data) {
+        appendU16(&data, row.id)
+        appendString8(&data, row.key)
+        for value in [row.label, row.hint, row.detail, row.section] { appendString16(&data, value) }
+        data.append(row.destructive ? 1 : 0)
     }
 }
 

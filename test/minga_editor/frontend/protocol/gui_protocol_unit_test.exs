@@ -70,11 +70,11 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert {:ok,
               %MingaEditor.Target{
                 surface: :picker,
-                intent: :activate_action,
+                intent: :activate_item,
                 generation: 8,
                 item_id: <<42::32>>
               }} ==
-               ProtocolGUI.decode_gui_action(opcode, <<2, 2, 8::32, 4::16, 42::32>>)
+               ProtocolGUI.decode_gui_action(opcode, <<2, 1, 8::32, 4::16, 42::32>>)
 
       assert {:ok,
               %MingaEditor.Target{
@@ -111,9 +111,21 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<9, 1, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 9, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 4::16, "x">>)
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<2, 2, 8::32, 4::16, 42::32>>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<6, 5, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<6, 1, 7::32, 4::16, "x">>)
     end
+  end
+
+  test "opening and choosing a picker Act menu use different exact identities" do
+    target = Opcodes.gui_action_act_menu_target()
+    action = Opcodes.gui_action_act_menu_action()
+
+    assert {:ok, {:act_menu_target, {:picker, 8, 42}}} ==
+             ProtocolGUI.decode_gui_action(target, <<0, 8::32, 42::32>>)
+
+    assert {:ok, {:act_menu_action, 0x100000008, 42}} ==
+             ProtocolGUI.decode_gui_action(action, <<0x100000008::64, 42::16>>)
   end
 
   test "retired index-targeted and unused actions reject their former payloads" do

@@ -536,6 +536,38 @@ defmodule MingaEditor.NativeIPC.NavigationTest do
     assert {:error, :picker_replaced} = Navigation.apply(replaced, identity, command)
   end
 
+  test "a picker action cannot activate a replacement menu's reused row identity", %{
+    identity: identity,
+    state: state
+  } do
+    open_menu = &PickerUI.handle_key(&1, ?., MingaEditor.Input.mod_ctrl())
+    picker = PickerUI.open(state, ChoiceSource)
+    first = open_menu.(picker)
+    assert {:ok, inspection} = Navigation.inspect(first, identity, nil, 10)
+    offer = inspection["authoritative"]["picker"]
+
+    assert [%{"kind" => "action", "action" => "Choose this item", "activation_id" => id}] =
+             offer["choices"]
+
+    command =
+      command!(%{
+        "type" => "activate_picker_choice",
+        "app_instance_id" => identity.app_instance_id,
+        "core_instance_id" => identity.core_instance_id,
+        "target_token" => offer["target_token"],
+        "picker_generation" => offer["generation"],
+        "activation_id" => id,
+        "choice_kind" => "action"
+      })
+
+    replacement = open_menu.(picker)
+    assert {:error, :picker_replaced} = Navigation.apply(replacement, identity, command)
+    edited = PickerUI.replace_query(first, offer["generation"], 1, "second")
+    assert {:error, :choice_not_found} = Navigation.apply(edited, identity, command)
+    assert {:ok, acted, :beam_applied} = Navigation.apply(first, identity, command)
+    assert acted.shell_runtime.state.modal == :none
+  end
+
   test "removed pane and old core identities reject without changing active focus", %{
     identity: identity,
     state: state

@@ -44,9 +44,9 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return fixedCommandSize(payload, 18)
 	case OPPresentationOperation:
 		return fixedCommandSize(payload, 24)
-	case OPSetTitle, OPProtocolError, OPApplicationQuitResponse, OPGuiRequest, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState, OPGuiCompletionSelection, OPGuiPickerSelection, OPGuiFocusOwner, OPGuiMenuBar:
+	case OPSetTitle, OPProtocolError, OPApplicationQuitResponse, OPGuiRequest, OPGuiIndentGuides, OPGuiLineSpacing, OPGuiFileTreeSelection, OPGuiCursorAnimation, OPGuiHoverAction, OPGuiConfigState, OPGuiWorkspaces, OPGuiNotifications, OPGuiEditTimeline, OPGuiExtensionOverlay, OPGuiExtensionPanel, OPGuiSearchState, OPGuiEmptyState, OPGuiCompletionSelection, OPGuiPickerSelection, OPGuiFocusOwner, OPGuiMenuBar, OPGuiFileLocationAction:
 		return len16CommandSize(payload)
-	case OPGuiWindowContent, OPGuiAgentTranscript, OPClipboardWrite, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime, OPGuiResidentSemantics, OPGuiAgentHelp, OPGuiTasksDrawer, OPGuiAgentQueue, OPGuiSubagentPeek, OPGuiSubagentPeekTranscript:
+	case OPGuiWindowContent, OPGuiAgentTranscript, OPClipboardWrite, OPGuiFileTree, OPGuiObservatory, OPGuiSidebars, OPGuiExtensionRuntime, OPGuiResidentSemantics, OPGuiAgentHelp, OPGuiTasksDrawer, OPGuiAgentQueue, OPGuiSubagentPeek, OPGuiSubagentPeekTranscript, OPGuiActMenu:
 		return len32CommandSize(payload)
 	case OPGuiStatusBar, OPGuiGutter, OPGuiSurfaceLayout:
 		return sectionedCommandSize(payload)

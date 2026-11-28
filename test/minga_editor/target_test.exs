@@ -32,7 +32,7 @@ defmodule MingaEditor.TargetTest do
     completion = Completion.new([item], {0, 0})
     payload = CompletionPayload.new(17, completion: completion)
     completions = ModalWorkflow.open(state, {:completion, payload})
-    {pickers, picker_generation, picker_id, action_id} = picker_state(state)
+    {pickers, picker_generation, picker_id} = picker_state(state)
 
     entry = %{
       path: "/project/named.ex",
@@ -69,13 +69,6 @@ defmodule MingaEditor.TargetTest do
          generation: picker_generation,
          item_id: <<picker_id::32>>
        }, {:picker_item, picker_generation, picker_id}},
-      {pickers,
-       %MingaEditor.Target{
-         surface: :picker,
-         intent: :resolve,
-         generation: picker_generation,
-         item_id: <<action_id::32>>
-       }, {:picker_action, picker_generation, action_id}},
       {trees,
        %MingaEditor.Target{
          surface: :file_tree,
@@ -171,7 +164,7 @@ defmodule MingaEditor.TargetTest do
     payload = CompletionPayload.new(1, completion: Completion.new([item], {0, 0}))
     completions = ModalWorkflow.open(state, {:completion, payload})
     completion_generation = CompletionPayload.presentation_generation(payload)
-    {pickers, picker_generation, picker_id, _action_id} = picker_state(state)
+    {pickers, picker_generation, picker_id} = picker_state(state)
     tree = FileTree.new("/project") |> FileTree.put_entries([])
     file_tree = FileTreeState.open(%FileTreeState{}, tree, nil)
     trees = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree)}
@@ -281,23 +274,20 @@ defmodule MingaEditor.TargetTest do
     end
   end
 
-  test "picker items and source actions reject a buffer retired after the offer" do
+  test "picker items reject a buffer retired after the offer" do
     state = TestHelpers.base_state()
     buffer = state.workspace.buffers.active
     item = %Item{id: {:buffer, buffer}, label: "Offered buffer"}
-    {state, generation, item_id, action_id} = picker_state(state, item)
+    {state, generation, item_id} = picker_state(state, item)
     buffers = MingaEditor.State.Buffers.remove(state.workspace.buffers, buffer)
     retired = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
 
-    for id <- [item_id, action_id] do
-      assert Target.resolve(retired, %MingaEditor.Target{
-               surface: :picker,
-               intent: :resolve,
-               generation: generation,
-               item_id: <<id::32>>
-             }) ==
-               {:error, :not_found}
-    end
+    assert Target.resolve(retired, %MingaEditor.Target{
+             surface: :picker,
+             intent: :resolve,
+             generation: generation,
+             item_id: <<item_id::32>>
+           }) == {:error, :not_found}
   end
 
   test "command input changed before its overlay refresh cannot accept the previous offer" do
@@ -336,12 +326,10 @@ defmodule MingaEditor.TargetTest do
     picker_state =
       %PickerState{picker: picker}
       |> PickerState.begin_query_session()
-      |> PickerState.open_action_menu([{"Open", :open}], item)
 
     [{id, _, _}] = picker_state.activation_offer.items
-    [{action_id, _, _}] = picker_state.activation_offer.actions
     state = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
-    {state, picker_state.activation_offer.generation, id, action_id}
+    {state, picker_state.activation_offer.generation, id}
   end
 
   defp timeline_state(state) do

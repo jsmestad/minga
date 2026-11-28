@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI do
   @moduledoc false
 
+  alias Minga.Frontend.Adapter.GUI.ActMenuEncoder
   alias Minga.Frontend.Adapter.GUI.AgentChatEncoder
   alias Minga.Frontend.Adapter.GUI.AgentContextEncoder
   alias Minga.Frontend.Adapter.GUI.AgentHelpEncoder
@@ -63,6 +64,7 @@ defmodule Minga.Frontend.Adapter.GUI do
     {:sidebars, SidebarsEncoder},
     {:file_tree, FileTreeEncoder},
     {:picker, PickerEncoder},
+    {:act_menu, ActMenuEncoder},
     {:minibuffer, MinibufferEncoder},
     {:completion, CompletionEncoder},
     {:signature_help, SignatureHelpEncoder},

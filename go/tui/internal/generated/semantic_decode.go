@@ -517,6 +517,49 @@ func DecodeGutterAuthoredRegion(data []byte, offset int, windowEnd int) (GutterA
 	}, pos, nil
 }
 
+func DecodeActMenuRow(data []byte, offset int, windowEnd int) (ActMenuRow, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+2, "id"); err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	id := decodeU16(data, pos)
+	pos += 2
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	hint, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	detail, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	section, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "destructive"); err != nil {
+		return ActMenuRow{}, offset, err
+	}
+	destructive := data[pos]
+	pos++
+	return ActMenuRow{
+		ID:          id,
+		Key:         key,
+		Label:       label,
+		Hint:        hint,
+		Detail:      detail,
+		Section:     section,
+		Destructive: destructive,
+	}, pos, nil
+}
+
 func DecodeModelineSegment(data []byte, offset int, windowEnd int) (ModelineSegment, int, error) {
 	pos := offset
 	name, pos, err := decodeString8Window(data, pos, windowEnd)
@@ -1954,58 +1997,6 @@ func DecodeGuiPickerItems(data []byte, offset int, windowEnd int) ([]PickerItem,
 		items = append(items, item)
 	}
 	return items, pos, nil
-}
-
-func DecodeGuiPickerActionMenu(data []byte, offset int, windowEnd int) (GuiPickerActionMenu, int, error) {
-	pos := offset
-	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
-		return GuiPickerActionMenu{}, offset, err
-	}
-	visible := data[pos]
-	pos++
-	var selectedIndex uint8
-	var actions []string
-	var activationIds []uint32
-	if visible == 1 {
-		if err := decodeRequireWindow(windowEnd, pos+1, "selected_index"); err != nil {
-			return GuiPickerActionMenu{}, offset, err
-		}
-		selectedIndex = data[pos]
-		pos++
-		if err := decodeRequireWindow(windowEnd, pos+1, "actions count"); err != nil {
-			return GuiPickerActionMenu{}, offset, err
-		}
-		actionsCount := int(data[pos])
-		pos += 1
-		actions = make([]string, 0, min(actionsCount, len(data)-pos))
-		for i := 0; i < actionsCount; i++ {
-			item, nextPos, err := decodeString16Window(data, pos, windowEnd)
-			if err != nil {
-				return GuiPickerActionMenu{}, offset, err
-			}
-			pos = nextPos
-			actions = append(actions, item)
-		}
-		if err := decodeRequireWindow(windowEnd, pos+1, "activation_ids count"); err != nil {
-			return GuiPickerActionMenu{}, offset, err
-		}
-		activationIdsCount := int(data[pos])
-		pos += 1
-		if err := decodeRequireWindow(windowEnd, pos+activationIdsCount*4, "activation_ids"); err != nil {
-			return GuiPickerActionMenu{}, offset, err
-		}
-		activationIds = make([]uint32, 0, activationIdsCount)
-		for i := 0; i < activationIdsCount; i++ {
-			activationIds = append(activationIds, decodeU32(data, pos))
-			pos += 4
-		}
-	}
-	return GuiPickerActionMenu{
-		Visible:       visible,
-		SelectedIndex: selectedIndex,
-		Actions:       actions,
-		ActivationIds: activationIds,
-	}, pos, nil
 }
 
 func DecodeGuiPickerModePrefix(data []byte, offset int, windowEnd int) (GuiPickerModePrefix, int, error) {
@@ -4140,6 +4131,102 @@ func DecodeGuiSubagentPeekFields(data []byte, offset int, windowEnd int) (GuiSub
 		ParentWindowID: parentWindowID,
 		Steps:          steps,
 		Panes:          panes,
+	}, pos, nil
+}
+
+// Command field decoder for gui_act_menu
+
+func DecodeGuiActMenuFields(data []byte, offset int, windowEnd int) (GuiActMenuFields, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "visible"); err != nil {
+		return GuiActMenuFields{}, offset, err
+	}
+	visible := data[pos]
+	pos++
+	var offerID uint64
+	var role uint8
+	var anchorRow uint16
+	var anchorColumn uint16
+	var selected uint16
+	var title string
+	var query string
+	var lead []ActMenuRow
+	var rows []ActMenuRow
+	if visible == 1 {
+		var err error
+		if err := decodeRequireWindow(windowEnd, pos+8, "offer_id"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		offerID = decodeU64(data, pos)
+		pos += 8
+		if err := decodeRequireWindow(windowEnd, pos+1, "role"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		role = data[pos]
+		pos++
+		if err := decodeRequireWindow(windowEnd, pos+2, "anchor_row"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		anchorRow = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireWindow(windowEnd, pos+2, "anchor_column"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		anchorColumn = decodeU16(data, pos)
+		pos += 2
+		if err := decodeRequireWindow(windowEnd, pos+2, "selected"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		selected = decodeU16(data, pos)
+		pos += 2
+		title, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		query, pos, err = decodeString16Window(data, pos, windowEnd)
+		if err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		if err := decodeRequireWindow(windowEnd, pos+1, "lead count"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		leadCount := int(data[pos])
+		pos += 1
+		lead = make([]ActMenuRow, 0, min(leadCount, len(data)-pos))
+		for i := 0; i < leadCount; i++ {
+			item, nextPos, err := DecodeActMenuRow(data, pos, windowEnd)
+			if err != nil {
+				return GuiActMenuFields{}, offset, err
+			}
+			pos = nextPos
+			lead = append(lead, item)
+		}
+		if err := decodeRequireWindow(windowEnd, pos+2, "rows count"); err != nil {
+			return GuiActMenuFields{}, offset, err
+		}
+		rowsCount := int(decodeU16(data, pos))
+		pos += 2
+		rows = make([]ActMenuRow, 0, min(rowsCount, len(data)-pos))
+		for i := 0; i < rowsCount; i++ {
+			item, nextPos, err := DecodeActMenuRow(data, pos, windowEnd)
+			if err != nil {
+				return GuiActMenuFields{}, offset, err
+			}
+			pos = nextPos
+			rows = append(rows, item)
+		}
+	}
+	return GuiActMenuFields{
+		Visible:      visible,
+		OfferID:      offerID,
+		Role:         role,
+		AnchorRow:    anchorRow,
+		AnchorColumn: anchorColumn,
+		Selected:     selected,
+		Title:        title,
+		Query:        query,
+		Lead:         lead,
+		Rows:         rows,
 	}, pos, nil
 }
 

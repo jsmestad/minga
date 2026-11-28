@@ -33,6 +33,10 @@ defmodule MingaEditor.FocusOwner do
   # Conflict precedes both inline overlays in Input.overlay_handlers/0.
   defp overlay_owner(:conflict, _modal, _state), do: {:editor_view, :conflict, 0}
 
+  defp overlay_owner(_tag, _modal, %{shell_runtime: %Runtime{state: %ShellState{act_menu: menu}}})
+       when menu != nil,
+       do: {:editor_view, :act_menu, 0}
+
   defp overlay_owner(tag, modal, state) do
     inline_owner(active_inline(state), tag, modal, state)
   end

@@ -171,7 +171,7 @@ defmodule MingaEditor.Shell.Traditional do
   @impl true
   @spec chrome_fingerprint(term()) :: term()
   def chrome_fingerprint(%RenderInput{
-        intent: %{frame: %{shell_state: %ShellState{} = shell_state}}
+        intent: %{frame: %{shell_state: %ShellState{} = shell_state, act_menu: act_menu}}
       }) do
     {
       shell_state.tab_bar,
@@ -180,6 +180,7 @@ defmodule MingaEditor.Shell.Traditional do
       shell_state.hover_popup,
       shell_state.signature_help,
       shell_state.whichkey,
+      act_menu,
       ShellState.modal(shell_state),
       ShellState.agent(shell_state),
       shell_state.bottom_panel,

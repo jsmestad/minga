@@ -25,9 +25,10 @@ func (f *InputFilter) Filter(model tea.Model, msg tea.Msg) tea.Msg {
 	msg = normalizeTerminalInput(resolveKeyBoundary(msg))
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft {
+		if msg.Button == tea.MouseLeft || msg.Button == tea.MouseRight {
 			if m, ok := model.(Model); ok && m.presentedClick != nil {
 				epoch := f.outputEpoch.Load()
+				// A press that overlaps a write can belong to either frame.
 				if epoch&1 != 0 {
 					return nil
 				}

@@ -101,6 +101,7 @@ type ChromePayload struct {
 	Complete            Completion
 	Which               WhichKey
 	Picker              Picker
+	ActMenu             generated.GuiActMenuFields
 	Preview             PickerPreview
 	Tree                FileTree
 	Status              StatusBar

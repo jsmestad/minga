@@ -49,7 +49,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
 
     model =
       picker
-      |> picker_modal(AgentHistorySource, nil, "", :ready)
+      |> picker_modal(AgentHistorySource, "", :ready)
       |> build_context()
       |> PickerBuilder.build()
 
@@ -78,13 +78,13 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
     picker = PickerState.new(items, title: source.title(), max_visible: 100)
 
     model =
-      picker |> picker_modal(source, nil, "", :ready) |> build_context() |> PickerBuilder.build()
+      picker |> picker_modal(source, "", :ready) |> build_context() |> PickerBuilder.build()
 
     assert length(model.items) == 100
     assert is_binary(PickerEncoder.encode_command(model))
 
     searched = PickerState.filter(picker, path)
-    modal = {:picker, %{picker_ui: ui}} = picker_modal(searched, source, nil, "", :ready)
+    modal = {:picker, %{picker_ui: ui}} = picker_modal(searched, source, "", :ready)
     model = modal |> build_context() |> PickerBuilder.build()
     assert is_binary(PickerEncoder.encode_command(model))
     assert [%{activation_id: id} | _] = model.items
@@ -148,7 +148,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         picker_modal(
           picker,
           Minga.Test.RenderModelPickerPreviewSource,
-          {[{"Open", :open}], 0, item},
           ">",
           :loading
         )
@@ -167,9 +166,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.has_preview?
       assert model.mode_prefix == ">"
       assert model.load_status == :loading
-      assert model.action_menu.actions == ["Open"]
-      assert model.action_menu.activation_ids == [2]
-      assert model.action_menu.selected_index == 0
 
       # The builder emits wire-shaped item maps: flags packs marked (bit 1) and active (bit 3), the
       # status chip flattens into text and tone, description/annotation default to "", icon_color
@@ -200,7 +196,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         |> PickerState.filter("command")
         |> PickerState.move_up()
 
-      {:picker, %{picker_ui: picker_ui}} = modal = picker_modal(picker, nil, nil, "", :ready)
+      {:picker, %{picker_ui: picker_ui}} = modal = picker_modal(picker, nil, "", :ready)
       model = PickerBuilder.build(build_context(modal))
       activation_id = model.selected_item_id
 
@@ -231,7 +227,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       }
 
       picker = %PickerState{items: [item], filtered: [item], title: "Find", selected: 0}
-      modal = picker_modal(picker, nil, nil, "", :ready)
+      modal = picker_modal(picker, nil, "", :ready)
 
       model = PickerBuilder.build(build_context(modal))
 
@@ -250,7 +246,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
     test "exactly 255 match_positions are preserved" do
       item = %Item{id: "one", label: "One", match_positions: Enum.to_list(0..254)}
       picker = %PickerState{items: [item], filtered: [item], title: "Find", selected: 0}
-      modal = picker_modal(picker, nil, nil, "", :ready)
+      modal = picker_modal(picker, nil, "", :ready)
 
       model = PickerBuilder.build(build_context(modal))
 
@@ -313,7 +309,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       path = temp_file!("not previewed")
       item = %Item{id: path, label: "Empty preview", meta: %{rows: []}}
       picker = PickerState.new([item], title: "Files")
-      modal = picker_modal(picker, AgentDraftAttachmentSource, nil, "", :ready)
+      modal = picker_modal(picker, AgentDraftAttachmentSource, "", :ready)
 
       assert PickerBuilder.build(build_context(modal)).preview_lines == []
     end
@@ -331,7 +327,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       item = %Item{id: candidate, label: "relative.txt"}
 
       picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
-      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, nil, "", :ready)
+      modal = picker_modal(picker, MingaEditor.UI.Picker.FileSource, "", :ready)
 
       model = PickerBuilder.build(build_context(modal))
 
@@ -348,9 +344,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
     end
   end
 
-  @spec picker_modal(PickerState.t(), module(), term(), String.t(), Picker.load_status()) ::
-          term()
-  defp picker_modal(picker, source, action_menu, mode_prefix, load_status) do
+  @spec picker_modal(PickerState.t(), module(), String.t(), Picker.load_status()) :: term()
+  defp picker_modal(picker, source, mode_prefix, load_status) do
     {:picker,
      %{
        picker_ui:
@@ -358,7 +353,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
            picker: picker,
            source: source,
            callback_source: nil,
-           action_menu: action_menu,
            source_switch: source_switch(mode_prefix, source),
            load_status: load_status,
            query_generation: 7,
@@ -374,7 +368,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
     defp movement_model(state) do
       [%Item{id: :one, label: "one"}, %Item{id: :two, label: "two"}]
       |> PickerState.new(title: "Files")
-      |> picker_modal(RecentFileSource, nil, "", :ready)
+      |> picker_modal(RecentFileSource, "", :ready)
       |> build_context(state)
       |> PickerBuilder.build()
     end
@@ -457,7 +451,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   @spec file_picker_modal(String.t()) :: term()
   defp file_picker_modal(path) do
     picker = PickerState.new([%Item{id: path, label: Path.basename(path)}], title: "Files")
-    picker_modal(picker, RecentFileSource, nil, "", :ready)
+    picker_modal(picker, RecentFileSource, "", :ready)
   end
 
   @spec build_context(term(), EditorState.t()) :: Context.t()

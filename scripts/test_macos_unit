@@ -31,6 +31,7 @@ POLICY_FUNCTIONS = {
     "markedTextDefersOwner", "localLeasesDeferLatestOwner", "iconSearchMirrorFocusesNativeField",
     "lifecycleAppliesOnlyDecodedOwner", "inlineStemSelectionPrecedesTyping",
     "productionInlineRebuildDoesNotCommit", "productionFieldsRegisterAfterLateInjection",
+    "actMenuReclaimsAndReturnsQueryFocus",
 }
 GEOMETRY_WIDTHS = (220, 320, 760)
 GEOMETRY_LABELS = {"Approve (y)", "Trust for session (a)", "Trust for this turn (t)", "Deny (n)"}
@@ -110,7 +111,7 @@ def validate_action(name, summary, tests, log, exit_code):
             elif node.get("nodeType") == "Test Case":
                 errors.append("Policy contains an unrelated execution identifier: " + node_text(node))
         if observed != POLICY_FUNCTIONS:
-            errors.append(f"Policy requires all 13 own passed functions; missing={sorted(POLICY_FUNCTIONS - observed)}, unexpected={sorted(observed - POLICY_FUNCTIONS)}")
+            errors.append(f"Policy requires every own passed function; missing={sorted(POLICY_FUNCTIONS - observed)}, unexpected={sorted(observed - POLICY_FUNCTIONS)}")
     else:
         enumerated = any("corpusIsEnumerated" in node_text(node) or "focus scenarios are enumerated for both consumers" in node_text(node) for node in passed)
         replayed = any("replay(" in node_text(node) or "same shared frames establish responder and AX identity" in node_text(node) for node in passed)

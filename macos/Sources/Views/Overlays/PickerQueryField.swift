@@ -85,7 +85,6 @@ struct PickerQueryField: NSViewRepresentable {
     let generation: UInt32
     let acknowledgedEditSequence: UInt32
     let placeholder: String
-    let isEditable: Bool
     let style: InlineEditFieldStyle
     let sendAction: ViewActionHandler<Action>?
 
@@ -102,7 +101,7 @@ struct PickerQueryField: NSViewRepresentable {
         field.font = .monospacedSystemFont(ofSize: Typography.Step.emphasis.rawValue, weight: .regular)
         field.lineBreakMode = .byClipping
         field.isSelectable = true
-        field.isEditable = isEditable && sendAction != nil
+        field.isEditable = sendAction != nil
         field.delegate = context.coordinator
         field.cell?.usesSingleLineMode = true
         field.cell?.isScrollable = true
@@ -116,7 +115,7 @@ struct PickerQueryField: NSViewRepresentable {
     func updateNSView(_ field: PickerNSTextField, context: Context) {
         context.coordinator.sendAction = sendAction
         context.coordinator.style = style
-        field.isEditable = isEditable && sendAction != nil
+        field.isEditable = sendAction != nil
         field.placeholderString = placeholder
         context.coordinator.apply(style: style, to: field)
 

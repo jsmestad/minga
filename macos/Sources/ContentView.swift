@@ -182,6 +182,16 @@ private struct WindowOverlayHost<Content: View>: View {
     }
 }
 
+/// Keeps the whole-window menu aligned to the continuously mounted editor,
+/// including when the sidebar or bottom panel changes the editor's origin.
+private struct ActMenuEditorBoundsKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 private enum EditorOverlayAction: Equatable, Sendable {
     case openHover
     case selectCompletion(generation: UInt32, itemID: String)
@@ -586,6 +596,18 @@ public struct ContentView<EditorSurface: View>: View {
                 }
             }
         }
+        .overlayPreferenceValue(ActMenuEditorBoundsKey.self) { editorBounds in
+            if !windowOverlayInput.protocolErrorState.isPresented {
+                ActMenuOverlay(
+                    state: gui.actMenuState, editorBounds: editorBounds, editorGeometry: editorGeometry,
+                    sendAction: translatedAction { (action: ActMenuOverlay.Action) in
+                        .actMenuAction(offerID: action.offerID, actionID: action.actionID)
+                    }
+                )
+                .environment(\.themeColors, windowOverlayInput.currentTheme)
+                .frameNativeDrawProbe(domain: .windowOverlay, metrics: metrics)
+            }
+        }
         .navigationTitle(chrome.title)
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(chrome.backgroundIsDark ? .dark : .light)
@@ -885,6 +907,7 @@ public struct ContentView<EditorSurface: View>: View {
             ZStack(alignment: .topLeading) {
                 // The Metal surface is unconditional so its AppKit and resident identity survives.
                 makeEditorSurface()
+                    .anchorPreference(key: ActMenuEditorBoundsKey.self, value: .bounds) { $0 }
 
                 if input.agentChatState.visible {
                     agentConversationSurface(input, geometry: geo)

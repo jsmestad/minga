@@ -594,9 +594,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:execute_command, "agent_toggle_help"}),
     do: AgentCommands.scope_toggle_help(state)
 
-  defp dispatch_action(state, {:execute_command, "agent_attach_diagnostics_at:" <> target}),
-    do: MingaEditor.UI.Picker.DiagnosticAttachmentSource.open_presented(state, target)
-
   defp dispatch_action(state, {:execute_command, "next_minga_change_at:" <> target}) do
     with [window_text, owner, version_text, review_text, point_text] <-
            String.split(target, ":", parts: 5),
@@ -760,6 +757,22 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     end)
   end
 
+  defp dispatch_action(state, {:act_menu_action, offer, action}),
+    do: MingaEditor.Shell.Traditional.ActMenuWorkflow.click(state, offer, action)
+
+  defp dispatch_action(state, {:review_ribbon_act, window, revision, head, anchor}),
+    do:
+      MingaEditor.Shell.Traditional.ActMenuWorkflow.open_ribbon(
+        state,
+        window,
+        revision,
+        head,
+        anchor
+      )
+
+  defp dispatch_action(state, {:act_menu_target, target}),
+    do: MingaEditor.Shell.Traditional.ActMenuWorkflow.open_target(state, target)
+
   defp dispatch_action(state, {:focus_window, 65_534, generation}),
     do: MingaEditor.Agent.PromptInput.focus_presentation(state, 65_534, generation)
 
@@ -854,18 +867,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       %MingaEditor.Target{
         surface: :picker,
         intent: :activate_item,
-        generation: generation,
-        item_id: <<activation_id::32>>
-      }
-    )
-  end
-
-  defp dispatch_action(state, {:picker_action_activate, generation, activation_id}) do
-    dispatch_action(
-      state,
-      %MingaEditor.Target{
-        surface: :picker,
-        intent: :activate_action,
         generation: generation,
         item_id: <<activation_id::32>>
       }
@@ -1193,14 +1194,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       next -> next
     end
   end
-
-  defp apply_semantic_target(
-         state,
-         %Target{},
-         :activate_action,
-         {:picker_action, generation, id}
-       ),
-       do: PickerUI.activate_action(state, generation, id)
 
   defp apply_semantic_target(state, %Target{}, :dismiss, :picker_dismissal),
     do: PickerUI.close(state)

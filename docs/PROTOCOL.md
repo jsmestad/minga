@@ -75,6 +75,8 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 | `0xAE` | gui_agent_queue | variable | Commit the conversation's resident input queue; see [GUI protocol](GUI_PROTOCOL.md#0xae-gui_agent_queue) |
 | `0xAF` | gui_subagent_peek | variable | Commit the parent tool-step offers and optional child split; see [GUI protocol](GUI_PROTOCOL.md#0xaf-gui_subagent_peek) |
 | `0xB0` | gui_subagent_peek_transcript | variable | Commit the selected child's separate resident transcript; see [GUI protocol](GUI_PROTOCOL.md#0xb0-gui_subagent_peek_transcript) |
+| `0xB1` | gui_act_menu | variable | Commit the shared action menu and its exact offer identity; see [GUI protocol](GUI_PROTOCOL.md#0xb1-gui_act_menu) |
+| `0xB2` | gui_file_location_action | variable | Run a validated Finder or Terminal action on macOS; see [GUI protocol](GUI_PROTOCOL.md#0xb2-gui_file_location_action) |
 
 ### BEAM → Frontend (Config Commands)
 

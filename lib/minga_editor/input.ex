@@ -15,6 +15,7 @@ defmodule MingaEditor.Input do
   """
 
   alias MingaEditor.Input.AgentHelp
+  alias MingaEditor.Input.ActMenu
   alias MingaEditor.Input.AgentNav
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.BottomPanel
@@ -97,6 +98,7 @@ defmodule MingaEditor.Input do
     [
       Interrupt,
       ConflictPrompt,
+      ActMenu,
       InlineEdit,
       InlineAsk,
       Completion,

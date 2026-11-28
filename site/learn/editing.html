@@ -589,6 +589,7 @@
           <li><strong>Inside a file, Vim keys keep their Vim meaning.</strong> <kbd>j</kbd> moves down, <kbd>w</kbd> jumps a word, <kbd>i</kbd> lets you type, <kbd>u</kbd> undoes and <kbd>q</kbd> records a macro. Minga never takes a letter away from Vim inside your text, which is why its own commands start with <kbd>SPC</kbd>.</li>
         </ul>
 
+        <p class="lk-takeaway">To see actions for what you are pointing at, right-click. From Normal mode press <kbd>g.</kbd>; in Insert mode or a picker press <kbd>Ctrl</kbd>+<kbd>.</kbd>. On a Minga change, the same menu lets you show its diff, keep it, or reject it.</p>
         <p class="lk-takeaway">Backing out is as simple: <kbd>esc</kbd> closes any menu, list or prompt you opened. In Minga's own read-only views, such as the task list, letters are not text, so <kbd>q</kbd> closes the view there.</p>
         <p class="lk-takeaway">The rest of the keys are in the <a href="/docs/design-keys.html">v0.1.0 key plan</a>. It is the plan for v0.1.0, not the keys of today's build. If you prefer desktop shortcuts to Vim keys, add <code>set :editing_model, :cua</code> to your config file; that option is in today's build, and <a href="/docs/configuration.html">Configuration</a> shows where the line goes.</p>
         <p class="lk-takeaway">What you can do differently: stop keeping a list of shortcuts. When you want a command, press <kbd>SPC</kbd> and read. The keys you use every day will stick on their own, and then you type them straight through and the menu never appears.</p>

@@ -1674,7 +1674,7 @@ struct PickerOverlayActivationTests {
         state.update(
             visible: true, selectedIndex: 0, filteredCount: 0, totalCount: 0,
             markedCount: 0, title: "Find File", query: "", hasPreview: false,
-            rawItems: [], actionMenu: nil, loadStatus: .loading
+            rawItems: [], loadStatus: .loading
         )
         let loadingBody = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1690,7 +1690,7 @@ struct PickerOverlayActivationTests {
             rawItems: [
                 Wire.PickerItem(iconColor: 0, flags: 0, label: "Last readable page", description: "", annotation: "", matchPositions: [], activationID: 41),
             ],
-            actionMenu: nil, loadStatus: .error("permission denied"), activationGeneration: 99
+            loadStatus: .error("permission denied"), activationGeneration: 99
         )
         let errorBody = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1715,7 +1715,7 @@ struct PickerOverlayActivationTests {
             rawItems: [
                 Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41, status: "Ready · 70%", statusTone: .ready),
             ],
-            actionMenu: nil, activationGeneration: 99
+            activationGeneration: 99
         )
         #expect(state.items[0].stacksDescription)
         let body = try PickerOverlay(state: state, sendAction: nil)
@@ -1737,7 +1737,7 @@ struct PickerOverlayActivationTests {
             visible: true, selectedIndex: 1, filteredCount: 2, totalCount: 2,
             markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
             rawItems: [model, file],
-            actionMenu: nil, activationGeneration: 99
+            activationGeneration: 99
         )
         let body = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1781,7 +1781,7 @@ struct PickerOverlayActivationTests {
         state.update(
             visible: true, selectedIndex: 0, filteredCount: 3, totalCount: 3,
             markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
-            rawItems: rows, actionMenu: nil, activationGeneration: 99
+            rawItems: rows, activationGeneration: 99
         )
         let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
@@ -1820,7 +1820,7 @@ struct PickerOverlayActivationTests {
             rawItems: [
                 Wire.PickerItem(iconColor: 0, flags: 0x02, label: "Selected", description: "lib/selected.ex", annotation: "", matchPositions: [], activationID: 41),
             ],
-            actionMenu: nil, activationGeneration: 99
+            activationGeneration: 99
         )
         let body = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1837,7 +1837,7 @@ struct PickerOverlayActivationTests {
             rawItems: [
                 Wire.PickerItem(iconColor: 0, flags: 0, label: "Unavailable", description: "", annotation: "", matchPositions: [], activationID: 0),
             ],
-            actionMenu: nil, activationGeneration: 0
+            activationGeneration: 0
         )
         let unavailableBody = try PickerOverlay(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
@@ -1859,7 +1859,7 @@ struct PickerOverlayActivationTests {
                 Wire.PickerItem(iconColor: 0, flags: 0, label: "First", description: "", annotation: "", matchPositions: [], activationID: 41),
                 Wire.PickerItem(iconColor: 0, flags: 0, label: "Second", description: "", annotation: "", matchPositions: [], activationID: 73),
             ],
-            actionMenu: nil, activationGeneration: 99
+            activationGeneration: 99
         )
         let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
@@ -1869,38 +1869,11 @@ struct PickerOverlayActivationTests {
             visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
             markedCount: 0, title: "Test", query: "third", hasPreview: false,
             rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "Third", description: "", annotation: "", matchPositions: [], activationID: 5)],
-            actionMenu: nil, activationGeneration: 100
+            activationGeneration: 100
         )
         try second.tap()
 
         #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 1, generation: 99, itemID: Data([0, 0, 0, 73]))])
-    }
-
-    @Test("a retained Actions entry reports its original offered identity")
-    @MainActor func retainedActionActivation() throws {
-        let spy = SpyEncoder()
-        let state = PickerState()
-        state.update(
-            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
-            markedCount: 0, title: "Test", query: "", hasPreview: false,
-            rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "File", description: "", annotation: "", matchPositions: [], activationID: 1)],
-            actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Delete"], activationIDs: [11, 27]),
-            activationGeneration: 101
-        )
-        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
-        let buttons = try sut.inspect().findAll(ViewType.Button.self)
-        let delete = try #require(buttons.first { (try? $0.accessibilityLabel().string()) == "Delete" })
-
-        state.update(
-            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
-            markedCount: 0, title: "Test", query: "", hasPreview: false,
-            rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "File", description: "", annotation: "", matchPositions: [], activationID: 2)],
-            actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Delete"], activationIDs: [12, 28]),
-            activationGeneration: 102
-        )
-        try delete.tap()
-
-        #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 2, generation: 101, itemID: Data([0, 0, 0, 27]))])
     }
 }
 

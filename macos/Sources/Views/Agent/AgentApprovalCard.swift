@@ -6,6 +6,7 @@ public struct AgentApprovalCard: View {
         case trustSession(sessionId: String, requestId: String, toolCallId: String)
         case trustTurn(sessionId: String, requestId: String, toolCallId: String)
         case deny(sessionId: String, requestId: String, toolCallId: String)
+        case openActMenu(sessionId: String, requestId: String, toolCallId: String)
     }
 
     public init(name: String, summary: String, toolCallId: String, sessionId: String, requestId: String, previewKind: UInt8, previewLines: [String], sendAction: ViewActionHandler<Action>?) {
@@ -108,6 +109,16 @@ public struct AgentApprovalCard: View {
             }
         }
         .controlSize(.small)
+        .contentShape(Rectangle())
+        .overlay {
+            SecondaryClick {
+                sendAction?(.openActMenu(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+            }
+            .accessibilityHidden(true)
+        }
+        .accessibilityAction(named: Text("Show Approval Actions")) {
+            sendAction?(.openActMenu(sessionId: sessionId, requestId: requestId, toolCallId: toolCallId))
+        }
     }
 
     @ViewBuilder

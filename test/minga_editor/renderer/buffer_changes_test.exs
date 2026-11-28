@@ -175,6 +175,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
 
     assert Map.keys(Map.from_struct(bounded.frame)) |> Enum.sort() ==
              [
+               :act_menu,
                :backend,
                :capabilities,
                :cursor_animate,

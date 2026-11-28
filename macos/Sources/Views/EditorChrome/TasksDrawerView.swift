@@ -11,6 +11,7 @@ public struct TasksDrawerView: View {
     public enum Action: Equatable, Sendable {
         /// `select`, an approval key (`y`, `a`, `t`, `n`), or `q` with an empty row id to close the drawer.
         case rowAction(rowID: String, action: String)
+        case openActMenu(rowID: String)
         /// An empty state's next step: the command its action names.
         case runCommand(name: String)
     }
@@ -288,6 +289,10 @@ struct TasksDrawerRowView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { sendAction?(.rowAction(rowID: row.id, action: "select")) }
+        .overlay {
+            SecondaryClick { sendAction?(.openActMenu(rowID: row.id)) }.accessibilityHidden(true)
+        }
+        .accessibilityAction(named: Text("Show Actions")) { sendAction?(.openActMenu(rowID: row.id)) }
         .anatomyPart("listRow")
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.title), \(row.words), \(row.age)")

@@ -1,0 +1,278 @@
+{
+ "authorship": [
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  }
+ ],
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule UsageLimit do\n  def label, do: \"Your plan limit applies\"\n  def window, do: 60\n  def retry?, do: false\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    348,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    138,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.act_menu.filtered"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    449,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    477,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    240,
+    107.5,
+    420,
+    110
+   ],
+   "part": "actMenu.panel"
+  },
+  {
+   "baseline": 133,
+   "frame": [
+    252,
+    119.5,
+    258,
+    17
+   ],
+   "part": "actMenu.title",
+   "text": "\u25cb Minga\u2019s change \u00b7 1 line \u00b7 unreviewed"
+  },
+  {
+   "baseline": 151,
+   "frame": [
+    252,
+    140.5,
+    96,
+    14
+   ],
+   "part": "actMenu.filter",
+   "text": "\u203a conversation"
+  },
+  {
+   "baseline": 182,
+   "frame": [
+    252,
+    172.5,
+    61,
+    13
+   ],
+   "part": "actMenu.section",
+   "text": "This change"
+  },
+  {
+   "frame": [
+    240,
+    189.5,
+    420,
+    24
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 205.5,
+   "frame": [
+    282,
+    194,
+    109,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Open conversation"
+  },
+  {
+   "baseline": 205.5,
+   "frame": [
+    252,
+    195,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "o"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    904,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    904,
+    86,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex \u25cf"
+  },
+  {
+   "frame": [
+    169,
+    904,
+    56,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "change: change 1/1"
+  },
+  {
+   "frame": [
+    1377,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1411,
+    904,
+    23,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 2:19"
+  },
+  {
+   "frame": [
+    6,
+    907,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 919.5,
+   "frame": [
+    12,
+    909,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.act_menu.filtered",
+ "size": "1440",
+ "theme": "astrodark",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

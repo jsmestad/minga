@@ -94,6 +94,30 @@ struct EditorFocusPolicyTests {
         )
     }
 
+    @Test("Act menu hands focus back to the same picker or Find field without changing its query")
+    func actMenuReclaimsAndReturnsQueryFocus() throws {
+        let targets: [(Wire.FocusOwner.Responder, UInt8)] = [(.pickerQuery, 8), (.searchQuery, 11)]
+        for (kind, surface) in targets {
+            let fixture = Fixture()
+            defer { fixture.close() }
+            let field = kind == .pickerQuery ? fixture.picker : fixture.search
+            let originalOwner = owner(kind, surface: surface)
+            field.stringValue = "notes"
+            fixture.policy.register(field, as: kind)
+            fixture.policy.focusOwnerDidChange(originalOwner)
+            try #require(fixture.hasFocus(field))
+            try #require(fixture.window.firstResponder is NSText)
+
+            fixture.policy.focusOwnerDidChange(owner(.editorView, surface: Wire.FocusOwner.actMenuSurface))
+            #expect(fixture.hasFocus(fixture.editor))
+            #expect(!fixture.policy.pendingOwnerApply)
+
+            fixture.policy.focusOwnerDidChange(originalOwner)
+            #expect(fixture.hasFocus(field))
+            #expect(field.stringValue == "notes")
+        }
+    }
+
     @Test("dismantling a modeled text field ends its native editor and applies the pending owner")
     func dismantlingFieldAppliesPendingOwner() async throws {
         for kind in [Wire.FocusOwner.Responder.pickerQuery, .searchQuery, .inlineEdit] {
@@ -404,7 +428,7 @@ struct EditorFocusPolicyTests {
                 case .pickerQuery:
                     PickerQueryField(
                         authoritativeText: text, generation: 1, acknowledgedEditSequence: 0,
-                        placeholder: "Query", isEditable: true, style: style, sendAction: { _ in }
+                        placeholder: "Query", style: style, sendAction: { _ in }
                     )
                 case .searchQuery:
                     SearchQueryField(searchState: searchState, style: style, sendAction: { _ in })

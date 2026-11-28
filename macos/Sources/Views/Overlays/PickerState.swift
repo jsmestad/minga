@@ -93,30 +93,6 @@ public struct PickerItem: Identifiable {
     }
 }
 
-public struct PickerActionEntry: Identifiable {
-    public init(id: Int, label: String, activation: PickerActivationIdentity) {
-        self.id = id
-        self.label = label
-        self.activation = activation
-    }
-
-    public let id: Int
-    public let label: String
-    public let activation: PickerActivationIdentity
-}
-
-/// Action menu state for the picker (the ⌃. act menu).
-public struct PickerActionMenu {
-    public init(selectedIndex: Int, entries: [PickerActionEntry]) {
-        self.selectedIndex = selectedIndex
-        self.entries = entries
-    }
-
-    public let selectedIndex: Int
-    public let entries: [PickerActionEntry]
-    public var actions: [String] { entries.map(\.label) }
-}
-
 /// A line of preview content with styled segments.
 public struct PreviewLine: Identifiable {
     public init(id: Int, segments: [PreviewSegment]) {
@@ -142,7 +118,7 @@ public struct PreviewSegment: Identifiable {
 
 @Observable
 public final class PickerState {
-    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {
+    public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {
         self.localPresentationStore = localPresentationStore
         self.visible = visible
         self.selectedIndex = selectedIndex
@@ -159,7 +135,6 @@ public final class PickerState {
         self.loadStatus = loadStatus
         self.items = items
         self.previewLines = previewLines
-        self.actionMenu = actionMenu
         self.activationGeneration = items.first?.activation.generation ?? 0
     }
     @ObservationIgnored private let localPresentationStore: LocalPresentationStore
@@ -186,7 +161,6 @@ public final class PickerState {
     public var loadStatus: Wire.PickerLoadStatus = .ready
     public var items: [PickerItem] = []
     public var previewLines: [PreviewLine] = []
-    public var actionMenu: PickerActionMenu? = nil
     /// Set while the picker offers its source's next steps instead of results: the header says what happened and why, and `items` are the next-step rows.
     public var empty: Wire.EmptyList? = nil
     /// True while the picker has nothing to filter: it takes no text, so the query field steps aside and the editor view's keys (j and k move, q closes) reach the picker.
@@ -196,7 +170,7 @@ public final class PickerState {
     /// The footer's key hints of an empty picker, resolved by the BEAM from the live keymap.
     public var hints: [Wire.KeyHint] = []
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = []) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = []) {
         self.visible = visible
         self.empty = empty
         self.listKeys = listKeys
@@ -236,29 +210,11 @@ public final class PickerState {
         self.selectedIndex = min(Int(selectedIndex), max(nextItems.count - 1, 0))
         let selectedActivationID = nextItems[safe: self.selectedIndex]?.activation.activationID ?? 0
         let retainedIDs = Set(nextItems.map { String($0.activation.activationID) })
-        // An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
-        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible && actionMenu == nil)
+        let effectiveID = localPresentationStore.reconcile(surface: .picker, generation: activationGeneration, committedItemID: String(selectedActivationID), retainedItemIDs: retainedIDs, visible: visible)
         self.previewSelectedIndex = nextItems.firstIndex(where: { String($0.activation.activationID) == effectiveID }).flatMap { $0 == self.selectedIndex ? nil : $0 }
-        if let am = actionMenu {
-            self.actionMenu = PickerActionMenu(
-                selectedIndex: Int(am.selectedIndex),
-                entries: am.actions.enumerated().map { index, label in
-                    PickerActionEntry(
-                        id: index,
-                        label: label,
-                        activation: PickerActivationIdentity(
-                            generation: activationGeneration,
-                            activationID: index < am.activationIDs.count ? am.activationIDs[index] : 0
-                        )
-                    )
-                }
-            )
-        } else {
-            self.actionMenu = nil
-        }
     }
 
-    public func updateSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32) {
+    public func updateSelection(generation: UInt32, selectedItemID: UInt32) {
         guard generation == activationGeneration else {
             localPresentationStore.discard(.picker)
             previewSelectedIndex = nil
@@ -273,10 +229,12 @@ public final class PickerState {
             localPresentationStore.discard(.picker)
             previewSelectedIndex = nil
         }
-        if let menu = actionMenu,
-           let actionIndex = menu.entries.firstIndex(where: { $0.activation.activationID == selectedActionID }) {
-            actionMenu = PickerActionMenu(selectedIndex: actionIndex, entries: menu.entries)
-        }
+    }
+
+    /// Drops any optimistic list move made before the shared menu took keyboard ownership.
+    public func discardNavigationPreview() {
+        localPresentationStore.discard(.picker)
+        previewSelectedIndex = nil
     }
 
     public func updatePreview(lines: [Wire.PickerPreviewLine]) {
@@ -305,8 +263,7 @@ public final class PickerState {
     }
 
     public func previewNavigation(delta: Int) -> Bool {
-        // The open act menu owns the list keys; the picker's highlighted row stays where it is.
-        guard visible, actionMenu == nil, !items.isEmpty else { return false }
+        guard visible, !items.isEmpty else { return false }
         let current = previewSelectedIndex ?? selectedIndex
         let next = previewTarget(from: current, delta: delta)
         guard next != current else { return false }
@@ -346,7 +303,6 @@ public final class PickerState {
         listKeys = false
         hints = []
         loadStatus = .ready
-        actionMenu = nil
         movementKeys = []
     }
 }

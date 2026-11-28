@@ -295,38 +295,6 @@ func TestDecodePickerHeaderOmitsTitleAndMarkedCount(t *testing.T) {
 	}
 }
 
-func TestDecodeActionMenuStringActions(t *testing.T) {
-	bytes := []byte{1, 1, 2, 0, 4, 'O', 'p', 'e', 'n', 0, 6, 'D', 'e', 'l', 'e', 't', 'e', 2, 0, 0, 0, 29, 0, 0, 0, 31}
-	m, consumed, err := generated.DecodeGuiPickerActionMenu(bytes, 0, len(bytes))
-	if err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if consumed != len(bytes) {
-		t.Fatalf("consumed %d, want %d", consumed, len(bytes))
-	}
-	if m.Visible != 1 || m.SelectedIndex != 1 || !reflect.DeepEqual(m.Actions, []string{"Open", "Delete"}) {
-		t.Fatalf("action menu mismatch: %+v", m)
-	}
-	if !reflect.DeepEqual(m.ActivationIds, []uint32{29, 31}) {
-		t.Fatalf("activation_ids: %v", m.ActivationIds)
-	}
-}
-
-func TestDecodeActionMenuEmptyActions(t *testing.T) {
-	// visible with zero actions: the []string tail is present but empty.
-	m, consumed, err := generated.DecodeGuiPickerActionMenu([]byte{1, 5, 0, 0}, 0, 4)
-	if err != nil || consumed != 4 || m.Visible != 1 || m.SelectedIndex != 5 || len(m.Actions) != 0 || len(m.ActivationIds) != 0 {
-		t.Fatalf("empty action menu: m=%+v consumed=%d err=%v", m, consumed, err)
-	}
-}
-
-func TestDecodeHiddenActionMenuSkipsTail(t *testing.T) {
-	m, consumed, err := generated.DecodeGuiPickerActionMenu([]byte{0}, 0, 1)
-	if err != nil || consumed != 1 || m.Visible != 0 || len(m.Actions) != 0 {
-		t.Fatalf("hidden action menu: m=%+v consumed=%d err=%v", m, consumed, err)
-	}
-}
-
 func TestDecodeLoadStatusErrorTail(t *testing.T) {
 	s, consumed, err := generated.DecodeGuiPickerLoadStatus([]byte{2, 0, 4, 'b', 'o', 'o', 'm'}, 0, 7)
 	if err != nil || consumed != 7 || s.Status != 2 || s.Message != "boom" {

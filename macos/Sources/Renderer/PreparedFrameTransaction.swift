@@ -34,7 +34,7 @@ extension GUIFrameImpact {
             return .editorOverlay
 
         case .guiWhichKey, .guiPicker, .guiPickerSelection, .guiPickerPreview,
-             .guiFloatPopup, .guiNotifications, .guiExtensionRuntime, .protocolError:
+             .guiActMenu, .guiFloatPopup, .guiNotifications, .guiExtensionRuntime, .protocolError:
             return .windowOverlay
 
         case .guiTabBar, .guiFileTree, .guiFileTreeSelection, .guiObservatory,
@@ -52,7 +52,7 @@ extension GUIFrameImpact {
              .clipboardWrite, .guiConfigState, .guiMenuBar, .guiFocusOwner:
             return []
 
-        case .applicationQuitResponse, .agentDesktopNotification, .guiRequest:
+        case .applicationQuitResponse, .agentDesktopNotification, .guiRequest, .guiFileLocationAction:
             return []
         }
     }
@@ -584,7 +584,7 @@ struct PreparedFrameTransactionBuilder {
             )
 
         case .guiCompletion, .guiCompletionSelection, .guiWhichKey, .guiPicker,
-             .guiPickerSelection, .guiPickerPreview,
+             .guiPickerSelection, .guiPickerPreview, .guiActMenu,
              .guiAgentChat, .guiAgentQueue, .guiAgentHelp, .guiMinibuffer, .guiHoverPopup, .guiHoverAction,
              .guiSignatureHelp, .guiFloatPopup, .guiExtensionOverlay,
              .guiSearchState, .guiEmptyState, .protocolError:
@@ -641,7 +641,7 @@ struct PreparedFrameTransactionBuilder {
             )
 
         case .beginFrame, .commitFrame, .presentationOperation, .applicationQuitResponse,
-             .agentDesktopNotification, .guiRequest:
+             .agentDesktopNotification, .guiRequest, .guiFileLocationAction:
             break
         }
     }
@@ -1188,6 +1188,8 @@ private extension RenderCommand {
         case .guiAgentQueue: 69
         case .guiSubagentPeek: 70
         case .guiSubagentPeekTranscript: 71
+        case .guiActMenu: 72
+        case .guiFileLocationAction: 73
         }
     }
 }

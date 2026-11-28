@@ -24,7 +24,7 @@ defmodule Minga.Keymap.NormalPrefixes do
     {~k(g c), :enter_comment_operator, "Comment operator"},
     {~k(g d), :goto_definition, "Go to definition"},
     {~k(g r), :find_references, "Find references"},
-    {~k(g .), :code_action, "Code actions"},
+    {~k(g .), :act_menu, "Act on the current target"},
     {~k(g y), :goto_type_definition, "Go to type definition"},
     {~k(g i), :goto_implementation, "Go to implementation"},
     {~k(g j), :move_logical_down, "Logical line down"},

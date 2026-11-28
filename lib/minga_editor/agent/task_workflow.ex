@@ -110,6 +110,21 @@ defmodule MingaEditor.Agent.TaskWorkflow do
     end
   end
 
+  @doc "Answers only the exact pending request captured by a task menu."
+  @spec answer_presented(EditorState.t(), pid(), MingaAgent.ToolApproval.Target.t(), decision()) ::
+          EditorState.t()
+  def answer_presented(%EditorState{} = state, session, target, decision) do
+    case Tasks.approval(state.agent_connection.tasks, session) do
+      %PendingApproval{approval: %PublicApproval{target: ^target}} ->
+        session
+        |> AgentSession.respond_to_approval_pid(target, decision)
+        |> answered(state, session, target)
+
+      _changed ->
+        NoticeWorkflow.publish(state, @already_answered)
+    end
+  end
+
   @spec answered(
           :ok | {:error, term()},
           EditorState.t(),

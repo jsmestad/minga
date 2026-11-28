@@ -2473,6 +2473,7 @@ defmodule MingaEditor.Renderer.ServerTest do
         surface: :editor,
         window_id: 1
       },
+      act_menu: :hidden,
       diff_views: %{},
       git_syncing: false,
       status_bar_data: nil,

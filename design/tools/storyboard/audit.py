@@ -308,23 +308,75 @@ def queue_header(audit, frame, parts, mac):
         audit.flag(frame, "queue.summary", "header line", "on the title's row", summary)
 
 
-def tui_contrast(audit, frame, path):
+ACT_MENU_SCENARIOS = {"minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"}
+ACT_MENU_RULES = frozenset("╭╮╰╯─│├┤")
+
+
+def act_menu(audit, frame, parts, samples, mac):
+    panels = by_part(parts, "actMenu.panel")
+    if not panels and frame["scenario"] not in ACT_MENU_SCENARIOS:
+        return None
+    if len(panels) != 1 or not all(value > 0 for value in panels[0]["frame"][2:]):
+        audit.flag(frame, "actMenu.panel", "panel measured", "one visible menu", len(panels))
+        return None
+    panel = panels[0]["frame"]
+    if not mac:
+        return panel
+
+    for name in ("actMenu.title", "actMenu.filter", "actMenu.label"):
+        if not by_part(parts, name):
+            audit.flag(frame, name, "part located", "visible menu text", "none")
+    measured = {(s["part"], s["text"]) for s in samples if s.get("inks")}
+    for part in parts:
+        name, text = part["part"], part.get("text")
+        if name.startswith("actMenu.") and text and (name, text) not in measured:
+            audit.flag(frame, name, "pixels sampled", "visible text ink", text)
+
+    if frame["scenario"] in ACT_MENU_SCENARIOS - {"minga.act_menu.filtered"}:
+        decisions = [p["frame"] for p in by_part(parts, "actMenu.decision")]
+        if len(decisions) != 2 or any(abs(a - b) > MAC_TOLERANCE
+                                       for a, b in zip(decisions[0][1:], decisions[1][1:])):
+            audit.flag(frame, "actMenu.decision", "aligned decisions", "two equal boxes on the same top edge", decisions)
+    return panel
+
+
+def contrast_spans(row, first, last, panel):
+    if panel:
+        x, y, width, height = panel
+        end = x + width
+        if y <= row < y + height and first < end and last >= x:
+            if first < x:
+                yield first, x - 1, False
+            yield max(first, x), min(last, end - 1), True
+            if last >= end:
+                yield end, last, False
+            return
+    yield first, last, False
+
+
+def tui_run_contrast(audit, frame, row, chars, fg, bg, attrs, inside):
+    if not chars:
+        return
+    ink = faint(fg, bg) if "faint" in attrs.split(",") else fg
+    glyph_only = all(c in ACT_MENU_RULES for c in chars) if inside else all(GLYPH.match(c) for c in chars)
+    target = audit.scale.glyph_contrast if glyph_only else audit.scale.text_contrast
+    ratio = contrast(ink, bg)
+    if ratio < target:
+        part = ("glyph" if glyph_only else "text")
+        audit.flag(frame, f"actMenu.{part}" if inside else part, "contrast", target,
+                   f"{ratio} ('{chars[:12]}' at row {row})", pair=f"{ink} on {bg}")
+
+
+def tui_contrast(audit, frame, path, panel=None):
     from renders import parse_tui  # noqa: E402
 
     (_, _), rows, styles = parse_tui(path)
     for row, runs in styles.items():
         row_cells = cells(rows[row]) if row < len(rows) else []
         for start, end, fg, bg, attrs in runs:
-            chars = "".join(row_cells[start:end + 1]).strip()
-            if not chars:
-                continue
-            ink = faint(fg, bg) if "faint" in attrs.split(",") else fg
-            glyph_only = all(GLYPH.match(c) for c in chars)
-            target = audit.scale.glyph_contrast if glyph_only else audit.scale.text_contrast
-            ratio = contrast(ink, bg)
-            if ratio < target:
-                audit.flag(frame, "text" if not glyph_only else "glyph", "contrast", target,
-                           f"{ratio} ('{chars[:12]}' at row {row})", pair=f"{ink} on {bg}")
+            for first, last, inside in contrast_spans(row, start, end, panel):
+                chars = "".join(row_cells[first:last + 1]).strip()
+                tui_run_contrast(audit, frame, row, chars, fg, bg, attrs, inside)
 
 
 def mac_contrast(audit, frame, export):
@@ -442,10 +494,11 @@ def run_audit(out, frontends):
             which_key(audit, frame, parts, mac)
             modeline(audit, frame, parts, mac)
             queue_header(audit, frame, parts, mac)
+            panel = act_menu(audit, frame, parts, export.get("samples", []), mac)
             if mac:
                 mac_contrast(audit, frame, export)
             else:
-                tui_contrast(audit, frame, path.with_name(path.name.replace(".parts.json", ".txt")))
+                tui_contrast(audit, frame, path.with_name(path.name.replace(".parts.json", ".txt")), panel)
     same_component(audit)
     return audit.findings
 

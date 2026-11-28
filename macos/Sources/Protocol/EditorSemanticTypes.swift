@@ -223,3 +223,68 @@ public struct StatusBarFlags: OptionSet, Sendable {
     /// Bits not understood by this frontend version.
     public var unknownBits: UInt8 { rawValue & ~Self.knownMask.rawValue }
 }
+
+/// The BEAM-owned menu projected by the frontend; a nil command payload clears it.
+extension Wire {
+    public struct ActMenu: Sendable, Equatable {
+        public enum Role: UInt8, Sendable {
+            case neutral, minga, failure
+        }
+
+        public enum Anchor: Sendable, Equatable {
+            case centered
+            case caret
+            case grid(row: UInt16, column: UInt16)
+        }
+
+        public struct Row: Sendable, Equatable, Identifiable {
+            public let id: UInt16
+            public let key: String
+            public let label: String
+            public let hint: String
+            public let detail: String
+            public let section: String
+            public let destructive: Bool
+
+            public init(id: UInt16, key: String, label: String, hint: String, detail: String, section: String, destructive: Bool) {
+                self.id = id
+                self.key = key
+                self.label = label
+                self.hint = hint
+                self.detail = detail
+                self.section = section
+                self.destructive = destructive
+            }
+        }
+
+        public let offerID: UInt64
+        public let role: Role
+        public let anchor: Anchor
+        public let selectedID: UInt16
+        public let title: String
+        public let query: String
+        public let lead: [Row]
+        public let rows: [Row]
+
+        public init(offerID: UInt64, role: Role, anchorRow: UInt16, anchorColumn: UInt16, selectedID: UInt16, title: String, query: String, lead: [Row], rows: [Row]) {
+            self.offerID = offerID
+            self.role = role
+            switch (anchorRow, anchorColumn) {
+            case (0xFFFF, 0xFFFF): anchor = .centered
+            case (0xFFFE, 0xFFFE): anchor = .caret
+            default: anchor = .grid(row: anchorRow, column: anchorColumn)
+            }
+            self.selectedID = selectedID
+            self.title = title
+            self.query = query
+            self.lead = lead
+            self.rows = rows
+        }
+    }
+}
+
+public extension Wire.FocusOwner {
+    /// The shared menu uses the editor responder, not a native query field.
+    static let actMenuSurface: UInt8 = 16
+    var ownsActMenu: Bool { surface == Self.actMenuSurface }
+}

@@ -44,24 +44,29 @@ func zoneIDAgentApproval(target protocol.AgentApprovalTarget, decision generated
 }
 
 func agentApprovalZonePacket(id string) []byte {
+	target, decision := agentApprovalZoneTarget(id)
+	return protocol.EncodeGUIAgentToolApproval(target, decision)
+}
+
+func agentApprovalZoneTarget(id string) (protocol.AgentApprovalTarget, generated.AgentApprovalDecision) {
 	parts := strings.Split(strings.TrimPrefix(id, zonePrefixAgentApproval), ":")
 	if !strings.HasPrefix(id, zonePrefixAgentApproval) || len(parts) != 4 {
-		return nil
+		return protocol.AgentApprovalTarget{}, 0
 	}
 	decision, err := strconv.ParseUint(parts[0], 10, 8)
 	if err != nil {
-		return nil
+		return protocol.AgentApprovalTarget{}, 0
 	}
 	var ids [3]string
 	for index := range ids {
 		ids[index], err = url.QueryUnescape(parts[index+1])
 		if err != nil {
-			return nil
+			return protocol.AgentApprovalTarget{}, 0
 		}
 	}
-	return protocol.EncodeGUIAgentToolApproval(protocol.AgentApprovalTarget{
+	return protocol.AgentApprovalTarget{
 		SessionID: ids[0], RequestID: ids[1], ToolCallID: ids[2],
-	}, generated.AgentApprovalDecision(decision))
+	}, generated.AgentApprovalDecision(decision)
 }
 
 func agentRetainedOutputZonePacket(id string) []byte {

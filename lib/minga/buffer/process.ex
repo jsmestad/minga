@@ -127,6 +127,7 @@ defmodule Minga.Buffer.Process do
           UndoHistory.review_selection()
           | {:lines, review_lines(), :current | non_neg_integer()}
           | {:cursor, pos_integer()}
+          | {:presented_ribbon, Minga.Buffer.RendererConsume.review_lease(), ReviewRibbon.head()}
           | {:visual, :char | :line, Document.position(), Document.position(), non_neg_integer()}
   @type review_selection_error :: :invalid_range | :stale_selection
   @type listing_info :: %{
@@ -1314,8 +1315,16 @@ defmodule Minga.Buffer.Process do
           | :empty
           | {:error, review_selection_error()}
   def prepare_review(server, selection) do
-    GenServer.call(server, {:prepare_review, selection})
+    GenServer.call(server, {:prepare_review, selection, :target_only})
   end
+
+  @doc "Prepares a decision with its source extent and the visible ribbon count for a visual selection."
+  @spec prepare_review_with_extent(GenServer.server(), review_selection()) ::
+          {:ok, review_target(), UndoHistory.review_scope(), pos_integer(), ReviewRibbon.extent()}
+          | :empty
+          | {:error, review_selection_error()}
+  def prepare_review_with_extent(server, selection),
+    do: GenServer.call(server, {:prepare_review, selection, :with_extent})
 
   @doc "Keeps the prepared units, or rejects all of them without dropping other history."
   @spec decide_review(
@@ -1337,6 +1346,12 @@ defmodule Minga.Buffer.Process do
   @spec preview_review(GenServer.server(), review_target()) ::
           {:ok, String.t(), String.t()} | UndoHistory.blocked() | {:error, review_error()}
   def preview_review(server, target), do: GenServer.call(server, {:preview_review, target})
+
+  @doc "Checks that a preview's exact history and document version are still current."
+  @spec review_offer_current(GenServer.server(), non_neg_integer(), review_target()) ::
+          :ok | :stale
+  def review_offer_current(server, version, target),
+    do: GenServer.call(server, {:review_offer_current, version, target})
 
   @doc "Moves to the current position of the same pending task unit, not its old coordinates."
   @spec move_to_review_unit(GenServer.server(), UndoHistory.review_location()) ::
@@ -2883,54 +2898,8 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:prepare_review, {:lines, lines, expected}}, _from, state) do
-    if expected == :current or expected == BufState.version(state) do
-      case prepare_review_lines(state, lines) do
-        {:error, :invalid_range} = error -> {:reply, error, state}
-        prepared -> reply_prepared_review(state, prepared)
-      end
-    else
-      {:reply, {:error, :stale_selection}, state}
-    end
-  end
-
-  def handle_call({:prepare_review, {:cursor, count}}, _from, state) do
-    document = state.document
-
-    prepared =
-      ReviewRibbon.prepare(state.undo_history, document, Document.cursor_offset(document), count)
-
-    reply_prepared_review(state, prepared)
-  end
-
-  def handle_call({:prepare_review, {:visual, kind, anchor, cursor, version}}, _from, state) do
-    if version == BufState.version(state) do
-      prepared =
-        case kind do
-          :line ->
-            first = min(elem(anchor, 0), elem(cursor, 0))
-            last = max(elem(anchor, 0), elem(cursor, 0))
-            prepare_review_lines(state, {first, last})
-
-          :char ->
-            document = state.document
-
-            %{span: %{start: first, stop: stop}} =
-              Selection.characterwise(document, anchor, cursor)
-
-            eof = Document.content_byte_size(document)
-            include_eof? = Position.point_for(document, max(anchor, cursor)) == eof
-            UndoHistory.prepare_review_range(state.undo_history, first, stop, include_eof?)
-        end
-
-      reply_prepared_review(state, prepared)
-    else
-      {:reply, {:error, :stale_selection}, state}
-    end
-  end
-
-  def handle_call({:prepare_review, selection}, _from, state) do
-    reply_prepared_review(state, UndoHistory.prepare_review(state.undo_history, selection))
+  def handle_call({:prepare_review, selection, detail}, _from, state) do
+    {:reply, prepare_review_offer(state, selection, detail), state}
   end
 
   def handle_call({:preview_review, {owner, target}}, _from, state) when owner == self() do
@@ -2945,6 +2914,18 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:preview_review, _target}, _from, state),
     do: {:reply, {:error, :stale_review}, state}
+
+  def handle_call({:review_offer_current, version, {owner, target}}, _from, state)
+      when owner == self() do
+    current? =
+      version == BufState.version(state) and
+        UndoHistory.current_review_offer?(state.undo_history, target)
+
+    {:reply, if(current?, do: :ok, else: :stale), state}
+  end
+
+  def handle_call({:review_offer_current, _version, _target}, _from, state),
+    do: {:reply, :stale, state}
 
   def handle_call({:decide_review, {owner, target}, :keep}, from, state) when owner == self(),
     do: admit_keep(state, target, from)
@@ -6350,20 +6331,108 @@ defmodule Minga.Buffer.Process do
   defp snapshot_lines(_document, _first_line, 0), do: []
   defp snapshot_lines(document, first_line, count), do: Lines.slice(document, first_line, count)
 
-  @spec reply_prepared_review(
-          state(),
-          {:ok, UndoHistory.review_target()} | :empty | {:error, :invalid_range}
-        ) ::
-          {:reply,
-           {:ok, review_target(), UndoHistory.review_scope(), pos_integer()}
-           | :empty
-           | {:error, :invalid_range}, state()}
-  defp reply_prepared_review(state, :empty), do: {:reply, :empty, state}
-  defp reply_prepared_review(state, {:error, :invalid_range} = error), do: {:reply, error, state}
+  @spec prepare_review_offer(state(), review_selection(), :target_only | :with_extent) ::
+          {:ok, review_target(), UndoHistory.review_scope(), pos_integer()}
+          | {:ok, review_target(), UndoHistory.review_scope(), pos_integer(),
+             ReviewRibbon.extent()}
+          | :empty
+          | {:error, review_selection_error()}
+  defp prepare_review_offer(state, {:visual, kind, anchor, cursor, version}, detail) do
+    if version == BufState.version(state) do
+      case visual_review_bounds(state.document, kind, anchor, cursor) do
+        {first, stop, include_eof?} = bounds ->
+          result = UndoHistory.prepare_review_range(state.undo_history, first, stop, include_eof?)
+          review_offer(state, result, detail, bounds)
 
-  defp reply_prepared_review(state, {:ok, target}) do
+        {:error, :invalid_range} = error ->
+          error
+      end
+    else
+      {:error, :stale_selection}
+    end
+  end
+
+  defp prepare_review_offer(state, selection, detail) do
+    review_offer(state, prepare_review_selection(state, selection), detail, nil)
+  end
+
+  @spec review_offer(
+          state(),
+          {:ok, UndoHistory.review_target()} | :empty | {:error, review_selection_error()},
+          :target_only | :with_extent,
+          {non_neg_integer(), non_neg_integer(), boolean()} | nil
+        ) ::
+          {:ok, review_target(), UndoHistory.review_scope(), pos_integer()}
+          | {:ok, review_target(), UndoHistory.review_scope(), pos_integer(),
+             ReviewRibbon.extent()}
+          | :empty
+          | {:error, review_selection_error()}
+  defp review_offer(state, {:ok, target}, :with_extent, bounds) do
+    {scope, unit_count} = UndoHistory.review_summary(target)
+
+    count =
+      if bounds,
+        do: length(ReviewRibbon.regions(state.undo_history, state.document, [bounds])),
+        else: unit_count
+
+    {:ok, sources} = UndoHistory.keep_sources(state.undo_history, target)
+    extent = ReviewRibbon.extent(state.document, sources)
+    {:ok, {self(), target}, scope, count, extent}
+  end
+
+  defp review_offer(_state, {:ok, target}, :target_only, _bounds) do
     {scope, count} = UndoHistory.review_summary(target)
-    {:reply, {:ok, {self(), target}, scope, count}, state}
+    {:ok, {self(), target}, scope, count}
+  end
+
+  defp review_offer(_state, result, _detail, _bounds), do: result
+
+  @spec prepare_review_selection(state(), review_selection()) ::
+          {:ok, UndoHistory.review_target()} | :empty | {:error, review_selection_error()}
+  defp prepare_review_selection(state, {:lines, lines, expected}) do
+    if expected == :current or expected == BufState.version(state),
+      do: prepare_review_lines(state, lines),
+      else: {:error, :stale_selection}
+  end
+
+  defp prepare_review_selection(state, {:cursor, count}) do
+    document = state.document
+    ReviewRibbon.prepare(state.undo_history, document, Document.cursor_offset(document), count)
+  end
+
+  defp prepare_review_selection(state, {:presented_ribbon, lease, head}) do
+    with ^lease <- renderer_review_lease(state),
+         {:ok, _target} = prepared <-
+           ReviewRibbon.prepare_presented(state.undo_history, state.document, head) do
+      prepared
+    else
+      _stale -> {:error, :stale_selection}
+    end
+  end
+
+  defp prepare_review_selection(state, selection),
+    do: UndoHistory.prepare_review(state.undo_history, selection)
+
+  @spec visual_review_bounds(
+          Document.t(),
+          :line | :char,
+          Document.position(),
+          Document.position()
+        ) ::
+          {non_neg_integer(), non_neg_integer(), boolean()} | {:error, :invalid_range}
+  defp visual_review_bounds(document, :line, {anchor_row, _}, {cursor_row, _}) do
+    first = min(anchor_row, cursor_row)
+    last = max(anchor_row, cursor_row)
+
+    if first >= 0 and last < Document.line_count(document),
+      do: ReviewRibbon.byte_bounds(document, first, last),
+      else: {:error, :invalid_range}
+  end
+
+  defp visual_review_bounds(document, :char, anchor, cursor) do
+    %{span: %{start: first, stop: stop}} = Selection.characterwise(document, anchor, cursor)
+    eof = Document.content_byte_size(document)
+    {first, stop, Position.point_for(document, max(anchor, cursor)) == eof}
   end
 
   @spec prepare_review_lines(state(), review_lines()) ::

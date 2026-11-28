@@ -25,6 +25,7 @@ const (
 	tasksDrawerRowFlagLast     = 0x01
 	tasksDrawerRowFlagSelected = 0x02
 	tasksDrawerCloseZone       = "tasks-drawer-close"
+	tasksDrawerLayerZ          = 2
 )
 
 func zoneIDTasksDrawerRow(id string) string { return "tasks-drawer-row:" + id }
@@ -51,7 +52,7 @@ func (m Model) tasksDrawerLayer() *lipgloss.Layer {
 		return nil
 	}
 	content := m.zones.ScanInto(strings.Join(m.renderTasksDrawer(drawer, rect.Width, rect.Height), "\n"), rect.X, rect.Y)
-	return lipgloss.NewLayer(content).X(rect.X).Y(rect.Y).Z(2)
+	return lipgloss.NewLayer(content).X(rect.X).Y(rect.Y).Z(tasksDrawerLayerZ)
 }
 
 func (m Model) renderTasksDrawer(drawer generated.GuiTasksDrawerFields, width, height int) []string {
@@ -413,6 +414,28 @@ func (m Model) tasksDrawerMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 		}
 	}
 	return protocol.EncodeGUITasksDrawerAction("", "focus"), true
+}
+
+func (m Model) appendTasksActMenuHits(hits []actMenuChromeHit) []actMenuChromeHit {
+	drawer, ok := m.tasksDrawer()
+	if !ok || m.layout.drawer.Height == 0 || drawer.View != tasksDrawerViewList {
+		return hits
+	}
+	for _, row := range drawer.Rows {
+		state, ok := generated.SpineStateFromWire(row.State)
+		if row.ID == "" || !ok || state != generated.StateNeedsYou || len(row.Actions) == 0 {
+			continue
+		}
+		if zone := m.zones.Get(zoneIDTasksDrawerRow(row.ID)); zone != nil {
+			hits = append(hits, actMenuChromeHit{box: actMenuZoneRect(zone), kind: actMenuTargetTask, key: row.ID})
+		}
+		for _, action := range row.Actions {
+			if zone := m.zones.Get(zoneIDTasksDrawerAction(row.ID, action.Key)); zone != nil {
+				hits = append(hits, actMenuChromeHit{box: actMenuZoneRect(zone), kind: actMenuTargetTask, key: row.ID})
+			}
+		}
+	}
+	return hits
 }
 
 func padTo(line string, width int, style lipgloss.Style) string {

@@ -16,6 +16,8 @@ defmodule MingaEditor.Extension.PickerTest do
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.FetchEffect
 
@@ -157,13 +159,18 @@ defmodule MingaEditor.Extension.PickerTest do
     state = selected |> open(args) |> apply_result(:picker_fetch)
     menu = PickerUI.handle_key(state, ?., @ctrl)
     assert_receive {:offered_actions, ^args, :first}
-    assert %{actions: ["Keep"], activation_ids: [action_id]} = picker_model(menu).action_menu
+    act_menu = menu |> ActMenuWorkflow.current() |> ActMenu.model()
+    assert [%{id: action_id, label: "Keep"}] = act_menu.lead
     model = picker_model(menu)
 
-    # A native query edit can change the highlight while the menu retains the captured item.
-    menu = PickerUI.replace_query(menu, model.query_generation, 1, "Second")
-    assert picker_model(menu).acknowledged_query_edit_seq == 1
-    acted = PickerUI.activate_action(menu, model.activation_generation, action_id)
+    # A native query edit already in flight can invalidate the captured item.
+    changed = PickerUI.replace_query(menu, model.query_generation, 1, "Second")
+    assert picker_model(changed).acknowledged_query_edit_seq == 1
+    skipped = ActMenuWorkflow.click(changed, act_menu.id, action_id)
+    assert {:picker, _} = skipped.shell_runtime.state.modal
+    refute_received {:action, _, _, _, _}
+
+    acted = ActMenuWorkflow.click(menu, act_menu.id, action_id)
     assert_receive {:action, :keep, %Item{id: :first}, ^args, :none}
     assert acted.shell_runtime.state.modal == :none
   end
@@ -294,8 +301,18 @@ defmodule MingaEditor.Extension.PickerTest do
 
   test "malformed action lists do not interrupt picker input", %{state: state} do
     state = state |> open(args(:invalid_actions)) |> apply_result(:picker_fetch)
-    assert state == PickerUI.handle_key(state, ?o, @ctrl)
-    assert picker_model(state).action_menu == nil
+    menu = PickerUI.handle_key(state, ?., @ctrl)
+
+    assert %{lead: [], selected: nil, rows: [%{id: id, label: "Choose this item"}]} =
+             model = menu |> ActMenuWorkflow.current() |> ActMenu.model()
+
+    assert {:handled, untouched} = MingaEditor.Input.ActMenu.handle_key(menu, 13, 0)
+    assert {:picker, _} = untouched.shell_runtime.state.modal
+    refute_received {:selected, _, _, _}
+
+    selected = ActMenuWorkflow.click(menu, model.id, id)
+    assert_receive {:selected, %Item{id: :first}, _, :none}
+    assert selected.shell_runtime.state.modal == :none
   end
 
   test "unload cancels its own work and picker only", %{state: state} do

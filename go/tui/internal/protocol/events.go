@@ -351,6 +351,65 @@ func EncodeGUITasksDrawerAction(rowID, action string) []byte {
 	return append(out, action...)
 }
 
+// EncodeGUIActMenuAction activates a displayed action, or dismisses its offer when id is zero.
+func EncodeGUIActMenuAction(offer uint64, id uint16) []byte {
+	packet := [12]byte{generated.OPGuiAction, generated.GUIActionActMenuAction}
+	binary.BigEndian.PutUint64(packet[2:10], offer)
+	binary.BigEndian.PutUint16(packet[10:], id)
+	return packet[:]
+}
+
+// EncodeGUIReviewRibbonAct names the exact authored head; the screen point is only its popup anchor.
+func EncodeGUIReviewRibbonAct(windowID uint16, revision uint64, head AuthoredGutterRegion, screenRow, screenCol uint16) []byte {
+	packet := [33]byte{generated.OPGuiAction, generated.GUIActionReviewRibbonAct}
+	binary.BigEndian.PutUint16(packet[2:4], windowID)
+	binary.BigEndian.PutUint64(packet[4:12], revision)
+	packet[12] = head.Role // Pending and deletion are wire kinds 0 and 1.
+	binary.BigEndian.PutUint64(packet[13:21], head.Unit)
+	binary.BigEndian.PutUint32(packet[21:25], head.FirstLine)
+	binary.BigEndian.PutUint32(packet[25:29], head.FirstColumn)
+	binary.BigEndian.PutUint16(packet[29:31], screenRow)
+	binary.BigEndian.PutUint16(packet[31:], screenCol)
+	return packet[:]
+}
+
+func EncodeGUIActMenuPickerTarget(generation, id uint32) []byte {
+	packet := [11]byte{generated.OPGuiAction, generated.GUIActionActMenuTarget, 0}
+	binary.BigEndian.PutUint32(packet[3:7], generation)
+	binary.BigEndian.PutUint32(packet[7:], id)
+	return packet[:]
+}
+
+func EncodeGUIActMenuFoldTarget(windowID uint16, generation uint64, line uint32) []byte {
+	packet := [17]byte{generated.OPGuiAction, generated.GUIActionActMenuTarget, 1}
+	binary.BigEndian.PutUint16(packet[3:5], windowID)
+	binary.BigEndian.PutUint64(packet[5:13], generation)
+	binary.BigEndian.PutUint32(packet[13:], line)
+	return packet[:]
+}
+
+func EncodeGUIActMenuFileTreeTarget(generation uint64, id string) []byte {
+	packet := make([]byte, 3, 13+len(id))
+	packet[0], packet[1], packet[2] = generated.OPGuiAction, generated.GUIActionActMenuTarget, 2
+	packet = binary.BigEndian.AppendUint64(packet, generation)
+	return appendString16(packet, id)
+}
+
+func EncodeGUIActMenuAgentApprovalTarget(target AgentApprovalTarget) []byte {
+	if !target.Valid() {
+		return nil
+	}
+	out := make([]byte, 3, 9+len(target.SessionID)+len(target.RequestID)+len(target.ToolCallID))
+	out[0], out[1], out[2] = generated.OPGuiAction, generated.GUIActionActMenuTarget, 3
+	return appendAgentApprovalTarget(out, target)
+}
+
+func EncodeGUIActMenuTasksTarget(id string) []byte {
+	out := make([]byte, 3, 5+len(id))
+	out[0], out[1], out[2] = generated.OPGuiAction, generated.GUIActionActMenuTarget, 4
+	return appendString16(out, id)
+}
+
 func EncodeGUIAgentComposerSubmit(generation, offer uint64) []byte {
 	packet := [18]byte{generated.OPGuiAction, generated.GUIActionAgentComposerSubmit}
 	binary.BigEndian.PutUint64(packet[2:], generation)
@@ -510,10 +569,13 @@ func EncodeGUIAgentToolApproval(target AgentApprovalTarget, decision generated.A
 	}
 	out := make([]byte, 2, 9+len(target.SessionID)+len(target.RequestID)+len(target.ToolCallID))
 	out[0], out[1] = generated.OPGuiAction, generated.GUIActionAgentToolApproval
+	return append(appendAgentApprovalTarget(out, target), byte(decision))
+}
+
+func appendAgentApprovalTarget(out []byte, target AgentApprovalTarget) []byte {
 	out = appendString16(out, target.SessionID)
 	out = appendString16(out, target.RequestID)
-	out = appendString16(out, target.ToolCallID)
-	return append(out, byte(decision))
+	return appendString16(out, target.ToolCallID)
 }
 
 // EncodeGUISemanticItemActivate activates one exact BEAM-authored item identity.

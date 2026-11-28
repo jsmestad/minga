@@ -334,6 +334,16 @@ type GutterAuthoredRegion struct {
 	LastLine    uint32
 }
 
+type ActMenuRow struct {
+	ID          uint16
+	Key         string
+	Label       string
+	Hint        string
+	Detail      string
+	Section     string
+	Destructive uint8
+}
+
 type ModelineSegment struct {
 	Name    string
 	FG      uint32
@@ -818,13 +828,6 @@ type GuiPickerQuery struct {
 	AcknowledgedEditSeq uint32
 }
 
-type GuiPickerActionMenu struct {
-	Visible       uint8
-	SelectedIndex uint8
-	Actions       []string
-	ActivationIds []uint32
-}
-
 type GuiPickerModePrefix struct {
 	Text string
 }
@@ -1042,6 +1045,19 @@ type GuiSubagentPeekFields struct {
 	ParentWindowID uint16
 	Steps          []SubagentPeekStep
 	Panes          []SubagentPeekPane
+}
+
+type GuiActMenuFields struct {
+	Visible      uint8
+	OfferID      uint64
+	Role         uint8
+	AnchorRow    uint16
+	AnchorColumn uint16
+	Selected     uint16
+	Title        string
+	Query        string
+	Lead         []ActMenuRow
+	Rows         []ActMenuRow
 }
 
 type GuiEditTimelineFields struct {

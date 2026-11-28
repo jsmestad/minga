@@ -20,6 +20,8 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   alias MingaEditor.FocusOwner
   alias MingaEditor.RenderModel.UI.TasksDrawerBuilder
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -49,6 +51,7 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
           | :tasks_stop
           | :tasks_open
           | :tasks_next_change
+          | :tasks_act_menu
           | :tasks_prev_change
           | :tasks_back
 
@@ -191,6 +194,8 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   What a command does depends on what the drawer shows: a pending stop takes only its answer, a diff answers its own request and scrolls, an output retries and scrolls, and the list does everything. While the drawer is arming, single letters are ignored.
   """
   @spec run(EditorState.t(), command()) :: EditorState.t()
+  def run(%EditorState{} = state, :tasks_act_menu), do: open_act_menu(state, :selected)
+
   def run(%EditorState{} = state, command) do
     if command in @letters and arming?(state) do
       state
@@ -225,6 +230,64 @@ defmodule MingaEditor.Shell.Traditional.TasksDrawerWorkflow do
   end
 
   def click(%EditorState{} = state, _row_id, _action), do: state
+
+  @doc "Builds an offer from the exact selected or clicked row without selecting it."
+  @spec open_act_menu(EditorState.t(), String.t() | :selected) :: EditorState.t()
+  def open_act_menu(state, :selected) do
+    case selected(state) do
+      nil -> state
+      row -> open_act_menu(state, row)
+    end
+  end
+
+  def open_act_menu(state, id) do
+    drawer = drawers(state)
+
+    if Drawers.showing?(drawer, :tasks) and drawer.view == :list and is_nil(drawer.pending) do
+      model = TasksDrawerBuilder.build(state.agent_connection.tasks, drawer, now())
+
+      case Enum.find(model.rows, &(&1.id == id)) do
+        nil -> NoticeWorkflow.publish(state, "The task changed. Open the act menu again.")
+        row -> open_row_offer(state, row, entry(state, id))
+      end
+    else
+      state
+    end
+  end
+
+  @spec open_row_offer(EditorState.t(), Minga.RenderModel.UI.TasksDrawer.Row.t(), Entry.t() | nil) ::
+          EditorState.t()
+  defp open_row_offer(state, row, %Entry{pid: pid, approval: %{approval: %{target: target}}}) do
+    lead = [
+      {"This request", "y", "Approve once", "y", "Runs this tool call once", false,
+       {:task_approval, :approve}},
+      {"This request", "n", "Deny", "n", "Does not run this tool call", true,
+       {:task_approval, :reject}}
+    ]
+
+    choices = [
+      {"This task", "=", "Show diff", "=", "", false, {:task, "="}},
+      {"This request", "t", "Trust this turn", "t", "Allows future calls in this turn", true,
+       {:task_approval, :approve_turn}},
+      {"This request", "a", "Trust this session", "a", "Allows future calls in this session",
+       true, {:task_approval, :approve_session}}
+    ]
+
+    offer = ActMenu.new(row.title, :minga, nil, {:task, row.id, {pid, target}}, lead, choices)
+    ActMenuWorkflow.replace(state, offer)
+  end
+
+  defp open_row_offer(state, row, _entry) do
+    choices =
+      Enum.map(row.actions, fn {key, label} ->
+        {"This task", key, label, key, "", key == "x", {:task, key}}
+      end)
+
+    lead = [{"This task", "↩", "Open task", "↩", "", false, {:task, "↩"}}]
+    role = if row.state == :failed, do: :failure, else: :neutral
+    offer = ActMenu.new(row.title, role, nil, {:task, row.id, nil}, lead, choices)
+    ActMenuWorkflow.replace(state, offer)
+  end
 
   @spec dispatch(EditorState.t(), Drawers.t(), command(), String.t() | nil) :: EditorState.t()
   defp dispatch(state, %Drawers{pending: {:stop, row, target}}, :tasks_approve, _selected),

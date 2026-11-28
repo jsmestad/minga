@@ -71,6 +71,7 @@ defmodule MingaEditor.RenderModel.UI.Builder do
       file_tree: FileTreeBuilder.build(ctx),
       picker: PickerBuilder.build(ctx),
       minibuffer: MinibufferBuilder.build(minibuffer_data),
+      act_menu: ctx.intent.frame.act_menu,
       completion: CompletionBuilder.build(ctx),
       signature_help: SignatureHelpBuilder.build(ctx),
       agent_chat: agent_chat,

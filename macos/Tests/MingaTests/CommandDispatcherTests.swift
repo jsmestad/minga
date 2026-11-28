@@ -1233,7 +1233,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
+                                        hasPreview: false, items: [], modePrefix: ">", loadStatus: .ready,
                                         queryGeneration: 7, acknowledgedQueryEditSeq: 11, activationGeneration: 13))
 
         #expect(gui.pickerState.visible == true)
@@ -1258,7 +1258,7 @@ struct CommandDispatcherRoutingTests {
         ]
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 2, filteredCount: 5,
                                         totalCount: 5, markedCount: 0, title: "Find File", query: "",
-                                        hasPreview: false, items: items, actionMenu: nil, modePrefix: "", loadStatus: .ready,
+                                        hasPreview: false, items: items, modePrefix: "", loadStatus: .ready,
                                         queryGeneration: 7, acknowledgedQueryEditSeq: 0, activationGeneration: 7, movementKeys: keys))
 
         // Plain j and k type into the query on the BEAM, so they never move the preview.
@@ -1281,11 +1281,11 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 5,
                                         totalCount: 100, markedCount: 2, title: "Find File", query: "edi",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: ">", loadStatus: .ready,
+                                        hasPreview: false, items: [], modePrefix: ">", loadStatus: .ready,
                                         queryGeneration: 7, acknowledgedQueryEditSeq: 11, activationGeneration: 13))
         dispatcher.applyForTesting(.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0,
                                         totalCount: 0, markedCount: 0, title: "", query: "",
-                                        hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready,
+                                        hasPreview: false, items: [], modePrefix: "", loadStatus: .ready,
                                         queryGeneration: 0, acknowledgedQueryEditSeq: 0, activationGeneration: 0))
 
         #expect(gui.pickerState.visible == false)
@@ -2303,6 +2303,41 @@ struct CommandDispatcherStagingTests {
             applicationEffectSink: applicationEffectSink
         )
         return (dispatcher, gui)
+    }
+
+    @Test("committed Act menu alone discards a raced picker preview and a committed hide clears the offer")
+    @MainActor func actMenuCommitsAndClears() {
+        let (dispatcher, gui) = makeDispatcher()
+        let rows = ["One", "Two"].enumerated().map { index, label in
+            Wire.PickerItem(iconColor: 0, flags: 0, label: label, description: "", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
+        }
+        let menu = Wire.ActMenu(offerID: 7, role: .neutral, anchorRow: .max, anchorColumn: .max, selectedID: 1,
+                                title: "Act on One", query: "", lead: [], rows: [
+                                    .init(id: 1, key: "o", label: "Open", hint: "", detail: "", section: "Item", destructive: false)
+                                ])
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiPicker(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 2, markedCount: 0,
+                                       title: "Picker", query: "", hasPreview: false, items: rows, modePrefix: "",
+                                       loadStatus: .ready, queryGeneration: 1, acknowledgedQueryEditSeq: 0, activationGeneration: 1))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(gui.pickerState.previewNavigation(delta: 1))
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiActMenu(menu))
+        #expect(gui.actMenuState.menu == nil)
+        #expect(gui.pickerState.effectiveSelectedIndex == 1)
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+        #expect(gui.actMenuState.menu == menu)
+        #expect(gui.pickerState.effectiveSelectedIndex == 0)
+        #expect(gui.pickerState.visible)
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 3, baseFrameSeq: 2, generation: 1))
+        dispatcher.dispatch(.guiActMenu(nil))
+        #expect(gui.actMenuState.menu == menu)
+        dispatcher.dispatch(.commitFrame(frameSeq: 3, seq: 0))
+        #expect(gui.actMenuState.menu == nil)
+        #expect(gui.pickerState.visible)
     }
 
     private func tab(_ label: String) -> Wire.TabEntry {
@@ -3998,6 +4033,7 @@ struct CommandDispatcherStagingTests {
             case .linkCursorChanged: events.append("link")
             case .focusOwnerChanged: events.append("focus-owner")
             case .agentDesktopNotification: events.append("agent-desktop-notification")
+            case .nativeFileLocationAction: events.append("native-file-location")
             case .needsYouCountChanged: events.append("needs-you-count")
             }
         }

@@ -145,7 +145,6 @@ macos/Sources/Views/Overlays/MessagesContentState.swift	case .unknown: return .g
 macos/Sources/Views/Overlays/MessagesContentView.swift	.foregroundStyle(.white)
 macos/Sources/Views/Overlays/NotificationCenterView.swift	.shadow(color: .black.opacity(0.32), radius: 16, x: 0, y: 8)
 macos/Sources/Views/Overlays/PickerOverlay.swift	.shadow(color: .black.opacity(0.35), radius: 12, y: 4)
-macos/Sources/Views/Overlays/PickerOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: 4)
 macos/Sources/Views/Overlays/SignatureHelpOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
 macos/Sources/Views/Overlays/WhichKeyOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: -4)
 macos/Sources/Views/Sidebar/ObservatoryView.swift	if node.messageQueueLen == 0 { return .green }

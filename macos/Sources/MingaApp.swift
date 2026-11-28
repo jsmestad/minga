@@ -570,11 +570,13 @@ struct MingaMenuCommands: Commands {
     }
 
     private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: (OutboundActionEncoding) -> Void) {
+        guard appState.gui.focusOwnerState.decodedOwner?.ownsActMenu != true else { return }
         NativeMenuTextRouter.perform(command, encoder: encoder, fallback: fallback)
     }
 
     private func textEditingCommandIsAvailable(_ command: NativeTextCommandRouter.Command) -> Bool {
-        NativeMenuTextRouter.isAvailable(command, encoder: encoder)
+        guard appState.gui.focusOwnerState.decodedOwner?.ownsActMenu != true else { return false }
+        return NativeMenuTextRouter.isAvailable(command, encoder: encoder)
     }
 
     /// Reads the system pasteboard and sends a paste event to the BEAM.
@@ -961,6 +963,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.windowTitle = title
         case .agentDesktopNotification(let notification):
             if coreConnectionIsLive { desktopAgentNotifications?.receive(notification) }
+        case .nativeFileLocationAction(let action):
+            guard coreConnectionIsLive else { return }
+            let url = URL(fileURLWithPath: action.path, isDirectory: action.kind == .openTerminal)
+            switch action.kind {
+            case .reveal:
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            case .openTerminal:
+                NSWorkspace.shared.open(
+                    [url],
+                    withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                    configuration: NSWorkspace.OpenConfiguration()
+                )
+            }
         case .needsYouCountChanged(let count):
             desktopAgentNotifications?.needsYouCount(count)
         case .documentEditedChanged(let edited):

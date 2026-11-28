@@ -103,6 +103,8 @@ func opcodeName(opcode byte) string {
 		return "file tree"
 	case generated.OPGuiPicker:
 		return "picker"
+	case generated.OPGuiActMenu:
+		return "act menu"
 	case generated.OPGuiPickerPreview:
 		return "picker preview"
 	case generated.OPGuiMinibuffer:

@@ -7,7 +7,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker
-  alias Minga.RenderModel.UI.Picker.ActionMenu
 
   @op_gui_picker Opcodes.gui_picker()
   @op_gui_picker_preview Opcodes.gui_picker_preview()
@@ -15,7 +14,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
   @section_picker_header 0x01
   @section_picker_query 0x02
   @section_picker_items 0x03
-  @section_picker_action_menu 0x04
   @section_picker_mode_prefix 0x05
   @section_picker_load_status 0x06
   @section_picker_empty 0x07
@@ -72,7 +70,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.activation_generation,
         model.has_preview?,
         model.items,
-        action_menu_structure(model.action_menu),
         model.load_status,
         model.empty,
         model.list_keys?,
@@ -81,14 +78,9 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
         model.hints
       })
 
-    selection = {model.selected_item_id, model.selected_action_id}
     preview = :erlang.phash2(model.preview_lines)
-    {:open, structural, selection, preview}
+    {:open, structural, model.selected_item_id, preview}
   end
-
-  @spec action_menu_structure(ActionMenu.t() | nil) :: term()
-  defp action_menu_structure(nil), do: nil
-  defp action_menu_structure(%ActionMenu{} = menu), do: {menu.actions, menu.activation_ids}
 
   @spec encode_selection_command(Picker.t()) :: binary()
   defp encode_selection_command(%Picker{} = model) do
@@ -97,7 +89,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       |> Writer.new()
       |> Writer.uint32(:generation, model.activation_generation)
       |> Writer.uint32(:selected_item_id, model.selected_item_id)
-      |> Writer.uint32(:selected_action_id, model.selected_action_id)
+      |> Writer.uint32(:reserved, 0)
       |> Writer.finish()
 
     :gui_picker_selection
@@ -118,7 +110,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
     :gui_picker
     |> Writer.new()
     |> Writer.append(<<@op_gui_picker>>)
-    |> Writer.uint8(:section_count, if(model.empty, do: 9, else: 8))
+    |> Writer.uint8(:section_count, if(model.empty, do: 8, else: 7))
     |> Writer.section16(
       :picker_header,
       @section_picker_header,
@@ -137,11 +129,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       :picker_items,
       @section_picker_items,
       Encode.encode_gui_picker_items(model.items)
-    )
-    |> Writer.section16(
-      :picker_action_menu,
-      @section_picker_action_menu,
-      Encode.encode_gui_picker_action_menu(to_wire_action_menu(model.action_menu))
     )
     |> Writer.section16(
       :picker_mode_prefix,
@@ -196,18 +183,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoder do
       title: model.title,
       marked_count: model.marked_count,
       activation_generation: model.activation_generation
-    }
-  end
-
-  @spec to_wire_action_menu(ActionMenu.t() | nil) :: map()
-  defp to_wire_action_menu(nil), do: %{visible: 0}
-
-  defp to_wire_action_menu(%ActionMenu{} = menu) do
-    %{
-      visible: 1,
-      selected_index: menu.selected_index,
-      actions: menu.actions,
-      activation_ids: menu.activation_ids
     }
   end
 

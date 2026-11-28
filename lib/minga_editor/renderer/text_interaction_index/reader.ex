@@ -1,6 +1,7 @@
 defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   @moduledoc "Opaque read capability for one renderer-owned interaction-index generation."
 
+  alias Minga.Buffer.RendererConsume
   alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.Renderer.TextPresentation
@@ -59,6 +60,20 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
       _ -> {:error, :inactive}
     end
   end
+
+  @doc "Resolves the render lease of the exact acknowledged authored gutter."
+  @spec gutter_source(t() | nil, pos_integer(), pos_integer()) ::
+          {:ok, RendererConsume.review_lease()} | :stale
+  def gutter_source(%__MODULE__{table: table}, window_id, revision) do
+    with {:ok, leases} <- read(table, :gutter_leases),
+         {:ok, {^revision, lease}} <- Map.fetch(leases, window_id) do
+      {:ok, lease}
+    else
+      _stale -> :stale
+    end
+  end
+
+  def gutter_source(nil, _window_id, _revision), do: :stale
 
   @doc "Resolves the owner and revision of the exact active composer presentation."
   @spec prompt_source(t(), pos_integer(), pos_integer()) ::

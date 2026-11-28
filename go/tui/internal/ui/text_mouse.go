@@ -171,7 +171,7 @@ func (m Model) editorTextOccluded(screenX, screenY int) bool {
 
 // The same higher-layer containment guards text and persistent chrome input.
 func (m Model) floatingOverlayContains(screenX, screenY int) bool {
-	if m.pickerVisible() || m.whichKeyVisible() {
+	if m.actMenu().Visible == 1 || m.pickerVisible() || m.whichKeyVisible() {
 		return true
 	}
 	winner, ok := m.overlayWinner()

@@ -111,7 +111,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x5D       | chat_returned_to_bottom |
   | 0x5F       | picker_query_changed    |
   | 0x60       | picker_item_activate    |
-  | 0x61       | picker_action_activate  |
   | 0x62       | search_focus            |
   | 0x63       | file_dialog_result      |
   | 0x64       | focus_window            |
@@ -158,6 +157,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_continue_turn Opcodes.gui_action_agent_continue_turn()
   @gui_action_agent_queue_action Opcodes.gui_action_agent_queue_action()
   @gui_action_subagent_peek_action Opcodes.gui_action_subagent_peek_action()
+  @gui_action_act_menu_action Opcodes.gui_action_act_menu_action()
+  @gui_action_review_ribbon_act Opcodes.gui_action_review_ribbon_act()
+  @gui_action_act_menu_target Opcodes.gui_action_act_menu_target()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
   @gui_action_git_stage_file Opcodes.gui_action_git_stage_file()
   @gui_action_git_unstage_file Opcodes.gui_action_git_unstage_file()
@@ -215,7 +217,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_chat_returned_to_bottom Opcodes.gui_action_chat_returned_to_bottom()
   @gui_action_picker_query_changed Opcodes.gui_action_picker_query_changed()
   @gui_action_picker_item_activate Opcodes.gui_action_picker_item_activate()
-  @gui_action_picker_action_activate Opcodes.gui_action_picker_action_activate()
   @gui_action_picker_fit Opcodes.gui_action_picker_fit()
   @gui_action_focus_window Opcodes.gui_action_focus_window()
   @gui_action_search_query Opcodes.gui_action_search_query()
@@ -297,6 +298,15 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
              MingaAgent.Session.QueuedInputSummary.identity() | nil}
           | {:subagent_peek_action, MingaEditor.Agent.SubagentPeekWorkflow.click(), pos_integer(),
              binary(), binary(), {non_neg_integer(), non_neg_integer()}}
+          | {:act_menu_action, pos_integer(), non_neg_integer()}
+          | {:review_ribbon_act, pos_integer(), pos_integer(), Minga.Buffer.ReviewRibbon.head(),
+             Minga.RenderModel.UI.ActMenu.anchor()}
+          | {:act_menu_target,
+             {:picker, non_neg_integer(), pos_integer()}
+             | {:fold, pos_integer(), pos_integer(), non_neg_integer()}
+             | {:file_tree, non_neg_integer(), String.t()}
+             | {:approval, ApprovalTarget.t()}
+             | {:task, String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
           | {:git_stage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
@@ -354,8 +364,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:picker_query_changed, generation :: non_neg_integer(),
              edit_seq :: non_neg_integer(), query :: String.t()}
           | {:picker_item_activate, generation :: non_neg_integer(),
-             activation_id :: non_neg_integer()}
-          | {:picker_action_activate, generation :: non_neg_integer(),
              activation_id :: non_neg_integer()}
           | {:picker_fit, generation :: pos_integer(), rows :: pos_integer()}
           | Target.t()
@@ -862,6 +870,45 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     end
   end
 
+  def decode_gui_action(@gui_action_act_menu_action, <<offer::64, id::16>>) when offer > 0,
+    do: {:ok, {:act_menu_action, offer, id}}
+
+  def decode_gui_action(
+        @gui_action_review_ribbon_act,
+        <<window::16, revision::64, kind, unit::64, row::32, column::32, y::16, x::16>>
+      )
+      when window > 0 and revision > 0 and kind in [0, 1] and unit > 0 do
+    type = if kind == 0, do: :text, else: :gap
+    {:ok, {:review_ribbon_act, window, revision, {type, unit, {row, column}}, {y, x}}}
+  end
+
+  def decode_gui_action(@gui_action_act_menu_target, <<0, generation::32, item::32>>)
+      when item > 0,
+      do: {:ok, {:act_menu_target, {:picker, generation, item}}}
+
+  def decode_gui_action(@gui_action_act_menu_target, <<1, window::16, generation::64, line::32>>)
+      when window > 0 and generation > 0,
+      do: {:ok, {:act_menu_target, {:fold, window, generation, line}}}
+
+  def decode_gui_action(
+        @gui_action_act_menu_target,
+        <<2, generation::64, length::16, item::binary-size(length)>>
+      )
+      when length > 0,
+      do: {:ok, {:act_menu_target, {:file_tree, generation, item}}}
+
+  def decode_gui_action(
+        @gui_action_act_menu_target,
+        <<3, session_length::16, session::binary-size(session_length), request_length::16,
+          request::binary-size(request_length), call_length::16, call::binary-size(call_length)>>
+      )
+      when session_length > 0 and request_length > 0 and call_length > 0,
+      do: {:ok, {:act_menu_target, {:approval, ApprovalTarget.new(session, request, call)}}}
+
+  def decode_gui_action(@gui_action_act_menu_target, <<4, length::16, id::binary-size(length)>>)
+      when length > 0,
+      do: {:ok, {:act_menu_target, {:task, id}}}
+
   def decode_gui_action(
         @gui_action_agent_read_retained_output,
         <<message_id::32, offer::binary-size(16)>>
@@ -1130,12 +1177,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       ),
       do: {:ok, {:picker_item_activate, generation, activation_id}}
 
-  def decode_gui_action(
-        @gui_action_picker_action_activate,
-        <<generation::32, activation_id::32>>
-      ),
-      do: {:ok, {:picker_action_activate, generation, activation_id}}
-
   # The generation names the picker the frontend drew; rows is a measurement of its list, not an item position.
   def decode_gui_action(@gui_action_picker_fit, <<generation::32, rows::16>>)
       when generation > 0 and rows > 0,
@@ -1277,7 +1318,6 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @spec decode_semantic_intent(atom(), non_neg_integer()) :: {:ok, atom()} | :error
   defp decode_semantic_intent(:completion, 1), do: {:ok, :accept}
   defp decode_semantic_intent(:picker, 1), do: {:ok, :activate_item}
-  defp decode_semantic_intent(:picker, 2), do: {:ok, :activate_action}
   defp decode_semantic_intent(:picker, 3), do: {:ok, :dismiss}
   defp decode_semantic_intent(:file_tree, 1), do: {:ok, :primary}
   defp decode_semantic_intent(:file_tree, 2), do: {:ok, :toggle}

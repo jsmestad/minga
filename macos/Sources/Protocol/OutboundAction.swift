@@ -10,6 +10,19 @@ nonisolated public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case review = 6
 }
 
+/// Exact presented chrome targets that can request a BEAM-owned menu.
+nonisolated public enum ActMenuTarget: Equatable, Sendable {
+    case picker(generation: UInt32, activationID: UInt32)
+    case fold(windowID: UInt16, generation: UInt64, sourceLine: UInt32)
+    case fileTree(generation: UInt64, itemID: String)
+    case approval(sessionID: String, requestID: String, toolCallID: String)
+    case tasksDrawer(rowID: String)
+}
+
+nonisolated public enum ReviewRibbonKind: UInt8, Equatable, Sendable {
+    case pending, deletion
+}
+
 /// A row offered by a particular installation of the Git status panel.
 nonisolated public struct GitStatusEntryTarget: Equatable, Sendable {
     public let panelID: UInt64
@@ -100,7 +113,9 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case hoverOpen
     case pickerQueryChanged(generation: UInt32, editSequence: UInt32, text: String)
     case pickerItemActivate(generation: UInt32, activationID: UInt32)
-    case pickerActionActivate(generation: UInt32, activationID: UInt32)
+    case actMenuAction(offerID: UInt64, actionID: UInt16)
+    case actMenuTarget(ActMenuTarget)
+    case reviewRibbonAct(windowID: UInt16, gutterRevision: UInt64, kind: ReviewRibbonKind, unit: UInt64, sourceLine: UInt32, byteColumn: UInt32, screenRow: UInt16, screenColumn: UInt16)
     /// The result rows the picker list of one picker generation shows. The BEAM pages the picker by `rows`.
     case pickerFit(generation: UInt32, rows: UInt16)
     case fileTreeEditConfirm(token: UInt32, text: String)

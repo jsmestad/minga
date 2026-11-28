@@ -439,13 +439,13 @@ defmodule Minga.DoneGateTest do
     action = Path(args[-1]).stem
     failed = action == "ordinary" and os.environ.get("SWIFT_EXIT", "0") != "0"
     if "summary" in args:
-        total = 13 if action == "focus-policy" else 2
+        total = 14 if action == "focus-policy" else 2
         print(json.dumps({"totalTestCount":total,"passedTests":total-int(failed),"failedTests":int(failed),"result":"Failed" if failed else "Passed"}))
         sys.exit(0)
     def case(identifier, result="Passed"):
         return {"nodeType":"Test Case","nodeIdentifier":identifier,"result":result}
     if action == "focus-policy":
-        functions = ["pickerBeforeKeyWindow","promptAfterNativeModal","inlineHierarchyRebuild","keyframeRestoresOwner","nativeFieldDefersOwner","dismantlingFieldAppliesPendingOwner","markedTextDefersOwner","localLeasesDeferLatestOwner","iconSearchMirrorFocusesNativeField","lifecycleAppliesOnlyDecodedOwner","inlineStemSelectionPrecedesTyping","productionInlineRebuildDoesNotCommit","productionFieldsRegisterAfterLateInjection"]
+        functions = ["pickerBeforeKeyWindow","promptAfterNativeModal","inlineHierarchyRebuild","keyframeRestoresOwner","nativeFieldDefersOwner","dismantlingFieldAppliesPendingOwner","markedTextDefersOwner","localLeasesDeferLatestOwner","iconSearchMirrorFocusesNativeField","lifecycleAppliesOnlyDecodedOwner","inlineStemSelectionPrecedesTyping","productionInlineRebuildDoesNotCommit","productionFieldsRegisterAfterLateInjection","actMenuReclaimsAndReturnsQueryFocus"]
         node = {"nodeType":"Test Suite","nodeIdentifier":"EditorFocusPolicyTests","result":"Passed","children":[case(f"EditorFocusPolicyTests/{name}()") for name in functions]}
     elif action == "focus-replay":
         replay = case("FocusReplayWindowTests/replay(_:)")

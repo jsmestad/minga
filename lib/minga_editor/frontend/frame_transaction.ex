@@ -20,7 +20,8 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.clipboard_write(),
     Opcodes.presentation_operation(),
     Opcodes.agent_desktop_notification(),
-    Opcodes.gui_request()
+    Opcodes.gui_request(),
+    Opcodes.gui_file_location_action()
   ]
 
   @retired_frame_body_opcodes [0x12, 0x13, 0x14, 0x1A]

@@ -12,13 +12,15 @@ extension EditorGeometry {
     @MainActor
     init(editorNSView: EditorNSView?) {
         if let v = editorNSView {
+            let presented = v.presentedActMenuGeometry
             self.init(
                 cellWidth: v.cellWidth,
                 cellHeight: v.cellHeight,
                 viewportWidth: v.bounds.width,
                 gutterCol: Int(v.dispatcher.committedEditorSnapshot?.gutterCol ?? 0),
                 gutterLeftMargin: CoreTextMetalRenderer.gutterLeftMarginPt,
-                gutterRightGap: CoreTextMetalRenderer.gutterRightGapPt
+                gutterRightGap: CoreTextMetalRenderer.gutterRightGapPt,
+                actMenuGridCellSize: presented?.cellSize
             )
         } else {
             self.init(

@@ -13,7 +13,7 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-func (m Model) renderBody() (string, *gitStatusHits) {
+func (m Model) renderBody(gutterHits *[]gutterActHit) (string, *gitStatusHits) {
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		var agentLines []string
 		if panes := m.subagentPeek().Panes; len(panes) != 0 {
@@ -32,7 +32,7 @@ func (m Model) renderBody() (string, *gitStatusHits) {
 	}
 	var lines []string
 	if len(m.windows) > 0 {
-		lines = m.semanticLines()
+		lines = m.semanticLines(gutterHits)
 	} else {
 		// Startup/teardown still composes chrome over the empty semantic canvas.
 		lines = m.withLegacyCursorline(nil)
@@ -41,24 +41,29 @@ func (m Model) renderBody() (string, *gitStatusHits) {
 	return strings.Join(m.fillBody(lines), "\n"), hits
 }
 
-func (m Model) semanticLines() []string {
+func (m Model) semanticLines(gutterHits *[]gutterActHit) []string {
 	// composedSemanticLines renders every window's rows exactly once. When no
 	// window carries geometry it returns those same rendered lines as the
 	// no-geometry fallback, so reuse them directly instead of re-rendering the
 	// windows a second time (which would also double-count the line cache
 	// hit/miss counters, #2288).
-	lines, _ := m.composedSemanticLines()
+	lines, _ := m.composedSemanticLines(gutterHits)
 	if len(lines) == 0 {
 		return nil
 	}
 	return lines
 }
 
-func (m Model) composedSemanticLines() ([]string, bool) {
+func (m Model) composedSemanticLines(gutterHits *[]gutterActHit) ([]string, bool) {
 	segmentsByRow := map[int][]semanticLineSegment{}
 	fallback := make([]string, 0, len(m.windowOrder))
 	maxRow := 0
 	hasGeometry := false
+	left := m.layout.leftPane.Width
+	if tree, ok := m.fileTree(); ok && tree.Visible && tree.Width > 0 && m.width >= 50 {
+		// File tree rows include their separator in the rendered width.
+		left = fileTreeWidth(m.width, tree)
+	}
 	for _, id := range m.windowOrder {
 		window := m.windows[id]
 		placement, ok := m.semanticWindowPlacement(window)
@@ -67,7 +72,7 @@ func (m Model) composedSemanticLines() ([]string, bool) {
 			continue
 		}
 		hasGeometry = true
-		rendered := m.renderWindowRows(window)
+		rendered := m.renderWindowRowsWithHits(window, left+placement.col, m.layout.body.Y+placement.row, gutterHits)
 		for rowOffset, line := range rendered {
 			row := placement.row + rowOffset
 			if row < 0 {
@@ -202,6 +207,10 @@ func (m Model) windowRow(window protocol.WindowContent, index int) (protocol.Win
 }
 
 func (m Model) renderWindowRows(window protocol.WindowContent) []string {
+	return m.renderWindowRowsWithHits(window, 0, 0, nil)
+}
+
+func (m Model) renderWindowRowsWithHits(window protocol.WindowContent, x, y int, gutterHits *[]gutterActHit) []string {
 	gutter, hasGutter := m.windowGutter(window.ID)
 	width, height := m.windowRenderDimensions(window, hasGutter, gutter)
 	sourceStart := m.presentationSourceStart(window, height)
@@ -236,6 +245,8 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		}
 	}
 	contentWidth := windowTextWidth(width, gutter)
+	gutterWidth := gutterRenderWidth(gutter)
+	trackFolds := gutterHits != nil && window.AccessibilityGeneration != 0
 	for rowIndex := 0; rowIndex < height; rowIndex++ {
 		m.renderWork.editorRowVisits++
 		trailing := blankMargin
@@ -245,15 +256,33 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 		sourceRowIndex := rowIndex + sourceStart
 		contentRowIndex := sourceRowIndex - overscanBefore
 		row, hasRow := m.windowRow(window, sourceRowIndex)
-		var twist uint8
-		if hasGutter && hasRow {
-			twist = presentedGutterTwist(gutter.Authorship, row, rowIndex == 0)
-			if rowIndex == 0 && gutter.Authorship != nil && !gutterSourceRow(row) {
-				twist = m.pinGutterAfterVirtualRows(window, gutter.Authorship, sourceRowIndex+1, sourceStart+height)
+		var twist gutterTwist
+		var entry protocol.GutterEntry
+		var hasEntry bool
+		if hasGutter && gutterWidth > 0 {
+			if trackFolds {
+				entry, hasEntry = presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
+			}
+			if hasRow {
+				twist = m.gutterTwistAt(window, gutter.Authorship, row, rowIndex, sourceStart, height)
+			}
+			if gutterHits != nil {
+				if twist.ink != 0 {
+					*gutterHits = append(*gutterHits, gutterActHit{
+						x: x + gutterWidth - 1, y: y + rowIndex, glyph: gutterTwistVariant(twist.ink).Token().Glyph,
+						window: window.ID, revision: gutter.Authorship.Revision, head: twist.head, authored: true,
+					})
+				}
+				if hasEntry && entry.SignType == 0 && (entry.DisplayType == 1 || entry.DisplayType == 4) {
+					*gutterHits = append(*gutterHits, gutterActHit{
+						x: x, y: y + rowIndex, glyph: strings.TrimSpace(m.gutterSign(entry)),
+						window: window.ID, revision: window.AccessibilityGeneration, foldLine: entry.BufferLine,
+					})
+				}
 			}
 		}
 		key, cacheable := m.lineCacheKeyFor(window, row, sourceRowIndex)
-		key.twist = twist
+		key.twist = twist.ink
 		if cacheable {
 			if cached, ok := builder.lookup(key); ok {
 				m.lineCache.hits++
@@ -264,9 +293,11 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 
 		cursorline, cursorlineBG := m.cursorlineForRow(window, sourceRowIndex, contentRowIndex)
 		gutterText := ""
-		if hasGutter {
-			entry, ok := presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
-			gutterText = m.renderGutterEntry(gutter, entry, ok, twist, cursorline, cursorlineBG)
+		if hasGutter && gutterWidth > 0 {
+			if !trackFolds {
+				entry, hasEntry = presentedGutterEntry(window.WrappedResidentRows, gutter, sourceRowIndex, row, hasRow)
+			}
+			gutterText = m.renderGutterEntry(gutter, entry, hasEntry, twist.ink, cursorline, cursorlineBG)
 		}
 
 		var content string
@@ -1090,18 +1121,39 @@ func presentedGutterEntry(wrappedResident bool, gutter protocol.Gutter, rank int
 
 const humanTwistInk uint8 = 0x80
 
-// The existing code-facing spacer is the dedicated authorship cell. It does
-// not consume a diagnostic, fold, line-number or text cell.
-func presentedGutterTwist(authorship *protocol.GutterAuthorship, row protocol.WindowRow, pin bool) uint8 {
-	continuation := row.Kind == protocol.WindowRowWrapContinuation
-	if !gutterSourceRow(row) {
-		return 0
+func gutterTwistVariant(ink uint8) generated.TwistVariant {
+	return generated.TwistVariant((ink &^ humanTwistInk) - 1)
+}
+
+// One selection provides both the painted ink and, only for a review head,
+// its exact activation identity. A shared shade does not change the owner.
+type gutterTwist struct {
+	ink  uint8
+	head protocol.AuthoredGutterRegion
+}
+
+func (m Model) gutterTwistAt(window protocol.WindowContent, authorship *protocol.GutterAuthorship, row protocol.WindowRow, rowIndex, sourceStart, height int) gutterTwist {
+	if authorship == nil {
+		return gutterTwist{}
 	}
-	region, head, shared, ok := authorship.RegionAt(row.BufferLine, pin, continuation)
-	if !ok {
-		return 0
+	if gutterSourceRow(row) {
+		continuation := row.Kind == protocol.WindowRowWrapContinuation
+		region, head, shared, ok := authorship.RegionAt(row.BufferLine, rowIndex == 0, continuation)
+		if ok {
+			return resolveGutterTwist(region, row.BufferLine, head, shared)
+		}
+	} else if rowIndex == 0 {
+		return m.pinGutterAfterVirtualRows(window, authorship, sourceStart+1, sourceStart+height)
 	}
-	return gutterTwistInk(region, row.BufferLine, head, shared)
+	return gutterTwist{}
+}
+
+func resolveGutterTwist(region protocol.AuthoredGutterRegion, line uint32, head, shared bool) gutterTwist {
+	twist := gutterTwist{ink: gutterTwistInk(region, line, head, shared)}
+	if head && (region.Role == protocol.AuthoredGutterPending || region.Role == protocol.AuthoredGutterDeletion) {
+		twist.head = region
+	}
+	return twist
 }
 
 func gutterSourceRow(row protocol.WindowRow) bool {
@@ -1110,7 +1162,7 @@ func gutterSourceRow(row protocol.WindowRow) bool {
 
 // Leading virtual rows do not own any source lines. A continuing region on
 // the first visible source row still pins its head in the top visual cell.
-func (m Model) pinGutterAfterVirtualRows(window protocol.WindowContent, authorship *protocol.GutterAuthorship, start, end int) uint8 {
+func (m Model) pinGutterAfterVirtualRows(window protocol.WindowContent, authorship *protocol.GutterAuthorship, start, end int) gutterTwist {
 	for i := start; i < end; i++ {
 		row, ok := m.windowRow(window, i)
 		if !ok {
@@ -1122,11 +1174,11 @@ func (m Model) pinGutterAfterVirtualRows(window protocol.WindowContent, authorsh
 		continuation := row.Kind == protocol.WindowRowWrapContinuation
 		region, head, shared, ok := authorship.RegionAt(row.BufferLine, true, continuation)
 		if ok && head && (continuation || region.FirstLine < row.BufferLine) {
-			return gutterTwistInk(region, row.BufferLine, true, shared)
+			return resolveGutterTwist(region, row.BufferLine, true, shared)
 		}
 		break
 	}
-	return 0
+	return gutterTwist{}
 }
 
 func gutterTwistInk(region protocol.AuthoredGutterRegion, line uint32, head, shared bool) uint8 {
@@ -1173,7 +1225,7 @@ func (m Model) renderGutterEntry(gutter protocol.Gutter, entry protocol.GutterEn
 	}
 	mark := ""
 	if twist != 0 {
-		variant := generated.TwistVariant((twist &^ humanTwistInk) - 1)
+		variant := gutterTwistVariant(twist)
 		token := variant.Token()
 		markBg := bg
 		if variant == generated.TwistKept && twist&humanTwistInk == 0 {

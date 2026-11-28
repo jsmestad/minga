@@ -704,6 +704,39 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	}
 }
 
+func TestDecodeActMenuIsBoundedByItsLength(t *testing.T) {
+	body := []byte{1, 1, 2, 3, 4, 5, 6, 7, 8, 1, 0, 4, 0, 5, 0, 17}
+	body = append(body, string16("Target")...)
+	body = append(body, string16("ke")...)
+	body = append(body, 1, 0, 17, 1, 'y')
+	for _, field := range []string{"Keep", "SPC m k", "accept 4 lines", "This change"} {
+		body = append(body, string16(field)...)
+	}
+	body = append(body, 0, 0, 0) // destructive flag, followed by zero list rows.
+	packet := binary.BigEndian.AppendUint32([]byte{0xb1}, uint32(len(body)))
+	packet = append(packet, body...)
+	size := len(packet)
+	packet = append(packet, 0xb1, 0, 0, 0, 1, 0)
+
+	visible, err := DecodeCommand(packet)
+	if err != nil || visible.Kind != CommandChrome || visible.Size != size {
+		t.Fatalf("visible offer command decoded as %+v, err=%v; want size %d", visible, err, size)
+	}
+	menu := visible.Chrome.ActMenu
+	if menu.Visible != 1 || menu.OfferID != 0x0102030405060708 || menu.Role != 1 || menu.AnchorRow != 4 ||
+		menu.AnchorColumn != 5 || menu.Selected != 17 || menu.Title != "Target" || menu.Query != "ke" || len(menu.Lead) != 1 {
+		t.Fatalf("menu offer lost identity or presentation data: %+v", menu)
+	}
+	want := generated.ActMenuRow{ID: 17, Key: "y", Label: "Keep", Hint: "SPC m k", Detail: "accept 4 lines", Section: "This change"}
+	if menu.Lead[0] != want {
+		t.Fatalf("lead = %+v, want %+v", menu.Lead[0], want)
+	}
+	clear, err := DecodeCommand(packet[visible.Size:])
+	if err != nil || clear.Kind != CommandChrome || clear.Size != 6 || clear.Chrome.ActMenu.Visible != 0 {
+		t.Fatalf("hidden command decoded as %+v, err=%v", clear, err)
+	}
+}
+
 func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	header := []byte{1, 0, 0, 0, 2, 0, 4, 1}
 	header = append(header, string16("Files")...)
@@ -749,7 +782,7 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if got := picker.Items[0]; !got.Marked || !got.Active || got.Status != "Ready" || got.StatusTone != generated.PickerStatusToneReady || got.Group != "ChatGPT" || got.Label != "main.ex" || got.Description != "lib/main.ex" || got.Annotation != "modified" {
 		t.Fatalf("picker item decoded incorrectly: %+v", got)
 	}
-	if len(picker.Actions) != 1 || picker.Actions[0] != "open" || picker.ModePrefix != "find" || !picker.EnterSelects {
+	if picker.ModePrefix != "find" || !picker.EnterSelects {
 		t.Fatalf("picker extras decoded incorrectly: %+v", picker)
 	}
 
@@ -1402,7 +1435,7 @@ func TestDecodeRemainingSemanticChrome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeCommand picker selection returned error: %v", err)
 	}
-	if command.Chrome.PickerSelection.Generation != 9 || command.Chrome.PickerSelection.SelectedID != 12 || command.Chrome.PickerSelection.SelectedActionID != 13 {
+	if command.Chrome.PickerSelection.Generation != 9 || command.Chrome.PickerSelection.SelectedID != 12 {
 		t.Fatalf("picker selection decoded incorrectly: %+v", command.Chrome.PickerSelection)
 	}
 

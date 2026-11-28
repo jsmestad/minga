@@ -78,6 +78,8 @@ func (m *Model) focusedComponent() (string, bool) {
 		return "empty_state", true
 	case 15:
 		return "agent_queue", true
+	case 16:
+		return "act_menu", true
 	default:
 		return "", false
 	}
@@ -110,8 +112,7 @@ func (m *Model) reconcilePicker(picker protocol.Picker) {
 	} else if int(picker.Selected) < len(picker.Items) {
 		committedID = pickerItemID(picker.Items[picker.Selected])
 	}
-	// An open act menu owns the list keys, so a preview made before its frame arrived was a move of the menu on the BEAM; the picker row stays where the BEAM has it.
-	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible && !picker.ActionVisible)
+	m.localPresentation.reconcileIdentity(presentationPicker, picker.Generation, committedID, retained, picker.Visible)
 }
 
 func (m *Model) applyFileTreeSelection(selection protocol.FileTreeSelection) {
@@ -155,13 +156,6 @@ func (m *Model) applyPickerSelection(selection protocol.PickerSelection) {
 		payload.Picker.SelectedID = selection.SelectedID
 	} else {
 		m.localPresentation.discardIdentity(presentationPicker)
-	}
-	payload.Picker.SelectedActionID = selection.SelectedActionID
-	for index, activationID := range payload.Picker.ActionActivationIDs {
-		if activationID == selection.SelectedActionID {
-			payload.Picker.ActionIndex = byte(index)
-			break
-		}
 	}
 	m.chrome[generated.OPGuiPicker] = payload
 	m.reconcilePicker(payload.Picker)
@@ -322,8 +316,8 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 		}
 	}
 	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
-		// Remapped Enter, a key sequence, and the act menu stay with the BEAM rather than running a previewed row.
-		if picker, present := m.picker(); present && picker.Visible && picker.EnterSelects && picker.ModePrefix == "" && !picker.ActionVisible && preview.generation == picker.Generation {
+		// Remapped Enter and key sequences stay with the BEAM.
+		if picker, present := m.picker(); present && picker.Visible && picker.EnterSelects && picker.ModePrefix == "" && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
 				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true
@@ -344,8 +338,7 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 // It moves only for a key the BEAM listed as picker movement, so the preview cannot disagree with the keymap: every other key edits the query or runs another command there.
 func (m *Model) previewPickerNavigation(keyPress []byte) bool {
 	payload, ok := m.chrome[generated.OPGuiPicker]
-	// The open act menu owns the list keys; the picker's highlighted row stays where it is.
-	if !ok || !payload.Picker.Visible || payload.Picker.ActionVisible || len(payload.Picker.Items) == 0 {
+	if !ok || !payload.Picker.Visible || len(payload.Picker.Items) == 0 {
 		return false
 	}
 

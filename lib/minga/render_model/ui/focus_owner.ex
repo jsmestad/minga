@@ -19,6 +19,7 @@ defmodule Minga.RenderModel.UI.FocusOwner do
           | :empty_state
           | :tasks
           | :queue
+          | :act_menu
 
   @enforce_keys [:responder, :surface, :window_id]
   defstruct [:responder, :surface, :window_id, generation: 0]

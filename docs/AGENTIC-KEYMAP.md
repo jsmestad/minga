@@ -261,7 +261,7 @@ These work in Normal mode without the leader.
 | `gr` | Find references |
 | `gi` | Go to implementation |
 | `gy` | Go to type definition |
-| `g.` | Code actions |
+| `g.` | Open the act menu at the cursor, including actions for a Minga change or code actions |
 | `gc` | Comment or uncomment, followed by a motion |
 | `K` | Hover documentation |
 | `gj` / `gk` | Down / up one line of the file when a long line is wrapped |
@@ -522,7 +522,7 @@ Find file, project search, the buffer switcher and every other list with a query
 | Page Down / Page Up | Next / previous page |
 | `↩` | Open the highlighted row |
 | `Tab` | Complete the query |
-| `⌃.` | Open a menu of actions for the highlighted row |
+| `⌃.` | Open the shared act menu for the highlighted row |
 | `⌃V` | Open the highlighted buffer in a split (buffer switcher only) |
 | `esc` | Close the picker |
 

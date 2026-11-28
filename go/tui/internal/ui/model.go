@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,9 @@ type Model struct {
 	gitStatusHits        *gitStatusHits
 	gitHitRevision       uint64
 	reviewHitRevision    uint64
+	actMenuHitRevision   uint64
+	gutterHitRevision    uint64
+	gutterHits           []gutterActHit
 	windows              map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
@@ -413,7 +417,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reportGridResize()
 	case tea.KeyPressMsg:
 		component, _ := m.focusedComponent()
-		if component == "agent_queue" {
+		if component == "agent_queue" || component == "act_menu" {
 			if packet, ok := keyPacket(msg, m.latency.Stamp()); ok {
 				m.send(packet)
 			}
@@ -510,16 +514,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
-			if hit.publicationChanged() {
-				break // The press could belong to either side of the terminal write.
+		click, press := msg.(tea.MouseClickMsg)
+		if (hit.claimed || (press && (click.Button == tea.MouseLeft || click.Button == tea.MouseRight))) && hit.publicationChanged() {
+			break // The press could belong to either side of the terminal write.
+		}
+		if hit.claimed && !hit.maskedGit {
+			if hit.packet != nil {
+				m.send(hit.packet)
 			}
-			if hit.claimed && !hit.maskedGit {
-				if hit.packet != nil {
-					m.send(hit.packet)
-				}
-				break
-			}
+			break
+		}
+		if m.actMenu().Visible == 1 {
+			break // Only the published modal can claim a pointer action.
+		}
+		if press && click.Button == tea.MouseLeft {
 			// Which-key paints above the picker (the mode pill opens a picker's keys over it), so it answers first.
 			if packet, handled := m.whichKeyMousePacket(msg); handled {
 				if packet != nil {
@@ -776,7 +784,12 @@ func agentTranscriptScrollRows(msg tea.KeyPressMsg, page int) (int, bool) {
 func (m *Model) composeBody() string {
 	start := time.Now()
 	m.lineCache.resetCounters()
-	content, hits := m.renderBody()
+	var gutterHits []gutterActHit
+	content, hits := m.renderBody(&gutterHits)
+	if !slices.Equal(m.gutterHits, gutterHits) {
+		m.gutterHitRevision++
+	}
+	m.gutterHits = gutterHits
 	if !hits.sameTargets(m.gitStatusHits) {
 		m.gitHitRevision++
 	}
@@ -810,7 +823,12 @@ func (m Model) View() tea.View {
 		parts = append(parts, m.footerLines()[:m.layout.footer.Height]...)
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
-	frame, layers := m.composeFrameWithLayers(content)
+	var menu *lipgloss.Layer
+	var paintedMenu actMenuPresentation
+	if m.protocolError == "" {
+		menu, paintedMenu = m.floatingActMenu()
+	}
+	frame, layers, gutterHits := m.composeFrameWithLayers(content, menu)
 	out := m.cursorStyleSequence() + frame + m.latencyHUDSequence()
 	if m.zones != nil && len(m.zones.approvalMarkers) != 0 {
 		if m.transcriptRenderer != nil {
@@ -837,6 +855,20 @@ func (m Model) View() tea.View {
 	if m.protocolError == "" && len(m.peekSteps) != 0 {
 		out += fmt.Sprintf("\x1b[0:%dm", m.peekHitRevision)
 	}
+	if paintedMenu.offer != 0 {
+		out += fmt.Sprintf("\x1b[0:%dm", m.actMenuHitRevision)
+	}
+	if m.protocolError == "" && m.gutterHitRevision != 0 {
+		out += fmt.Sprintf("\x1b[0:%dm", m.gutterHitRevision)
+	}
+	var onMouse func(tea.MouseMsg) tea.Cmd
+	if m.protocolError == "" {
+		var targetStamp uint64
+		onMouse, targetStamp = m.presentedMouseHandler(layers, paintedMenu, gutterHits)
+		if targetStamp != 0 {
+			out += fmt.Sprintf("\x1b[0:%d:%dm", targetStamp>>24&0xffffff, targetStamp&0xffffff)
+		}
+	}
 	view := tea.NewView(out)
 	view.AltScreen = true
 	// The terminal reports when its window gets or loses the focus (mode 1004), which the BEAM hears as frontend_foreground.
@@ -845,8 +877,9 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
-	if m.protocolError == "" {
-		view.OnMouse = m.presentedMouseHandler(layers)
+	view.OnMouse = onMouse
+	if paintedMenu.offer != 0 {
+		return view // The modal presents its committed filter; no caret behind it.
 	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		if _, focused := m.focusedSubagentPeek(); !focused {
@@ -1146,6 +1179,7 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 	m.commitPeekTranscript(peek)
 	if m.staging.base == 0 {
 		delete(m.chrome, generated.OPGuiSubagentPeek)
+		delete(m.chrome, generated.OPGuiActMenu)
 		m.reconcilePeekMetadata(generated.GuiSubagentPeekFields{})
 		m.retireMissingWindows(windowSnapshot.windows)
 		m.lineCache.reset()
@@ -1169,6 +1203,9 @@ func (m *Model) commitStaging(cmds []tea.Cmd, command protocol.Command) []tea.Cm
 			continue
 		}
 		m.applyMutation(staged)
+	}
+	if component, _ := m.focusedComponent(); component == "act_menu" {
+		m.localPresentation.discardIdentity(presentationPicker)
 	}
 	m.scrollAgentHelp(0)
 	// Gutter state is prepared as a detached frame candidate so retain updates,
@@ -1593,6 +1630,15 @@ func (m *Model) applyMutation(command protocol.Command) {
 			next, _ := reviewModelineTarget(command.Chrome.Status)
 			if previous != next {
 				m.reviewHitRevision++
+			}
+		}
+		if command.Chrome.Opcode == generated.OPGuiActMenu {
+			old, next := m.actMenu(), command.Chrome.ActMenu
+			if old.Visible != next.Visible || old.OfferID != next.OfferID ||
+				old.AnchorRow != next.AnchorRow || old.AnchorColumn != next.AnchorColumn ||
+				old.Selected != next.Selected || old.Title != next.Title || old.Query != next.Query ||
+				!slices.Equal(old.Lead, next.Lead) || !slices.Equal(old.Rows, next.Rows) {
+				m.actMenuHitRevision++
 			}
 		}
 		m.chrome[command.Chrome.Opcode] = command.Chrome

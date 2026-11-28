@@ -487,7 +487,7 @@ struct EncoderGUIActionTests {
         #expect(end == payload.count)
     }
 
-    @Test("picker semantic activations encode the offered generation and identity")
+    @Test("picker activation and secondary menu target encode the exact offered item")
     func pickerActivationLayouts() {
         let item = captureFrame { $0.send(.pickerItemActivate(generation: 17, activationID: 23)) }
         #expect(item.count == 10)
@@ -496,12 +496,26 @@ struct EncoderGUIActionTests {
         #expect(readU32(item, 2) == 17)
         #expect(readU32(item, 6) == 23)
 
-        let action = captureFrame { $0.send(.pickerActionActivate(generation: 29, activationID: 31)) }
-        #expect(action.count == 10)
-        #expect(action[0] == OP_GUI_ACTION)
-        #expect(action[1] == GUI_ACTION_PICKER_ACTION_ACTIVATE)
-        #expect(readU32(action, 2) == 29)
-        #expect(readU32(action, 6) == 31)
+        let target = captureFrame { $0.send(.actMenuTarget(.picker(generation: 29, activationID: 31))) }
+        #expect(target.count == 11)
+        #expect(target[0] == OP_GUI_ACTION)
+        #expect(target[1] == GUI_ACTION_ACT_MENU_TARGET)
+        #expect(target[2] == 0)
+        #expect(readU32(target, 3) == 29)
+        #expect(readU32(target, 7) == 31)
+    }
+
+    @Test("filter and outside dismissal are offer-specific reserved Act menu actions")
+    func actMenuReservedActions() {
+        let offer: UInt64 = 0xE102_0304_0506_0708
+        for actionID in [UInt16.max, 0] {
+            let payload = captureFrame { $0.send(.actMenuAction(offerID: offer, actionID: actionID)) }
+            #expect(payload.count == 12)
+            #expect(payload[0] == OP_GUI_ACTION)
+            #expect(payload[1] == GUI_ACTION_ACT_MENU_ACTION)
+            #expect(readU64(payload, 2) == offer)
+            #expect(readU16(payload, 10) == actionID)
+        }
     }
 
     @Test("tab_reorder encodes action type, tab ID, and visible index")

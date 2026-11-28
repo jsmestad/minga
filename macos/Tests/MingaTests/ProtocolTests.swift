@@ -107,7 +107,8 @@ struct ProtocolDecoderTests {
         #expect(PROTOCOL_VERSION >= 30, "Hover and launchpad owners require the v30 handshake")
         #expect(OP_GUI_FOCUS_OWNER == 0xAA)
         for responder in UInt8(0)...3 {
-            for surface in UInt8(0)...Wire.FocusOwner.agentQueueSurface {
+            for surface in UInt8(0)...Wire.FocusOwner.actMenuSurface
+                where surface != Wire.FocusOwner.actMenuSurface || responder == 0 {
                 var packet = Data([0xFF, OP_GUI_FOCUS_OWNER, 0, 10, responder, surface])
                 appendWireU32(&packet, 0xA1B2_C3D4)
                 appendWireU32(&packet, 0x1234_5678)
@@ -146,7 +147,7 @@ struct ProtocolDecoderTests {
                 _ = try decodeCommand(data: Data(complete.prefix(count)), offset: 0)
             }
         }
-        let invalidValues: [(UInt8, UInt8)] = [(4, 0), (0, 16), (255, 255)]
+        let invalidValues: [(UInt8, UInt8)] = [(4, 0), (0, 17), (1, 16), (255, 255)]
         for (responder, surface) in invalidValues {
             var packet = complete
             packet[3] = responder
