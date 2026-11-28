@@ -8,6 +8,7 @@ This page is the plan: what has to be decided, what has to be proven before code
 
 | After | You get | Can you stop using an outside terminal for tests? |
 |---|---|---|
+| R | Two edits in different places of a buffer, landing in one frame, re-send only their own rows. Not ticketed yet | n/a |
 | S0 | Folded and decorated buffers scroll locally like plain ones | n/a |
 | S1 | `:!` and test keys open a drawer under your file with coloured, foldable, stoppable output. Your window is never taken | No: there is no jump from the file to an error |
 | S2 | A run segment in the modeline, `SPC c c` to run, `SPC c C` to rerun, a stop list, `SPC ~` to hide the drawer | No |
@@ -17,6 +18,23 @@ This page is the plan: what has to be decided, what has to be proven before code
 | S6 | Runs in the switcher, the full act menu, Fix with Minga | Yes |
 
 S1 and S2 alone are a better output buffer and nothing more. Plan S1 to S3 as one run of work with no other project between them.
+
+## Ordering against the Spine
+
+- #4060 slice 1 (Zig 0.17) lands before S1 writes `minga-run`. S1 writes its PTY and process-group code as a module `minga-terminal` can link.
+- #4052 (the act menu, PR #4391) merges before S2 or S6 add a target to it. It is open on 2026-11-28.
+- S1 defines the block-state and strand fields in the protocol once. #4061 reuses them.
+- #4061 gains a dependency on S2 if ADR-0010 is accepted. S5 depends on nothing from #4060.
+- S0 (#4388) changes rendering code Spine tickets share; see its coordination note.
+
+## A prerequisite Spike B found
+
+**R: one range per edit in the resident delta path.** `resident_delta_fetch_range/2` in `lib/minga_editor/render_pipeline/buffer_prefetch.ex` computes one bounding range over every pending edit. Two distant edits in one frame re-send everything between them. This is not specific to runs: an agent editing two places in a file, a multi-site rename and a format that touches the top and the bottom all hit it.
+
+- **Order:** R, then S0, then S1. A folded window keeps up today only because it takes the windowed path. S0 makes it resident, so S0 before R would move `*run*` onto the path that freezes.
+- **Done when:** `bench/run_buffer_stream.exs` (branch `spike/run-buffer-throughput-4387`) without `RUN_BENCH_SERIAL` shows every flush carried by a row delta, no frame over 16 ms p95 and the Editor mailbox bounded, for scenarios B and C at 50,000 rows; and frame time is measured on both real frontends, which Spike B did not do.
+- **If it cannot be done inside the row-delta path:** one buffer per run, and the design returns to review.
+- Not ticketed. It changes rendering code the Spine shares, so it needs the same coordination as S0 ([#4388](https://github.com/jsmestad/minga/issues/4388)).
 
 ## Decisions needed before S1
 
@@ -36,6 +54,8 @@ Two assumptions carry the design. Each gets a spike with a written result before
 
 ### Spike A: the PTY helper (blocks S1)
 
+**Done.** Result and tables: [#4386](https://github.com/jsmestad/minga/issues/4386). Recommendation: build `minga-run` as designed, with the command in a background process group of a session whose controlling terminal is the PTY, and with a settings change ending the run as well as a read. The questions below are kept as the record of what was asked.
+
 Build the smallest `minga-run`: allocate a PTY for stdout and stderr, give the child `/dev/null` as stdin, own the process group, report exit.
 
 Answer, on macOS and Linux:
@@ -49,6 +69,8 @@ Answer, on macOS and Linux:
 Done when: a table of those commands with what each printed and how each ended, and a yes or no on the "needs keyboard input" detection. If the answer is no, the design's reason for that failure becomes a plain exit code and the sentence in the design is removed.
 
 ### Spike B: an interleaved, folding buffer in the resident store (blocks S1, informs S0)
+
+**Done on the BEAM side; frame time on the real frontends not run.** Result and tables: [#4387](https://github.com/jsmestad/minga/issues/4387). As the store is today, two runs streaming into one buffer freeze the view, because edits that land in one frame are merged into one bounding range. With one frame per edit the same workload costs 2.5 ms and 4 rows per frame. Recommendation: keep one buffer per project, after the resident delta path fetches one range per edit. The questions below are kept as the record of what was asked.
 
 `*run*` is not append-only: an older running block grows above newer ones, and eviction deletes in the middle.
 
@@ -108,7 +130,7 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 
 - **Delivers:** the agent's shell commands are runs in the same buffer, with the minga strand, the word "Minga", and approvals as pending blocks. `SPC a w`.
 - **Work:** `MingaAgent.Tools.Shell` becomes a client of `Minga.Run` (colour stripped from what the model reads); approval routing from the Editor to the agent; the ⌘. order; the ADR-0008 amendment; delete `minga-shell-output-reader` and the hook runner's shell mode.
-- **Done when:** an agent run and your run appear as blocks with different strands; your keys cannot stop Minga's run; an approval answered in the drawer and one answered in the conversation agree; the agent's transcript for a known command is unchanged apart from colour.
+- **Done when:** an agent run and your run appear as blocks with different strands; your keys cannot stop Minga's run; an approval answered in the drawer and one answered in the conversation agree; the agent's reading of `mix test`, `git diff`, `rg` and `ls` is compared with today's pipe, and each difference is either covered by the tool's description or removed by the pipe option. Spike A already shows `rg` and `ls` differ.
 
 ### S6: the rest
 
@@ -125,6 +147,18 @@ Each slice lists what it delivers, the main work, and how to tell it is done. Ti
 | `docs/design/marks.md`, `themes.md`, `anatomy.md` | Strand in a block buffer, entry marks, Working takes its author's role, in-buffer button height | S1 |
 | `docs/design/scenarios.toml` and boards | Scenarios for each drawn frame, through the board generator | The slice that builds each |
 | ADR-0006 | A tenth modeline segment | S2 |
+
+## Open questions from the post-merge review
+
+Carried from the review of #4384. None is settled.
+
+- **⌘. order.** The design gives ⌘. three targets in order. Key-grammar rule 5 allows a platform key only as an alias of one binding without a modifier.
+- **`x` and ⌘. on a block Minga ran.** The design says your keys never stop Minga's run; say what the key does instead on such a block.
+- **Approval keys.** The design's act-menu text lists `y` and `n` only. The existing approval target has `y` once, `a` this session, `t` this turn, `n` deny, and `esc` defers. Use that set.
+- **Row ceiling.** Running runs are never evicted, so seven running runs at their caps exceed the resident store's 65,536 rows.
+- **Window label row.** ADR-0009 gives a buffer drawer a label while labels are showing. The drawer's minimum and the Room test do not count that row, and nothing says whether a drawer plus one file counts as two buffer windows.
+- **Where block state is drawn.** `terminal.md` uses a gutter column; the runs design uses the header row. Settle before #4061 starts.
+- **`SPC ~`** against "closing a drawer returns to the one it replaced" in `surfaces.md`.
 
 ## Not verified
 
