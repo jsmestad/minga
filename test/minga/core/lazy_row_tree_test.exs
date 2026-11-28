@@ -25,15 +25,23 @@ defmodule Minga.Core.LazyRowTreeTest do
     end
   end
 
-  test "lazy summary shifts distribute through split and merge" do
+  test "split, merge, and lazy shift preserve cached counts and summaries" do
     tree = LazyRowTree.from_sorted([{1, 2, 1}, {4, 5, 4}, {9, 1, 9}], &max_end/4)
 
+    assert LazyRowTree.count(nil) == 0
+    assert LazyRowTree.count(tree) == 3
+
     shifted = LazyRowTree.shift(tree, 7, &shift_max_end/2)
+    assert LazyRowTree.count(shifted) == 3
     assert LazyRowTree.summary(shifted) == LazyRowTree.summary(tree) + 7
 
     {left, right} = LazyRowTree.split(shifted, 12, &max_end/4, &shift_max_end/2)
+    assert LazyRowTree.count(left) == 2
+    assert LazyRowTree.count(right) == 1
+
     merged = LazyRowTree.merge(left, right, &max_end/4, &shift_max_end/2)
 
+    assert LazyRowTree.count(merged) == 3
     assert entries(merged) == [{8, 2}, {11, 5}, {16, 1}]
     assert LazyRowTree.summary(merged) == 17
   end

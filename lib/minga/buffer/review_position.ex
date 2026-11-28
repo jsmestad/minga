@@ -1,5 +1,12 @@
 defmodule Minga.Buffer.ReviewPosition do
-  @moduledoc "Ranks exact pending review heads without rebuilding the ledger when text moves."
+  @moduledoc """
+  Ranks distinct pending review heads without rebuilding the ledger when text moves.
+
+  A head stores an inclusive reach relative to its start: a one-byte change and a
+  deletion anchor both cover just the start byte. The index ranks the rightmost
+  covering head; exact pending membership and unit selection still come from the
+  history.
+  """
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
@@ -13,9 +20,8 @@ defmodule Minga.Buffer.ReviewPosition do
 
   @type rank :: {index :: pos_integer(), total :: pos_integer()}
   @typep byte_range :: {non_neg_integer(), non_neg_integer()}
-  @typep head :: {byte_count :: non_neg_integer(), gap? :: boolean()}
-  @typep summary :: {reach :: non_neg_integer(), count :: pos_integer()}
-  @typep tree :: LazyRowTree.t(head(), summary())
+  @typep reach :: non_neg_integer()
+  @typep tree :: LazyRowTree.t(reach(), non_neg_integer())
   @opaque t :: %__MODULE__{root: tree()}
 
   @spec build(UndoHistory.t(), Document.t()) :: t()
@@ -29,7 +35,7 @@ defmodule Minga.Buffer.ReviewPosition do
   def at(%__MODULE__{root: root}, point) do
     case find_rank(root, point, 0) do
       nil -> nil
-      rank -> {rank, count(LazyRowTree.summary(root))}
+      rank -> {rank, LazyRowTree.count(root)}
     end
   end
 
@@ -68,10 +74,10 @@ defmodule Minga.Buffer.ReviewPosition do
       else: repair_regions(history, document, expanded)
   end
 
-  @spec put_head({non_neg_integer(), head(), non_neg_integer()}, tree()) :: tree()
-  defp put_head({key, head, priority}, tree) do
+  @spec put_head({non_neg_integer(), reach(), non_neg_integer()}, tree()) :: tree()
+  defp put_head({key, reach, priority}, tree) do
     tree = LazyRowTree.update(tree, key, fn _ -> :delete end, &summarize/4, &shift_summary/2)
-    node = LazyRowTree.leaf(key, head, priority, &summarize/4)
+    node = LazyRowTree.leaf(key, reach, priority, &summarize/4)
     LazyRowTree.insert(tree, node, &summarize/4, &shift_summary/2)
   end
 
@@ -118,31 +124,29 @@ defmodule Minga.Buffer.ReviewPosition do
   defp heads_touching(nil, _first, _last, acc), do: acc
 
   defp heads_touching(tree, first, last, acc) do
-    {furthest, _size} = LazyRowTree.summary(tree)
-
-    if furthest < first do
+    if LazyRowTree.summary(tree) < first do
       acc
     else
-      %{key: start, value: head, left: left, right: right} =
+      %{key: start, value: reach, left: left, right: right} =
         LazyRowTree.view(tree, &shift_summary/2)
 
       acc = heads_touching(left, first, last, acc)
 
-      heads_touching_right(start, head, right, {first, last}, acc)
+      heads_touching_right(start, reach, right, {first, last}, acc)
     end
   end
 
   @spec heads_touching_right(
           non_neg_integer(),
-          head(),
+          reach(),
           tree(),
           {non_neg_integer(), non_neg_integer()},
           [non_neg_integer()]
         ) :: [non_neg_integer()]
-  defp heads_touching_right(start, _head, _right, {_first, last}, acc) when start > last, do: acc
+  defp heads_touching_right(start, _reach, _right, {_first, last}, acc) when start > last, do: acc
 
-  defp heads_touching_right(start, head, right, {first, last}, acc) do
-    acc = if reach(start, head) >= first, do: [start | acc], else: acc
+  defp heads_touching_right(start, reach, right, {first, last}, acc) do
+    acc = if start + reach >= first, do: [start | acc], else: acc
     heads_touching(right, first, last, acc)
   end
 
@@ -150,15 +154,13 @@ defmodule Minga.Buffer.ReviewPosition do
   defp find_rank(nil, _point, _preceding), do: nil
 
   defp find_rank(tree, point, preceding) do
-    {furthest, _size} = LazyRowTree.summary(tree)
-
-    if furthest >= point do
+    if LazyRowTree.summary(tree) >= point do
       tree |> LazyRowTree.view(&shift_summary/2) |> find_rank_at(point, preceding)
     end
   end
 
   @spec find_rank_at(
-          LazyRowTree.View.t(head(), {non_neg_integer(), non_neg_integer()}),
+          LazyRowTree.View.t(reach(), non_neg_integer()),
           non_neg_integer(),
           non_neg_integer()
         ) :: pos_integer() | nil
@@ -166,14 +168,14 @@ defmodule Minga.Buffer.ReviewPosition do
     do: find_rank(left, point, preceding)
 
   defp find_rank_at(
-         %{key: start, value: {length, gap?}, left: left, right: right},
+         %{key: start, value: reach, left: left, right: right},
          point,
          preceding
        ) do
-    rank = preceding + count(LazyRowTree.summary(left)) + 1
+    rank = preceding + LazyRowTree.count(left) + 1
 
     find_rank(right, point, rank) ||
-      if(point < start + length or (gap? and point == start),
+      if(point <= start + reach,
         do: rank,
         else: find_rank(left, point, preceding)
       )
@@ -182,36 +184,23 @@ defmodule Minga.Buffer.ReviewPosition do
   @spec build_heads([ReviewRibbon.t()]) :: tree()
   defp build_heads(regions), do: LazyRowTree.from_sorted(heads(regions), &summarize/4)
 
-  @spec heads([ReviewRibbon.t()]) :: [{non_neg_integer(), head(), non_neg_integer()}]
+  @spec heads([ReviewRibbon.t()]) :: [{non_neg_integer(), reach(), non_neg_integer()}]
   defp heads(regions) do
     regions
     |> Enum.reduce([], fn
-      {_unit, start, stop}, [{start, {length, gap?}, priority} | rest] ->
-        [{start, {max(length, stop - start), gap? or start == stop}, priority} | rest]
+      {_unit, start, stop}, [{start, reach, priority} | rest] ->
+        [{start, max(reach, stop - start - 1), priority} | rest]
 
       {_unit, start, stop}, acc ->
-        [{start, {stop - start, start == stop}, :erlang.phash2({:review_head, start})} | acc]
+        [{start, max(stop - start - 1, 0), :erlang.phash2({:review_head, start})} | acc]
     end)
     |> Enum.reverse()
   end
 
-  @spec summarize(non_neg_integer(), head(), summary() | nil, summary() | nil) :: summary()
-  defp summarize(start, head, left, right) do
-    {max(reach(start, head), max(furthest(left), furthest(right))),
-     1 + count(left) + count(right)}
-  end
+  @spec summarize(non_neg_integer(), reach(), non_neg_integer() | nil, non_neg_integer() | nil) ::
+          non_neg_integer()
+  defp summarize(start, reach, left, right), do: max(start + reach, max(left || 0, right || 0))
 
-  @spec reach(non_neg_integer(), head()) :: non_neg_integer()
-  defp reach(start, {length, _gap?}), do: start + max(0, length - 1)
-
-  @spec furthest(summary() | nil) :: non_neg_integer()
-  defp furthest(nil), do: 0
-  defp furthest({last, _count}), do: last
-
-  @spec count(summary() | nil) :: non_neg_integer()
-  defp count(nil), do: 0
-  defp count({_last, total}), do: total
-
-  @spec shift_summary(summary(), integer()) :: summary()
-  defp shift_summary({last, total}, delta), do: {last + delta, total}
+  @spec shift_summary(non_neg_integer(), integer()) :: non_neg_integer()
+  defp shift_summary(furthest, delta), do: furthest + delta
 end
