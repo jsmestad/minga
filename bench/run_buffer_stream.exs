@@ -1,6 +1,6 @@
 defmodule Minga.Bench.RunBufferStream.Tap do
   @moduledoc """
-  Port manager placed in front of `Minga.Test.HeadlessPort` (spike #4387, throwaway).
+  Port manager placed in front of `Minga.Test.HeadlessPort` for the run-buffer stream bench.
 
   Records every render batch the renderer admits (receive time, bytes, opcode counts) in the shared ETS event table, so the bench sees the exact wire shape of every frame without retaining packets.
 
@@ -103,9 +103,11 @@ end
 
 defmodule Minga.Bench.RunBufferStream do
   @moduledoc """
-  Spike #4387: does the resident-row update path keep up when one ~50,000-row buffer takes output that is not append-only?
+  Does the resident-row update path keep up when one ~50,000-row buffer takes output that is not append-only?
 
-  Throwaway measurement script; it never merges. See the hand-back for the limits of what it measures.
+  Written for spike #4387 and kept as the acceptance bench for #4397 (two distant edits in one frame). It measures the BEAM side only: fetch, build, encode and bytes handed to the port. It does not measure a frontend drawing the frame. Post results on the issue, not in the tree.
+
+      RUN_BENCH_SINK=drop RUN_BENCH_SCENARIOS=A:top,B:top,C:growing RUN_BENCH_ROUNDS=3 MIX_ENV=test mix run bench/run_buffer_stream.exs
 
   ## Scenarios
 
@@ -127,6 +129,7 @@ defmodule Minga.Bench.RunBufferStream do
     * `RUN_BENCH_SCENARIOS` comma list of tokens, default `A:top,B:top,B:growing,B:end,C:growing,D:growing`.
     * `RUN_BENCH_ROUNDS` repeats the whole token list this many times, interleaved (A, B, A, B, ...). Default 1.
     * `RUN_BENCH_ROWS`, `RUN_BENCH_EVICT_ROWS`, `RUN_BENCH_SECONDS`, `RUN_BENCH_HZ` (30), `RUN_BENCH_PHASE` (0.5), `RUN_BENCH_LINES` (3 per flush), `RUN_BENCH_BLOCKS` (20), `RUN_BENCH_FOLDED_BLOCKS` (22, scenario D), `RUN_BENCH_GROWING_BLOCK` (5, 1-indexed), `RUN_BENCH_EVICT_BLOCK` (10, 1-indexed).
+    * `RUN_BENCH_SERIAL` `1` waits for the Editor to handle each edit before the next write, so every edit gets its own frame. It shows what the row-delta path costs when no two edits share a frame.
     * `RUN_BENCH_SINK` `headless` (default; the renderer waits for HeadlessPort to decode each frame) or `drop` (admit and discard, like a production port admission).
     * `RUN_BENCH_RENDER` `sync` (default; the `:headless` backend renders synchronously inside the Editor turn) or `async` (experimental and unsupported: `:gui` backend, globally named `Renderer.Server` with `require_ack?: false` and no frontend acknowledgements, real debounced render timer; its numbers are leads, not measurements).
     * `RUN_BENCH_WIDTH` / `RUN_BENCH_HEIGHT` frame size in cells, default 160x50.

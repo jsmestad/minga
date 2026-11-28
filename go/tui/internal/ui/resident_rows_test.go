@@ -56,6 +56,62 @@ func TestResidentRowsRandomizedSplicesMatchSliceModel(t *testing.T) {
 	}
 }
 
+// Two edits far apart in one frame arrive as two splices of different sizes. Both address the rows the
+// store held before the frame, so the second one lands after the shift the first one caused.
+func TestResidentRowsApplyUnequalSplicesAgainstTheBase(t *testing.T) {
+	base := make([]protocol.WindowRow, 300)
+	for i := range base {
+		base[i] = protocol.WindowRow{ID: uint64(i + 1), ContentHash: uint32(i + 1), Text: "base"}
+	}
+	fresh := func(first uint64, count int) []protocol.WindowRow {
+		rows := make([]protocol.WindowRow, count)
+		for i := range rows {
+			rows[i] = protocol.WindowRow{ID: first + uint64(i), ContentHash: uint32(first) + uint32(i), Text: "new"}
+		}
+		return rows
+	}
+	cases := []struct {
+		name    string
+		splices []protocol.WindowRowSplice
+	}{
+		{"insert near the top and near the bottom", []protocol.WindowRowSplice{
+			{StartIndex: 20, DeleteCount: 1, InsertRows: fresh(1_000, 3)},
+			{StartIndex: 280, DeleteCount: 1, InsertRows: fresh(2_000, 2)},
+		}},
+		{"remove a block and append", []protocol.WindowRowSplice{
+			{StartIndex: 100, DeleteCount: 101, InsertRows: fresh(1_000, 1)},
+			{StartIndex: 299, DeleteCount: 1, InsertRows: fresh(2_000, 2)},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := newResidentRows(base, windowedRows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := make([]protocol.WindowRow, 0, len(base)+8)
+			position := 0
+			for _, splice := range tc.splices {
+				want = append(want, base[position:splice.StartIndex]...)
+				want = append(want, splice.InsertRows...)
+				position = int(splice.StartIndex + splice.DeleteCount)
+			}
+			want = append(want, base[position:]...)
+			delta := protocol.WindowContent{BaseRowCount: uint32(len(base)), ResultRowCount: uint32(len(want)), RowSplices: tc.splices}
+			next, miss, err := store.splice(delta, nil)
+			if err != nil || miss {
+				t.Fatalf("miss=%v err=%v", miss, err)
+			}
+			if next.count() != len(want) || !reflect.DeepEqual(next.materialize(), want) {
+				t.Fatalf("store has %d rows, want %d, or the rows differ", next.count(), len(want))
+			}
+			if store.count() != len(base) {
+				t.Fatalf("the base store changed")
+			}
+		})
+	}
+}
+
 func TestResidentRowsRefMissAndInvalidSplicePreserveValue(t *testing.T) {
 	rows := []protocol.WindowRow{{ID: 1, ContentHash: 1, Text: "one"}, {ID: 2, ContentHash: 2, Text: "two"}}
 	store, _ := newResidentRows(rows, windowedRows)
