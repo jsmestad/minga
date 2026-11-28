@@ -324,10 +324,13 @@ enum StoryboardCapture {
     private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?, covered: [CGRect]) -> [[String: Any]] {
         guard let pixels else { return [] }
         return parts.compactMap { part in
-            // Sample the text aperture without the card's stroke, padding, or scrollbar.
-            let inkFrame = part.name == "hover.document"
-                ? part.frame.insetBy(dx: Spacing.lg, dy: 2 * Spacing.pixel)
-                : part.frame
+            var inkFrame = part.frame
+            if part.name == "hover.document" {
+                // Native scrollbars can reserve more width than the text inset on hosted runners.
+                let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+                inkFrame = inkFrame.insetBy(dx: Spacing.lg, dy: 2 * Spacing.pixel)
+                inkFrame.size.width -= max(0, scrollerWidth - Spacing.lg)
+            }
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
                   let sample = pixels.sample(inkFrame, excluding: part.name == "breadcrumb.segment" ? covered : [],
                                              singleInk: part.name == "actMenu.key") else { return nil }

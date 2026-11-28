@@ -2043,39 +2043,9 @@ scenario = "code.diagnostics.hover"
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
-theme = "astrodark"
-pairs = ["#2f7ddc on #1a1d24"]
-reason = "The editor sampler picks up the blended block cursor edge on the diagnostic source."
-issue = 4137
-
-[[exception]]
-scenario = "code.diagnostics.hover"
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = ["#4778d7 on #303446"]
-reason = "The editor sampler picks up the blended block cursor edge on the diagnostic source."
-issue = 4137
-
-[[exception]]
-scenario = "code.diagnostics.hover"
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
 theme = "catppuccin_latte"
 pairs = ["#eebf7a on #eff1f6"]
 reason = "The existing diagnostic underline appears in the editor sample outside the card."
-issue = 4137
-
-[[exception]]
-scenario = ["code.diagnostics.hover", "code.hover", "code.hover.focused"]
-frontend = "macos"
-part = "editor.code"
-rule = "contrast"
-theme = "catppuccin_latte"
-pairs = ["#6280e5 on #eff1f6"]
-reason = "The editor sampler picks up the same blended blue ink seen on the hosted editor scenes."
 issue = 4137
 
 [[exception]]
@@ -2084,8 +2054,18 @@ frontend = "macos"
 part = "editor.code"
 rule = "contrast"
 theme = "catppuccin_latte"
-pairs = ["#40a02b on #eff1f6", "#afa3d1 on #eff1f6", "#df8d1d on #eff1f6"]
-reason = "The green and amber syntax colours and tinted review pixels appear in the code outside the card."
+pairs = ["#40a02b on #eff1f6", "#a28dd5 on #eff1f5", "#bbc5bf on #eff1f5", "#cdc2c6 on #eff1f5", "#df8d1d on #eff1f6"]
+reason = "The same syntax ink and antialiased edges occur in the matching review fixture without a hover."
+issue = 4137
+
+[[exception]]
+scenario = "minga.hover.attribution"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#60414b on #303446"]
+reason = "The same syntax edges occur in the matching review fixture without a hover."
 issue = 4137
 
 [[exception]]
@@ -2124,7 +2104,7 @@ frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
 theme = "catppuccin_latte"
-pairs = ["#a86d11 on #e6e9ef"]
+pairs = ["#b38338 on #e6e9ef"]
 reason = "The warning count uses its existing modeline ink; it measures the same with the card hidden."
 issue = 4137
 
