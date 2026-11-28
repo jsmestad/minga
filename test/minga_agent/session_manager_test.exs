@@ -531,9 +531,7 @@ defmodule MingaAgent.SessionManagerTest do
                  [worker_pid]
                )
 
-      session_ref = Process.monitor(session_pid)
-      Process.exit(session_pid, :kill)
-      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+      crash_session(manager, session_pid)
 
       :sys.get_state(manager)
 
@@ -604,9 +602,7 @@ defmodule MingaAgent.SessionManagerTest do
         end)
 
       worker_ref = Process.monitor(worker_pid)
-      session_ref = Process.monitor(session_pid)
-      Process.exit(session_pid, :kill)
-      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+      crash_session(manager, session_pid)
       :sys.get_state(manager)
 
       assert :ok =
@@ -668,9 +664,7 @@ defmodule MingaAgent.SessionManagerTest do
         end)
       end)
 
-      session_ref = Process.monitor(session_pid)
-      Process.exit(session_pid, :kill)
-      assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :killed}, 1_000
+      crash_session(manager, session_pid)
       :sys.get_state(manager)
 
       assert :ok = SessionManager.stop_session(manager, session_id)
@@ -952,9 +946,7 @@ defmodule MingaAgent.SessionManagerTest do
                [worker_pid]
              )
 
-    ref = Process.monitor(second_restart)
-    Process.exit(second_restart, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^second_restart, :killed}, 1000
+    crash_session(manager, second_restart)
 
     assert_receive {
                      :minga_event,
@@ -993,9 +985,6 @@ defmodule MingaAgent.SessionManagerTest do
         restart_window_ms: 1
       )
 
-    # Monitor establishment is asynchronous and start/get do not acknowledge it.
-    # Assert window reset, not a crash reason observed before the manager's monitor reaches the Session.
-
     first_restart = crash_and_wait_for_restart(manager, session_id, pid)
 
     assert_receive {
@@ -1004,7 +993,8 @@ defmodule MingaAgent.SessionManagerTest do
                      %SessionRestartedEvent{
                        session_id: ^session_id,
                        old_pid: ^pid,
-                       new_pid: ^first_restart
+                       new_pid: ^first_restart,
+                       reason: :killed
                      }
                    },
                    1000
@@ -1022,7 +1012,8 @@ defmodule MingaAgent.SessionManagerTest do
                      %SessionRestartedEvent{
                        session_id: ^session_id,
                        old_pid: ^first_restart,
-                       new_pid: ^second_restart
+                       new_pid: ^second_restart,
+                       reason: :killed
                      }
                    },
                    1000
@@ -1448,12 +1439,23 @@ defmodule MingaAgent.SessionManagerTest do
 
   @spec crash_and_wait_for_restart(GenServer.server(), String.t(), pid()) :: pid()
   defp crash_and_wait_for_restart(manager, session_id, pid) do
-    # Our monitor and kill share a sender, so our DOWN must report :killed.
-    # The manager's asynchronous monitor has no such ordering with this kill.
+    crash_session(manager, pid)
+    wait_until_restarted_session(manager, session_id, pid)
+  end
+
+  @spec crash_session(GenServer.server(), pid()) :: :ok
+  defp crash_session(manager, pid) do
+    # Read from the manager so the session handles its monitor signal before the query.
+    :sys.replace_state(manager, fn state ->
+      assert {:monitored_by, monitors} = Process.info(pid, :monitored_by)
+      assert self() in monitors
+      state
+    end)
+
     ref = Process.monitor(pid)
     Process.exit(pid, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1000
-    wait_until_restarted_session(manager, session_id, pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1_000
+    :ok
   end
 
   @spec crash_on_metadata(nil, term(), term()) :: nil
