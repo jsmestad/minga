@@ -1506,7 +1506,7 @@ defmodule MingaEditor.Renderer.ServerTest do
                      @async_render_timeout
     end
 
-    test "stale retry composes separated structural edits in current coordinates" do
+    test "stale retry keeps separated structural edits as two splices and sends no rows between them" do
       gate = start_supervised!({Agent, fn -> :pause_once end})
       pipeline = stale_once_resident_probe_pipeline(self(), gate)
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(300, pipeline)
@@ -1520,7 +1520,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       :ok = Minga.Buffer.Process.insert_text(buffer, "second\n")
       send(renderer, :continue_resident_probe)
 
-      assert_receive {:resident_probe, 20, 1, false, 102, [{0, 100, 102}], ^epoch},
+      assert_receive {:resident_probe, 20, 1, false, 4, [{0, 1, 2}, {99, 1, 2}], ^epoch},
                      @async_render_timeout
 
       RendererServer.frame_status(renderer, {:frame_applied, 1, 20})
