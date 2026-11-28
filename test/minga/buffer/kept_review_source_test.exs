@@ -71,8 +71,11 @@ defmodule Minga.Buffer.KeptReviewSourceTest do
           {:removed_offset, [next_written, removed, {:removed, {:replace, 1, 2, 2}, 4, "y"}]},
           {:removed_gap, [next_written, removed, {:removed, {:replace, 1, 1, 2}, 5, "y"}]},
           {:adjacency,
-           [next_written, {:removed, {:replace, 1, 0, 2}, 5, "x"},
-            {:removed, {:replace, 1, 1, 2}, 5, "y"}]}
+           [
+             next_written,
+             {:removed, {:replace, 1, 0, 2}, 5, "x"},
+             {:removed, {:replace, 1, 1, 2}, 5, "y"}
+           ]}
         ] do
       assert Source.project([written | parts], "aABCz") == [], inspect(reason)
     end
