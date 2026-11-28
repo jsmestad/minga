@@ -117,7 +117,8 @@ defmodule Minga.MixProject do
         "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
         "docs/adr/0006-the-spine.md",
         "docs/adr/0007-cua-is-a-key-profile.md",
-        "docs/adr/0008-terminal-engine.md"
+        "docs/adr/0008-terminal-engine.md",
+        "docs/adr/0009-one-modeline-and-window-labels.md"
       ],
       # The sidebar reads in task order. docs/REFERENCE.md lists the same groups, with the Changelog at the end.
       groups_for_extras: [
@@ -169,7 +170,8 @@ defmodule Minga.MixProject do
           "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
           "docs/adr/0006-the-spine.md",
           "docs/adr/0007-cua-is-a-key-profile.md",
-          "docs/adr/0008-terminal-engine.md"
+          "docs/adr/0008-terminal-engine.md",
+          "docs/adr/0009-one-modeline-and-window-labels.md"
         ]
       ],
       before_closing_head_tag: %{
