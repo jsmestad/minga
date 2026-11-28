@@ -313,13 +313,13 @@ func TestPickerPreviewDoesNotOutliveTheFrameThatOpensTheActMenu(t *testing.T) {
 				t.Fatalf("highlighted index before the frame = %d, want 2", got)
 			}
 
-			frame := pickerChrome(5, 1)
-			frame.Picker.ActionVisible = tc.actionMenu
-			frame.Picker.Actions = []string{"Open", "Delete"}
-			model.chrome[generated.OPGuiPicker] = frame
-			model.reconcilePicker(frame.Picker)
+			commands := []protocol.Command{{Kind: protocol.CommandChrome, Chrome: pickerChrome(5, 1)}}
+			if tc.actionMenu {
+				commands = append(commands, actMenuCommand(reviewActMenuFixture()), focusOwnerCommand(0, 16))
+			}
+			model = applyTo(t, model, frame(commands...)...)
 
-			if got := model.effectivePickerIndex(frame.Picker); got != tc.index {
+			if got := model.effectivePickerIndex(model.chrome[generated.OPGuiPicker].Picker); got != tc.index {
 				t.Fatalf("highlighted index after the frame = %d, want %d", got, tc.index)
 			}
 		})

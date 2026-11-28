@@ -16,9 +16,6 @@ type pickerPointerZones struct {
 	box        uiRect
 	generation uint32
 	items      [maxPopupRows]uint32
-	// actionBox and actions bind the act menu's rows, painted above the picker while the BEAM has the menu open.
-	actionBox uiRect
-	actions   [maxPopupRows]uint32
 }
 
 func pickerPointerZone(row int) string {
@@ -117,9 +114,6 @@ func (m Model) pickerPointerPacket(click tea.MouseClickMsg) ([]byte, bool) {
 	}
 	if painted.box.Width == 0 || painted.generation == 0 || painted.generation != picker.Generation {
 		return nil, true
-	}
-	if pickerActionMenuVisible(picker) {
-		return m.pickerActionPointerPacket(click, painted.generation), true
 	}
 	if !painted.box.Contains(click.X, click.Y) {
 		return protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 3, painted.generation, nil), true

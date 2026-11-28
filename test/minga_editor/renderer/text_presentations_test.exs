@@ -2,6 +2,7 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.Decorations
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias Minga.RenderModel.Window.Row
   alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.Mouse.Target.Text, as: TextTarget
@@ -15,6 +16,7 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
   alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.Window
   alias MingaEditor.Renderer.TextPresentation
+  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Renderer.TextPresentations
   alias MingaEditor.State.Windows
 
@@ -246,6 +248,40 @@ defmodule MingaEditor.Renderer.TextPresentationsTest do
     replacement = resident_presentation(store, :after_empty_view)
     registry = TextPresentations.acknowledge(registry, [replacement])
     assert TextPresentations.last_publication_nodes(registry) == initial_nodes
+  end
+
+  test "a gutter input lease follows acknowledged frames even when the marks do not move" do
+    state = TestHelpers.base_state()
+    input = Input.from_editor_state(state)
+    window = state.workspace.windows.map |> Map.fetch!(1) |> WindowIntent.from_window()
+    first = {self(), 2, {5, 0}}
+    next = {self(), 2, {6, 0}}
+    gutter = Authorship.new(10, first, [{0, 0}], [{:text, 1, {0, 0}, 0}], :resident)
+    changed = Authorship.patch(gutter, {11, next, [{0, 0}]}, [], [], [])
+    assert Authorship.update(gutter, changed) == {:patch, 10, 11, [], []}
+
+    frame = fn authorship ->
+      cache = WindowCache.put_gutter_authorship(%WindowCache{}, authorship)
+      rendered = RenderWindow.materialize(1, window, cache)
+      %{input | windows: Windows.set_map(input.windows, %{1 => rendered})}
+    end
+
+    registry = TextPresentations.new()
+    reader = TextPresentations.reader(registry)
+    registry = TextPresentations.acknowledge_output(registry, frame.(gutter))
+    assert Reader.gutter_source(reader, 1, 10) == {:ok, first}
+    assert Reader.gutter_source(reader, 2, 10) == :stale
+
+    registry = TextPresentations.commit_local_output(registry, frame.(changed))
+    assert Reader.gutter_source(reader, 1, 11) == :stale
+    assert Reader.gutter_source(reader, 1, 10) == {:ok, first}
+
+    registry = TextPresentations.acknowledge_output(registry, frame.(changed))
+    assert Reader.gutter_source(reader, 1, 10) == :stale
+    assert Reader.gutter_source(reader, 1, 11) == {:ok, next}
+
+    TextPresentations.acknowledge_output(registry, output_without_windows())
+    assert Reader.gutter_source(reader, 1, 11) == :stale
   end
 
   test "shared child graphs reclaim fully after both release orders" do

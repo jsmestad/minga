@@ -55,12 +55,11 @@ final class EditorNSView: MTKView {
 
     private var trackingArea: NSTrackingArea?
 
-    /// Whether the current right-click was consumed by a native context menu.
-    private var contextMenuShownForRightClick = false
-    private weak var activeContextMenu: NSMenu?
+    /// A native Ctrl-primary click has a primary AppKit release, but is a secondary Minga gesture.
+    private var controlClickIsSecondary = false
 
     /// Local input identity and press ownership prevent a gesture started on one
-    /// BEAM connection from sending its drag, release, or menu action to another.
+    /// BEAM connection from sending its drag or release to another.
     private var inputConnectionGeneration: UInt64 = 0
     private var inputEnabled = true
     private var leftMousePressActive = false
@@ -79,9 +78,12 @@ final class EditorNSView: MTKView {
         let peekWindowID: UInt16?
         let peekComposerToken: String?
         let parentComposerPresentation: UInt64?
+        let actMenuOfferID: UInt64?
     }
     private var imeCommitTarget: IMECommitTarget?
     private var textInputCallbacksSuppressed = false
+
+    var presentedActMenuGeometry: PresentedEditorGeometry? { editorPresentation?.geometry }
 
     /// Controlled NSTextInputContext seam for native input-routing tests.
     var inputMethodEventHandlerForTesting: ((NSEvent) -> Bool)?
@@ -655,14 +657,11 @@ final class EditorNSView: MTKView {
         lastTextHover = nil
         invalidateAccessibilityConnection()
         consumeLeftGestureTail = consumeLeftGestureTail || leftMousePressActive || leftMouseDownPoint != nil || isDraggingScrollIndicator
-        consumeRightGestureTail = consumeRightGestureTail || rightMousePressActive || contextMenuShownForRightClick
+        consumeRightGestureTail = consumeRightGestureTail || rightMousePressActive || controlClickIsSecondary
         consumeMiddleGestureTail = consumeMiddleGestureTail || middleMousePressActive
         leftMousePressActive = false
         rightMousePressActive = false
         middleMousePressActive = false
-        activeContextMenu?.cancelTracking()
-        activeContextMenu = nil
-        contextMenuShownForRightClick = false
         cancelIMEComposition()
         lastMoveRow = -1
         lastMoveCol = -1
@@ -783,10 +782,11 @@ final class EditorNSView: MTKView {
                 guard let dispatcher, dispatcher.isCurrentConnection(connectionID) else { return }
                 dispatcher.textPresentationLeases.finishAttempt(textAttempt)
             },
-            onTextPresented: { [weak self, localScrollPresentation] snapshot, textLayout in
+            onInteractionPresented: { [weak self, localScrollPresentation] snapshot, textLayout, geometry in
                 self?.promotePresentedSnapshot(
                     snapshot,
                     localScrollPresentation: localScrollPresentation,
+                    geometry: geometry,
                     textLayout: textLayout,
                     connectionID: connectionID
                 )
@@ -866,6 +866,7 @@ final class EditorNSView: MTKView {
     private func promotePresentedSnapshot(
         _ snapshot: CommittedEditorSnapshot,
         localScrollPresentation: LocalScrollPresentation?,
+        geometry: PresentedEditorGeometry,
         textLayout: PresentedTextLayout,
         connectionID: UInt64
     ) {
@@ -873,6 +874,7 @@ final class EditorNSView: MTKView {
         dispatcher.promoteVisibleEditorPresentation(
             snapshot: snapshot,
             localTransform: localScrollPresentation,
+            geometry: geometry,
             textLayout: textLayout,
             connectionID: connectionID
         )
@@ -1712,7 +1714,7 @@ final class EditorNSView: MTKView {
             return false
         }
 
-        if Self.shouldYieldSystemCommandShortcut(event) {
+        if focusPolicy.shouldYieldShortcut(event) {
             return false
         }
 
@@ -1737,10 +1739,12 @@ final class EditorNSView: MTKView {
             return
         }
 
+        let ownsActMenu = focusPolicy.focusOwnerState.decodedOwner?.ownsActMenu == true
+
         // ── Space leader key-chord interception ──
         // When SPC is pending or held, intercept chord keys before any other processing.
         // Skip when IME is composing or when the current mode treats SPC as typed text.
-        if !imeComposition.hasMarkedText && !spaceLeaderShouldTreatSpaceLiterally() {
+        if !ownsActMenu && !imeComposition.hasMarkedText && !spaceLeaderShouldTreatSpaceLiterally() {
             if let chars = event.charactersIgnoringModifiers, chars == " ", mods == 0 {
                 applySpaceLeader(spaceLeader.spaceDown(isRepeat: event.isARepeat))
                 return
@@ -1754,18 +1758,16 @@ final class EditorNSView: MTKView {
         }
 
         // ── Cmd+V paste interception ──
-        if event.modifierFlags.contains(.command),
+        if !ownsActMenu, event.modifierFlags.contains(.command),
            let chars = event.charactersIgnoringModifiers,
            chars == "v"
         {
-            if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
-                encoder.send(.paste(text))
-            }
+            pasteFromClipboard()
             return
         }
 
         // ── Cmd+G / Cmd+Shift+G: Find next/prev using Find Pasteboard ──
-        if event.modifierFlags.contains(.command),
+        if !ownsActMenu, event.modifierFlags.contains(.command),
            let chars = event.charactersIgnoringModifiers,
            chars == "g"
         {
@@ -1783,11 +1785,11 @@ final class EditorNSView: MTKView {
             return
         }
 
-        dispatcher.previewAgentHelpNavigation(event, in: window)
+        if !ownsActMenu { dispatcher.previewAgentHelpNavigation(event, in: window) }
 
         // Special keys outside composition bypass IME.
         if let codepoint = mapKeyCode(event) {
-            if handleSubagentPeekActivation(codepoint: codepoint, modifiers: mods) { return }
+            if !ownsActMenu, handleSubagentPeekActivation(codepoint: codepoint, modifiers: mods) { return }
             sendKeyPress(codepoint: codepoint, modifiers: mods)
             return
         }
@@ -1864,6 +1866,14 @@ final class EditorNSView: MTKView {
     }
 
     // MARK: - Space leader helpers
+
+    /// Deferred spaces and text composition from the prior surface must not filter a newly opened offer.
+    func actMenuTookKeyboardFocus() {
+        spaceGraceTimer?.cancel()
+        spaceGraceTimer = nil
+        spaceLeader = SpaceLeaderChord()
+        cancelIMECompositionIfTargetChanged()
+    }
 
     /// Performs one space-leader effect. The grace timer runs only while the detector holds a pending SPC.
     private func applySpaceLeader(_ effect: SpaceLeaderChord.Effect) {
@@ -1942,16 +1952,27 @@ final class EditorNSView: MTKView {
         // guard gates every geometry-hit-testing handler below; press/release pairs
         // that straddle a resize are completed by viewWillStartLiveResize instead.
         guard !inLiveResize else { return }
+        if event.modifierFlags.intersection([.control, .option, .shift, .command]) == .control {
+            controlClickIsSecondary = true
+            secondaryMouseDown(with: event, modifiers: modifierBits(from: event.modifierFlags.subtracting(.control)))
+            return
+        }
+        controlClickIsSecondary = false
         consumeLeftGestureTail = false
         leftMousePressActive = true
         focusPolicy.pointerReturnedToEditor()
 
         let point = convert(event.locationInWindow, from: nil)
+        if handleReviewRibbonPress(at: point, secondary: false) {
+            consumeLeftGestureTail = true
+            return
+        }
         if editorPresentation?.textLayout?.promptTransform == nil, beginScrollIndicatorDrag(at: point) {
             return
         }
 
         if editorPresentation?.textLayout?.promptTransform == nil, handleFoldChevronClick(at: point) {
+            consumeLeftGestureTail = true
             return
         }
 
@@ -1970,6 +1991,11 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if controlClickIsSecondary {
+            controlClickIsSecondary = false
+            secondaryMouseUp(with: event, modifiers: modifierBits(from: event.modifierFlags.subtracting(.control)))
+            return
+        }
         if consumeLeftGestureTail {
             consumeLeftGestureTail = false
             leftMousePressActive = false
@@ -2000,111 +2026,46 @@ final class EditorNSView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        // Dropped during a live resize (see mouseDown). The matching rightMouseUp stays
-        // ungated so a press that straddles the resize still delivers its release.
+        secondaryMouseDown(with: event, modifiers: modifierBits(from: event.modifierFlags))
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        secondaryMouseUp(with: event, modifiers: modifierBits(from: event.modifierFlags))
+    }
+
+    private func secondaryMouseDown(with event: NSEvent, modifiers: UInt8) {
         guard !inLiveResize else { return }
         consumeRightGestureTail = false
         rightMousePressActive = true
         focusPolicy.pointerReturnedToEditor()
         resetCursorBlink()
-        let (row, col) = cellPosition(from: event)
-        let cc = UInt8(clamping: event.clickCount)
         let point = convert(event.locationInWindow, from: nil)
-        let target = dispatcher.visibleEditorPresentation?.textLayout?.hit(at: point, capturedWindowID: nil)?.target
-        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_PRESS, clickCount: cc)) {
-            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS, clickCount: cc))
+        if handleReviewRibbonPress(at: point, secondary: true) {
+            consumeRightGestureTail = true
+            return
         }
-        contextMenuShownForRightClick = true
-        let menu = buildEditorContextMenu(connectionGeneration: inputConnectionGeneration, target: target)
-        activeContextMenu = menu
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
-        if activeContextMenu === menu {
-            activeContextMenu = nil
+        if let target = foldChevronTarget(at: point) {
+            encoder.send(.actMenuTarget(.fold(windowID: target.windowID, generation: target.generation, sourceLine: target.line)))
+            consumeRightGestureTail = true
+            return
+        }
+        let clickCount = UInt8(clamping: event.clickCount)
+        if !sendPresentedText(at: point, button: MOUSE_BUTTON_RIGHT, modifiers: modifiers, eventType: MOUSE_PRESS, clickCount: clickCount) {
+            let (row, col) = cellPosition(from: event)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifiers, eventType: MOUSE_PRESS, clickCount: clickCount))
         }
     }
 
-    override func rightMouseUp(with event: NSEvent) {
-        if consumeRightGestureTail {
-            consumeRightGestureTail = false
+    private func secondaryMouseUp(with event: NSEvent, modifiers: UInt8) {
+        defer {
             rightMousePressActive = false
-            return
+            consumeRightGestureTail = false
         }
-        rightMousePressActive = false
-        if contextMenuShownForRightClick {
-            _ = sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_RELEASE, clickCount: 1)
-            contextMenuShownForRightClick = false
-            return
-        }
-
-        let (row, col) = cellPosition(from: event)
-        if !(sendPresentedText(event: event, button: MOUSE_BUTTON_RIGHT, eventType: MOUSE_RELEASE, clickCount: 1)) {
-            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE, clickCount: 1))
-        }
-    }
-
-    private struct EditorContextMenuAction {
-        let name: String
-        let connectionGeneration: UInt64
-    }
-
-    private func buildEditorContextMenu(connectionGeneration: UInt64, target: EditorTextTarget?) -> NSMenu {
-        let menu = NSMenu(title: "Editor")
-        menu.autoenablesItems = false
-        addEditorMenuItem("Cut", action: "cut", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Copy", action: "copy", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Paste", action: "paste", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Select All", action: "select_all", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Attach Selection to Agent Draft", action: "agent_attach_selection", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Attach Current Buffer to Agent Draft", action: "agent_attach_buffer", connectionGeneration: connectionGeneration, to: menu)
-        if let target {
-            let action = "agent_attach_diagnostics_at:\(target.windowID):\(target.presentationID)"
-            addEditorMenuItem("Attach File Diagnostics to Agent Draft", action: action, connectionGeneration: connectionGeneration, to: menu)
-        }
-        menu.addItem(.separator())
-
-        let hasLsp = statusBarState?.hasLsp ?? false
-        addEditorMenuItem("Go to Definition", action: "goto_definition", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
-        addEditorMenuItem("Peek Definition", action: "peek_definition", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
-        addEditorMenuItem("Find References", action: "find_references", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
-        addEditorMenuItem("Rename Symbol", action: "rename_symbol", connectionGeneration: connectionGeneration, to: menu, enabled: hasLsp)
-        menu.addItem(.separator())
-
-        addEditorMenuItem("Toggle Comment", action: "toggle_comment_line", connectionGeneration: connectionGeneration, to: menu)
-        addEditorMenuItem("Format Document", action: "format_buffer", connectionGeneration: connectionGeneration, to: menu)
-        return menu
-    }
-
-    private func addEditorMenuItem(
-        _ title: String,
-        action: String,
-        connectionGeneration: UInt64,
-        to menu: NSMenu,
-        enabled: Bool = true
-    ) {
-        let item = NSMenuItem(title: title, action: #selector(handleEditorContextMenuItem(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = EditorContextMenuAction(name: action, connectionGeneration: connectionGeneration)
-        item.isEnabled = enabled
-        menu.addItem(item)
-    }
-
-    @objc private func handleEditorContextMenuItem(_ sender: NSMenuItem) {
-        guard let action = sender.representedObject as? EditorContextMenuAction else { return }
-        performEditorContextMenuAction(action.name, connectionGeneration: action.connectionGeneration)
-    }
-
-    private func performEditorContextMenuAction(_ action: String, connectionGeneration: UInt64) {
-        guard connectionGeneration == inputConnectionGeneration, !consumeRightGestureTail else { return }
-
-        switch action {
-        case "cut":
-            encoder.send(.commandCut)
-        case "copy":
-            encoder.send(.commandCopy)
-        case "paste":
-            pasteFromClipboard()
-        default:
-            encoder.send(.executeCommand(name: action))
+        guard rightMousePressActive, !consumeRightGestureTail else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if !sendPresentedText(at: point, button: MOUSE_BUTTON_RIGHT, modifiers: modifiers, eventType: MOUSE_RELEASE, clickCount: 1) {
+            let (row, col) = cellPosition(from: event)
+            encoder.send(.mouse(row: row, column: col, button: MOUSE_BUTTON_RIGHT, modifiers: modifiers, eventType: MOUSE_RELEASE, clickCount: 1))
         }
     }
 
@@ -2140,7 +2101,7 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard !consumeLeftGestureTail else { return }
+        guard !consumeLeftGestureTail, !controlClickIsSecondary else { return }
         guard !inLiveResize else { return }
         if isDraggingScrollIndicator {
             let point = convert(event.locationInWindow, from: nil)
@@ -2390,23 +2351,6 @@ final class EditorNSView: MTKView {
             consumesMiddleGestureTail: consumeMiddleGestureTail,
             inputEnabled: inputEnabled
         )
-    }
-
-    func performContextMenuActionForTesting(_ action: String, connectionGeneration: UInt64) {
-        performEditorContextMenuAction(action, connectionGeneration: connectionGeneration)
-    }
-
-    func beginMousePressForTesting(button: UInt8) {
-        switch button {
-        case MOUSE_BUTTON_LEFT:
-            leftMousePressActive = true
-        case MOUSE_BUTTON_RIGHT:
-            rightMousePressActive = true
-        case MOUSE_BUTTON_MIDDLE:
-            middleMousePressActive = true
-        default:
-            break
-        }
     }
 
     func scrollTrackTargetForTesting(y: CGFloat) -> UInt32 {
@@ -3320,6 +3264,10 @@ final class EditorNSView: MTKView {
 
     /// A peek commit carries the marked text's original destination through the BEAM focus boundary.
     private func commitIMEText(_ text: String, target: IMECommitTarget?) {
+        if target?.actMenuOfferID != nil {
+            for scalar in text.unicodeScalars { sendKeyPress(codepoint: scalar.value, modifiers: 0) }
+            return
+        }
         if let token = target?.peekComposerToken, let window = target?.peekWindowID {
             encoder.send(.subagentPeek(.insertText, windowID: window, displayed: token, target: text, row: 0, column: 0))
             return
@@ -3340,13 +3288,16 @@ final class EditorNSView: MTKView {
         }
         let chat = dispatcher.guiState.agentChatState
         let parentComposerOwnsText = chat.visible && chat.promptFocused && chat.promptPresentation != 0
+        let actMenuOfferID = focusPolicy.focusOwnerState.decodedOwner?.ownsActMenu == true
+            ? dispatcher.guiState.actMenuState.menu?.offerID : nil
         return IMECommitTarget(
             connectionGeneration: inputConnectionGeneration,
             windowID: surface?.windowId,
             contentEpoch: surface?.content.contentEpoch,
             peekWindowID: peek?.windowID,
             peekComposerToken: peek?.token,
-            parentComposerPresentation: parentComposerOwnsText ? chat.promptPresentation : nil
+            parentComposerPresentation: parentComposerOwnsText ? chat.promptPresentation : nil,
+            actMenuOfferID: actMenuOfferID
         )
     }
 
@@ -3413,8 +3364,9 @@ final class EditorNSView: MTKView {
     /// frame's commit_frame resolves a keystroke-to-present sample on the shared
     /// dispatcher recorder.
     private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
-        let queueOwnsKeyboard = focusPolicy.focusOwnerState.decodedOwner?.ownsAgentQueue == true
-        if !queueOwnsKeyboard {
+        let focusOwner = focusPolicy.focusOwnerState.decodedOwner
+        let localEditorKeys = focusOwner?.ownsAgentQueue != true && focusOwner?.ownsActMenu != true
+        if localEditorKeys {
             updateOptimisticTextInputMode(codepoint: codepoint, modifiers: modifiers)
             dispatcher.previewCompletionNavigation(codepoint: codepoint, modifiers: modifiers)
             dispatcher.previewPickerNavigation(codepoint: codepoint, modifiers: modifiers)
@@ -3423,7 +3375,7 @@ final class EditorNSView: MTKView {
         recoveryManager?.onKeySent()
         let seq = dispatcher.latency.stamp()
         let peekOwnsKeyboard = dispatcher.guiState.subagentPeekState.metadata.pane?.focused == true
-        let composerOffer = !queueOwnsKeyboard && !peekOwnsKeyboard && (codepoint == 13 || codepoint == 102)
+        let composerOffer = localEditorKeys && !peekOwnsKeyboard && (codepoint == 13 || codepoint == 102)
             ? dispatcher.guiState.agentChatState.draftAttachmentOffer : 0
         encoder.send(.keyPress(codepoint: codepoint, modifiers: modifiers, sequence: seq, composerOffer: composerOffer))
     }
@@ -3574,10 +3526,30 @@ final class EditorNSView: MTKView {
     }
 
     private func handleFoldChevronClick(at point: NSPoint) -> Bool {
-        guard let (gutter, entry) = foldChevronEntry(at: point),
-              let content = editorPresentationSnapshot?.content(for: gutter.windowId) else { return false }
-        encoder.send(.foldToggleAtLine(windowID: gutter.windowId, generation: content.accessibilityGeneration, bufferLine: entry.bufLine))
+        guard let target = foldChevronTarget(at: point) else { return false }
+        encoder.send(.foldToggleAtLine(windowID: target.windowID, generation: target.generation, bufferLine: target.line))
         return true
+    }
+
+    private func foldChevronTarget(at point: NSPoint) -> (windowID: UInt16, generation: UInt64, line: UInt32)? {
+        guard editorPresentation?.textLayout?.promptTransform == nil,
+              let (gutter, entry) = foldChevronEntry(at: point),
+              let content = editorPresentationSnapshot?.content(for: gutter.windowId) else { return nil }
+        return (gutter.windowId, content.accessibilityGeneration, entry.bufLine)
+    }
+
+    private func handleReviewRibbonPress(at point: NSPoint, secondary: Bool) -> Bool {
+        guard bounds.contains(point),
+              let hit = presentedActMenuGeometry?.ribbonHit(at: point) else { return false }
+        switch hit {
+        case .head(let action):
+            encoder.send(action)
+            return true
+        case .mark:
+            // A body or human/kept mark must not be normalized into a source-text
+            // right-click, which the BEAM would otherwise treat as a review target.
+            return secondary
+        }
     }
 
     private func foldChevronEntry(at point: NSPoint) -> (gutter: Wire.WindowGutter, entry: Wire.GutterEntry)? {

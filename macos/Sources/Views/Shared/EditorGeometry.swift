@@ -12,9 +12,8 @@ import SwiftUI
 
 /// Editor surface geometry the chrome needs to position overlays.
 ///
-/// Deliberately has NO cursor fields: the cursor is dynamic per-frame state that
-/// lives in `GUIState` (via `CompletionState` anchors, etc.). The app-only
-/// `FrameState` cursor is intentionally not carried here.
+/// Most overlays carry their own BEAM anchors. The Act menu's physical caret
+/// and grid metrics are exceptions captured with the visible Metal presentation.
 public struct EditorGeometry: Equatable, Sendable {
     /// Width of one monospaced cell in points.
     public var cellWidth: CGFloat
@@ -28,6 +27,7 @@ public struct EditorGeometry: Equatable, Sendable {
     public var gutterLeftMargin: CGFloat
     /// Gap between the gutter and the text column, in points.
     public var gutterRightGap: CGFloat
+    public var actMenuGridCellSize: CGSize?
 
     public init(
         cellWidth: CGFloat,
@@ -35,7 +35,8 @@ public struct EditorGeometry: Equatable, Sendable {
         viewportWidth: CGFloat,
         gutterCol: Int,
         gutterLeftMargin: CGFloat,
-        gutterRightGap: CGFloat
+        gutterRightGap: CGFloat,
+        actMenuGridCellSize: CGSize? = nil
     ) {
         self.cellWidth = cellWidth
         self.cellHeight = cellHeight
@@ -43,6 +44,7 @@ public struct EditorGeometry: Equatable, Sendable {
         self.gutterCol = gutterCol
         self.gutterLeftMargin = gutterLeftMargin
         self.gutterRightGap = gutterRightGap
+        self.actMenuGridCellSize = actMenuGridCellSize
     }
 
     /// Canvas-preview geometry with plausible metrics for a Metal-free preview.

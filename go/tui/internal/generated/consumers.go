@@ -62,6 +62,7 @@ var GoRequiredOpcodes = map[byte]string{
 	OPGuiAgentQueue:             "gui_agent_queue",
 	OPGuiSubagentPeek:           "gui_subagent_peek",
 	OPGuiSubagentPeekTranscript: "gui_subagent_peek_transcript",
+	OPGuiActMenu:                "gui_act_menu",
 }
 
 var GoSkippedOpcodes = map[byte]string{
@@ -77,4 +78,5 @@ var GoSkippedOpcodes = map[byte]string{
 	OPGuiCursorAnimation:      "Terminal controls cursor animation",
 	OPGuiConfigState:          "Native settings state is not used by the TUI",
 	OPGuiMenuBar:              "The terminal has no menu bar; the mode pill and which-key are its mouse path",
+	OPGuiFileLocationAction:   "Finder and Terminal.app actions are specific to native macOS",
 }

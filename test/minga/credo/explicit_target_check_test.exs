@@ -237,6 +237,30 @@ defmodule Minga.Credo.ExplicitTargetCheckTest do
     end
   end
 
+  test "act-menu positions require the exact offer or painted target contracts" do
+    for {opcode, payload, triggers} <- [
+          {:gui_action_act_menu_action, "<<offer::64, id::16>>", []},
+          {:gui_action_act_menu_action, "<<offer::64, index::16>>", ["index"]},
+          {:gui_action_review_ribbon_act,
+           "<<window::16, revision::64, kind, unit::64, row::32, column::32, y::16, x::16>>", []},
+          {:gui_action_review_ribbon_act,
+           "<<window::16, kind, unit::64, row::32, column::32, y::16, x::16>>",
+           ["window", "x", "y"]},
+          {:gui_action_act_menu_target, "<<1, window::16, generation::64, line::32>>", []},
+          {:gui_action_act_menu_target, "<<1, window::16, line::32>>", ["window"]}
+        ] do
+      issues =
+        """
+        defmodule MingaEditor.Frontend.Protocol.GUI do
+          def decode_gui_action(@#{opcode}, #{payload}), do: :ok
+        end
+        """
+        |> check()
+
+      assert Enum.sort(Enum.map(issues, & &1.trigger)) == triggers
+    end
+  end
+
   test "existing narrow identities need a reasoned capped exemption" do
     code = """
     defmodule MingaEditor.Frontend.Protocol.GUI do

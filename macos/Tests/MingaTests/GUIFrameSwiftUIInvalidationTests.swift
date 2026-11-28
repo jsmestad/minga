@@ -750,8 +750,7 @@ struct GUIFrameSwiftUIInvalidationTests {
                 title: "Files",
                 query: "",
                 hasPreview: false,
-                rawItems: [Self.pickerItem(label: "pick-me")],
-                actionMenu: nil
+                rawItems: [Self.pickerItem(label: "pick-me")]
             )
         }
         await expectOnlyOwnerProbeUpdate(.agent, value: "review the diff", recorder: recorder) {
@@ -1435,7 +1434,6 @@ struct GUIFrameSwiftUIInvalidationTests {
             query: "",
             hasPreview: false,
             rawItems: [pickerItem(label: label)],
-            actionMenu: nil,
             modePrefix: "",
             loadStatus: .ready
         )
@@ -1478,7 +1476,6 @@ struct GUIFrameSwiftUIInvalidationTests {
             query: "",
             hasPreview: false,
             items: [pickerItem(label: label)],
-            actionMenu: nil,
             modePrefix: "",
             loadStatus: .ready,
             queryGeneration: 0,

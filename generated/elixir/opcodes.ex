@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 59
+  def protocol_version, do: 60
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -274,6 +274,10 @@ defmodule Minga.Protocol.Opcodes do
   def gui_subagent_peek, do: 0xAF
   @spec gui_subagent_peek_transcript() :: non_neg_integer()
   def gui_subagent_peek_transcript, do: 0xB0
+  @spec gui_act_menu() :: non_neg_integer()
+  def gui_act_menu, do: 0xB1
+  @spec gui_file_location_action() :: non_neg_integer()
+  def gui_file_location_action, do: 0xB2
 
 
   # GUI action sub-opcodes (Frontend to BEAM)
@@ -421,8 +425,6 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_picker_query_changed, do: 0x5F
   @spec gui_action_picker_item_activate() :: non_neg_integer()
   def gui_action_picker_item_activate, do: 0x60
-  @spec gui_action_picker_action_activate() :: non_neg_integer()
-  def gui_action_picker_action_activate, do: 0x61
   @spec gui_action_search_focus() :: non_neg_integer()
   def gui_action_search_focus, do: 0x62
   @spec gui_action_file_dialog_result() :: non_neg_integer()
@@ -467,5 +469,11 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_queue_action, do: 0x76
   @spec gui_action_subagent_peek_action() :: non_neg_integer()
   def gui_action_subagent_peek_action, do: 0x77
+  @spec gui_action_act_menu_action() :: non_neg_integer()
+  def gui_action_act_menu_action, do: 0x78
+  @spec gui_action_review_ribbon_act() :: non_neg_integer()
+  def gui_action_review_ribbon_act, do: 0x79
+  @spec gui_action_act_menu_target() :: non_neg_integer()
+  def gui_action_act_menu_target, do: 0x7A
 
 end

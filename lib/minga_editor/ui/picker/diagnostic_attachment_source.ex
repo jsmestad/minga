@@ -9,9 +9,7 @@ defmodule MingaEditor.UI.Picker.DiagnosticAttachmentSource do
   alias MingaAgent.DraftAttachment
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
-  alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.State
-  alias MingaEditor.Window
   alias MingaEditor.UI.Picker.{Context, Item, SelectionAttachmentTargetSource, Source}
 
   @max_bytes DraftAttachment.max_bytes()
@@ -26,23 +24,9 @@ defmodule MingaEditor.UI.Picker.DiagnosticAttachmentSource do
   def open(%State{} = state),
     do: NoticeWorkflow.publish(state, "Open a file before attaching diagnostics.")
 
-  @doc "Opens diagnostics for an exact presented editor pane, never the focused buffer."
-  @spec open_presented(State.t(), String.t()) :: State.t()
-  def open_presented(state, target) do
-    with [window, presentation] <- String.split(target, ":", parts: 2),
-         {window_id, ""} when window_id > 0 <- Integer.parse(window),
-         {presentation_id, ""} when presentation_id > 0 <- Integer.parse(presentation),
-         %Window{content: {:buffer, buffer}} <- Map.get(state.workspace.windows.map, window_id),
-         reader when reader != nil <- state.render.text_interaction_reader,
-         {:ok, {^buffer, _version}} <- Reader.source(reader, window_id, presentation_id) do
-      open_buffer(state, buffer)
-    else
-      _stale -> NoticeWorkflow.publish(state, "This editor pane changed. Open the menu again.")
-    end
-  end
-
+  @doc "Opens the destination picker for the named buffer, independent of keyboard focus."
   @spec open_buffer(State.t(), pid()) :: State.t()
-  defp open_buffer(state, buffer) do
+  def open_buffer(state, buffer) do
     case {Buffer.storage(buffer), Buffer.file_path(buffer)} do
       {{:remote, _, _}, _path} ->
         NoticeWorkflow.publish(state, "Diagnostics snapshots are only available for local files.")

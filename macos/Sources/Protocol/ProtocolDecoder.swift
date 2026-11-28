@@ -40,6 +40,16 @@ struct NativeFileDialogRequest: Sendable, Equatable {
     let suggestedPath: String
 }
 
+/// An out-of-band host action approved by the BEAM after it validates a file offer.
+struct NativeFileLocationAction: Sendable, Equatable {
+    enum Kind: UInt8, Sendable {
+        case reveal, openTerminal
+    }
+
+    let kind: Kind
+    let path: String
+}
+
 // `StatusBarUpdate` and its nested types moved to StatusBarUpdate.swift in the
 // MingaProtocol framework. The decoder still constructs it below.
 
@@ -87,6 +97,7 @@ enum RenderCommand: Sendable {
     case applicationQuitResponse(ApplicationQuitResponse)
     case agentDesktopNotification(AgentDesktopNotification)
     case guiRequest(NativeFileDialogRequest)
+    case guiFileLocationAction(NativeFileLocationAction)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
     case registerFont(id: UInt8, family: String)
@@ -100,8 +111,9 @@ enum RenderCommand: Sendable {
     case guiWhichKey(Wire.WhichKey)
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(StatusBarUpdate)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = [])
-    case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32, empty: Wire.EmptyList? = nil, listKeys: Bool = false, movementKeys: [Wire.PickerMovementKey] = [], hints: [Wire.KeyHint] = [])
+    case guiPickerSelection(generation: UInt32, selectedItemID: UInt32)
+    case guiActMenu(Wire.ActMenu?)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
     case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation, composerHints: [AgentComposerHint] = [], continueTarget: AgentStopTarget? = nil, promptFocused: Bool = false)
     case guiAgentQueue(Wire.AgentQueue?)
@@ -528,6 +540,19 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             )),
             3 + payloadLength
         )
+
+    case .guiFileLocationAction:
+        var header = try ByteCursor(data, range: rest..<data.endIndex)
+        let payloadLength = Int(try header.readUInt16())
+        var payload = try header.readSubcursor(count: payloadLength)
+        guard let kind = NativeFileLocationAction.Kind(rawValue: try payload.readUInt8()) else {
+            throw ProtocolDecodeError.malformed
+        }
+        let path = try payload.readString(count: Int(try payload.readUInt16()))
+        guard payload.isAtEnd, path.hasPrefix("/"), !path.utf8.contains(0) else {
+            throw ProtocolDecodeError.malformed
+        }
+        return (.guiFileLocationAction(.init(kind: kind, path: path)), 3 + payloadLength)
 
     case .beginFrame:
         // begin_frame (#2739): <opcode, frame_seq:u32, base_frame_seq:u32, generation:u32>.
@@ -1532,7 +1557,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let pickerSectionCount = Int(data[rest])
         if pickerSectionCount == 0 {
-            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, markedCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil, modePrefix: "", loadStatus: .ready, queryGeneration: 0, acknowledgedQueryEditSeq: 0, activationGeneration: 0), 2)
+            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, markedCount: 0, title: "", query: "", hasPreview: false, items: [], modePrefix: "", loadStatus: .ready, queryGeneration: 0, acknowledgedQueryEditSeq: 0, activationGeneration: 0), 2)
         }
         var pickerPos = rest + 1
         var pkVisible = false
@@ -1544,7 +1569,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pkTitle = ""
         var pkQuery = ""
         var pkItems: [Wire.PickerItem] = []
-        var pkActionMenu: Wire.PickerActionMenu? = nil
         var pkModePrefix = ""
         var pkLoadStatus: Wire.PickerLoadStatus = .ready
         var pkQueryGeneration: UInt32 = 0
@@ -1608,12 +1632,6 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                         )
                     }
 
-                case 0x04: // Action menu
-                    let (m, _) = try GeneratedProtocol.decodeGuiPickerActionMenu(data, psStart, psEnd)
-                    if m.visible != 0 {
-                        pkActionMenu = Wire.PickerActionMenu(selectedIndex: m.selectedIndex, actions: m.actions, activationIDs: m.activationIds)
-                    }
-
                 case 0x06: // LoadStatus
                     let (s, _) = try GeneratedProtocol.decodeGuiPickerLoadStatus(data, psStart, psEnd)
                     switch s.status {
@@ -1656,7 +1674,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             pickerPos = psEnd
         }
 
-        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys, movementKeys: pkMovementKeys, hints: pkHints), pickerPos - offset)
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, markedCount: pkMarkedCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, modePrefix: pkModePrefix, loadStatus: pkLoadStatus, queryGeneration: pkQueryGeneration, acknowledgedQueryEditSeq: pkAcknowledgedQueryEditSeq, activationGeneration: pkActivationGeneration, empty: pkEmpty, listKeys: pkListKeys, movementKeys: pkMovementKeys, hints: pkHints), pickerPos - offset)
 
     case .guiPickerSelection:
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
@@ -1665,8 +1683,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         guard payloadLen == 12, payloadStart + payloadLen <= data.count else { throw ProtocolDecodeError.malformed }
         let generation = try readU32(data, payloadStart)
         let selectedItemID = try readU32(data, payloadStart + 4)
-        let selectedActionID = try readU32(data, payloadStart + 8)
-        return (.guiPickerSelection(generation: generation, selectedItemID: selectedItemID, selectedActionID: selectedActionID), 3 + payloadLen)
+        // The final u32 was the picker-only action selection and is reserved.
+        return (.guiPickerSelection(generation: generation, selectedItemID: selectedItemID), 3 + payloadLen)
 
     case .guiPickerPreview:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -3088,7 +3106,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             throw ProtocolDecodeError.malformed
         }
         let start = rest + 2
-        guard data[start] <= 3, data[start + 1] <= Wire.FocusOwner.agentQueueSurface else {
+        let surface = data[start + 1]
+        guard data[start] <= 3, surface <= Wire.FocusOwner.actMenuSurface,
+              surface != Wire.FocusOwner.actMenuSurface || data[start] == Wire.FocusOwner.Responder.editorView.rawValue else {
             throw ProtocolDecodeError.malformed
         }
         let (fields, _) = try GeneratedProtocol.decodeGuiFocusOwnerFields(data, start, start + payloadLength)
@@ -3097,6 +3117,34 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             windowID: fields.windowID, generation: fields.generation
         )
         return (.guiFocusOwner(owner), 3 + payloadLength)
+
+    case .guiActMenu:
+        var header = try ByteCursor(data, range: rest..<data.endIndex)
+        let payloadLength = Int(try header.readUInt32())
+        let payload = try header.readSubcursor(count: payloadLength)
+        let end = payload.offset + payloadLength
+        do {
+            let (fields, decodedEnd) = try GeneratedProtocol.decodeGuiActMenuFields(data, payload.offset, end)
+            guard decodedEnd == end, fields.visible <= 1 else { throw ProtocolDecodeError.malformed }
+            if fields.visible == 0 { return (.guiActMenu(nil), 5 + payloadLength) }
+            guard let role = Wire.ActMenu.Role(rawValue: fields.role), fields.offerID != 0,
+                  fields.lead.count <= 2,
+                  (fields.anchorRow < UInt16.max - 1 && fields.anchorColumn < UInt16.max - 1) ||
+                    fields.anchorRow == fields.anchorColumn else {
+                throw ProtocolDecodeError.malformed
+            }
+            func row(_ fields: GeneratedProtocol.ActMenuRow) -> Wire.ActMenu.Row {
+                .init(id: fields.id, key: fields.key, label: fields.label, hint: fields.hint,
+                      detail: fields.detail, section: fields.section, destructive: fields.destructive != 0)
+            }
+            return (.guiActMenu(.init(
+                offerID: fields.offerID, role: role, anchorRow: fields.anchorRow, anchorColumn: fields.anchorColumn,
+                selectedID: fields.selected, title: fields.title, query: fields.query,
+                lead: fields.lead.map(row), rows: fields.rows.map(row)
+            )), 5 + payloadLength)
+        } catch is GeneratedProtocol.DecodeError {
+            throw ProtocolDecodeError.malformed
+        }
 
     case .guiAgentQueue:
         var header = try ByteCursor(data, range: rest..<data.endIndex)

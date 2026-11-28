@@ -7,14 +7,18 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
 
   @type root_ref :: reference()
   @type current_root :: {pid(), root_ref() | nil}
+  @type gutter_leases :: %{
+          optional(pos_integer()) => {pos_integer(), Minga.Buffer.RendererConsume.review_lease()}
+        }
   @type t :: %__MODULE__{
           table: :ets.table(),
           current_roots: %{optional(pos_integer()) => current_root()},
+          gutter_leases: gutter_leases(),
           last_publication_nodes: non_neg_integer()
         }
 
   @enforce_keys [:table]
-  defstruct [:table, current_roots: %{}, last_publication_nodes: 0]
+  defstruct [:table, current_roots: %{}, gutter_leases: %{}, last_publication_nodes: 0]
 
   @spec new() :: t()
   def new do
@@ -24,6 +28,15 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
 
   @spec reader(t()) :: Reader.t()
   def reader(%__MODULE__{table: table}), do: Reader.new(table)
+
+  @doc "Publishes only the compact gutter leases from one acknowledged frame."
+  @spec publish_gutters(t(), gutter_leases()) :: t()
+  def publish_gutters(%__MODULE__{gutter_leases: leases} = index, leases), do: index
+
+  def publish_gutters(%__MODULE__{} = index, leases) do
+    :ets.insert(index.table, {:gutter_leases, leases})
+    %{index | gutter_leases: leases}
+  end
 
   @doc "Publishes one complete candidate graph and pins its lease and current root."
   @spec publish(t(), TextPresentation.t()) :: t()
@@ -122,7 +135,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex do
   @spec reset(t()) :: t()
   def reset(%__MODULE__{table: table} = index) do
     :ets.delete_all_objects(table)
-    %{index | current_roots: %{}, last_publication_nodes: 0}
+    %{index | current_roots: %{}, gutter_leases: %{}, last_publication_nodes: 0}
   end
 
   @spec last_publication_nodes(t()) :: non_neg_integer()

@@ -296,11 +296,14 @@ func (g Gutter) ResolveAuthorship(previous Gutter) (*GutterAuthorship, bool) {
 			return nil, false
 		}
 		base = previous.Authorship.regions
-		if update.Kind == GutterAuthorshipRetain {
+		if len(update.Added) == 0 && len(update.Removed) == 0 {
 			if len(base) != 0 && base[len(base)-1].maxLast >= g.Resident.LineCount {
 				return nil, false
 			}
-			return previous.Authorship, true
+			if update.Kind == GutterAuthorshipRetain {
+				return previous.Authorship, true
+			}
+			return &GutterAuthorship{Revision: update.Revision, regions: base}, true
 		}
 	default:
 		return nil, false

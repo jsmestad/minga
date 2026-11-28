@@ -47,8 +47,10 @@ final class EditorFocusPolicy: EditorFocusControlling {
 
     /// Records the authoritative owner only after its frame commits.
     func focusOwnerDidChange(_ owner: Wire.FocusOwner) {
+        let gainedActMenu = owner.ownsActMenu && decodedOwner?.ownsActMenu != true
         decodedOwner = owner
         focusOwnerState.publish(owner: owner)
+        if gainedActMenu { (editorView as? EditorNSView)?.actMenuTookKeyboardFocus() }
         applyDecodedOwner()
     }
 
@@ -291,7 +293,7 @@ final class EditorFocusPolicy: EditorFocusControlling {
         if event.windowNumber != window.windowNumber {
             return event
         }
-        if event.type == .keyDown, Self.shouldYieldSystemCommandShortcut(event) {
+        if event.type == .keyDown, shouldYieldShortcut(event) {
             return event
         }
         if nativeTextEditingIsActive() {
@@ -309,6 +311,26 @@ final class EditorFocusPolicy: EditorFocusControlling {
             return event
         }
         return nil
+    }
+
+    /// Text shortcuts belong to the menu's key route while it owns the editor
+    /// responder. Keep yielding actual application and window commands to AppKit.
+    func shouldYieldShortcut(_ event: NSEvent) -> Bool {
+        if decodedOwner?.ownsActMenu == true {
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == .command {
+                switch event.charactersIgnoringModifiers {
+                case "a", "c", "v", "x", "z": return false
+                default: break
+                }
+            } else if modifiers == [.command, .shift] {
+                switch event.charactersIgnoringModifiers {
+                case "z", "Z": return false
+                default: break
+                }
+            }
+        }
+        return Self.shouldYieldSystemCommandShortcut(event)
     }
 
     /// Returns true for shortcuts that AppKit or the menu bar must handle.
@@ -456,6 +478,12 @@ final class EditorFocusPolicy: EditorFocusControlling {
 
     private func resolvedKind(in window: NSWindow) -> Wire.FocusOwner.Responder? {
         let alreadyFocused = responderForDecodedOwner().map { hasFocus($0, in: window) } ?? false
+        // A mounted picker or Find field can hand focus to the Act menu.
+        // Do not interrupt marked text or an unrelated native text lease.
+        let overlayFieldHandsOff = decodedOwner?.ownsActMenu == true
+            && (pickerQuery.map { hasFocus($0, in: window) } == true
+                || searchQuery.map { hasFocus($0, in: window) } == true)
+            && (window.firstResponder as? NSTextView)?.hasMarkedText() != true
         return FocusResolution.resolve(
             committed: decodedOwner,
             lifecycle: FocusLifecycleState(
@@ -465,7 +493,7 @@ final class EditorFocusPolicy: EditorFocusControlling {
                 windowIsKey: window.isKeyWindow || !window.isVisible,
                 nativeTextEditingActive: localTextEditing != nil
                     || (editorView as? EditorNSView)?.hasMarkedText() == true
-                    || (nativeTextEditingIsActive() && !alreadyFocused)
+                    || (nativeTextEditingIsActive() && !alreadyFocused && !overlayFieldHandsOff)
             )
         )
     }

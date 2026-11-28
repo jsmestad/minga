@@ -129,25 +129,20 @@ type WhichKey struct {
 }
 
 type Picker struct {
-	Visible             bool
-	Generation          uint32
-	Selected            uint16
-	SelectedID          uint32
-	SelectedActionID    uint32
-	Filtered            uint16
-	Total               uint16
-	Marked              uint16
-	HasPreview          bool
-	Title               string
-	Query               string
-	ModePrefix          string
-	LoadStatus          byte
-	LoadError           string
-	Actions             []string
-	ActionActivationIDs []uint32
-	ActionIndex         byte
-	ActionVisible       bool
-	Items               []PickerItem
+	Visible    bool
+	Generation uint32
+	Selected   uint16
+	SelectedID uint32
+	Filtered   uint16
+	Total      uint16
+	Marked     uint16
+	HasPreview bool
+	Title      string
+	Query      string
+	ModePrefix string
+	LoadStatus byte
+	LoadError  string
+	Items      []PickerItem
 	// Empty is set while the picker offers its source's next steps instead of results: the header says what happened and why, and Items are the next-step rows.
 	Empty *generated.EmptyList
 	// ListKeys is true while the picker has nothing to filter: it takes no text, and j and k move, q closes.

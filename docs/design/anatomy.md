@@ -127,7 +127,7 @@ The top of the act menu and every surface where Minga asks a yes or no question.
 | Label to consequence | `hairline` | 2 pt | next row |
 | Height | content | label plus consequence, at least 44 pt | 2 rows |
 
-The label uses `emphasis` semibold, centred; the consequence uses `caption` in the secondary colour, centred below. The selected half fills with the target's role colour (TUI: reverse video in that role). The no half is never preselected.
+On macOS both cards share the same top edge, heading baseline and bottom shortcut baseline. The consequence starts below the heading and aligns with its text, not its key. The label uses `emphasis` semibold and the consequence uses smaller text; neither relies on low contrast for hierarchy. The selected half uses a light tint and outline in the target's role. The TUI centers the label and consequence in two rows and uses reverse video in the target's role. The no half is never preselected.
 
 ## Popover and menu
 
@@ -146,7 +146,7 @@ The act menu, the twist-head menu's successor, and any compact panel at a target
 | Width | content | 280 to 420 pt | 36 to 64 columns |
 | Panel vertical padding | `xs` | 4 pt | 0 rows |
 
-Labels use `body`; menu keys and direct keys use `Typography.monospacedSmall`, direct keys in the secondary colour. Help sits in the bottom border in the TUI and is absent on macOS. The panel is exactly as tall as its content.
+Labels use `body`; menu keys and direct keys use `Typography.monospacedSmall` on macOS. The menu text must reach 4.5:1 against the panel and any selection fill. The storyboard audit measures the text in the menu and the still-visible text behind it. Help sits in the bottom border in the TUI and is absent on macOS. The panel fits its content and stays within the viewport.
 
 ## Which-key panel
 

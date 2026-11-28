@@ -234,7 +234,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID), "status": i.status, "status_tone": Int(i.statusTone.rawValue), "group": i.group]
         }
@@ -252,9 +252,6 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["has_preview"] = hasPreview
         result["items"] = itemArray
         result["movement_keys"] = movementKeys.map { ["codepoint": Int($0.codepoint), "modifiers": Int($0.modifiers), "delta": $0.delta] }
-        if let am = actionMenu {
-            result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions, "activation_ids": am.activationIDs]
-        }
         switch loadStatus {
         case .ready: result["load_status"] = "ready"
         case .loading: result["load_status"] = "loading"
@@ -264,6 +261,25 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["list_keys"] = listKeys
         result["hints"] = hints.map { ["keys": $0.keys, "word": $0.word] }
         return result
+
+    case .guiActMenu(let menu):
+        guard let menu else { return ["type": "gui_act_menu", "visible": false] }
+        let anchor: (UInt16, UInt16) = switch menu.anchor {
+        case .centered: (.max, .max)
+        case .caret: (0xFFFE, 0xFFFE)
+        case .grid(let row, let column): (row, column)
+        }
+        func row(_ row: Wire.ActMenu.Row) -> [String: Any] {
+            ["id": Int(row.id), "key": row.key, "label": row.label, "hint": row.hint,
+             "detail": row.detail, "section": row.section, "destructive": row.destructive]
+        }
+        return ["type": "gui_act_menu", "visible": true, "offer_id": jsonUInt64(menu.offerID),
+                "role": Int(menu.role.rawValue), "anchor_row": Int(anchor.0), "anchor_column": Int(anchor.1),
+                "selected": Int(menu.selectedID), "title": menu.title, "query": menu.query,
+                "lead": menu.lead.map(row), "rows": menu.rows.map(row)]
+
+    case .guiFileLocationAction(let action):
+        return ["type": "gui_file_location_action", "kind": Int(action.kind.rawValue), "path": action.path]
 
     case .guiPickerPreview(let visible, let lines):
         let lineArray = lines.map { segments -> [[String: Any]] in

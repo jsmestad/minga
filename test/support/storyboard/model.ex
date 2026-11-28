@@ -14,6 +14,7 @@ defmodule Minga.Test.Storyboard.Model do
   @type surface ::
           :which_key
           | :picker
+          | :act_menu
           | :minibuffer
           | :completion
           | :signature_help
@@ -96,6 +97,7 @@ defmodule Minga.Test.Storyboard.Model do
   @transient [
     :which_key,
     :picker,
+    :act_menu,
     :minibuffer,
     :completion,
     :signature_help,
@@ -245,6 +247,7 @@ defmodule Minga.Test.Storyboard.Model do
     [
       which_key: match?(%{visible: true}, ui.which_key),
       picker: visible?(ui.picker),
+      act_menu: match?(%Minga.RenderModel.UI.ActMenu{}, ui.act_menu),
       minibuffer: visible?(ui.minibuffer),
       completion: visible?(ui.completion),
       signature_help: visible?(ui.signature_help),

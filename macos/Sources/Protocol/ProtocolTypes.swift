@@ -1111,19 +1111,6 @@ public enum Wire {
         }
     }
 
-    /// An action menu for the picker (the ⌃. act menu).
-    public struct PickerActionMenu: Sendable {
-        public let selectedIndex: UInt8
-        public let actions: [String]
-        public let activationIDs: [UInt32]
-
-        public init(selectedIndex: UInt8, actions: [String], activationIDs: [UInt32] = []) {
-            self.selectedIndex = selectedIndex
-            self.actions = actions
-            self.activationIDs = activationIDs
-        }
-    }
-
     /// Async loading status for picker sources.
     public enum PickerLoadStatus: Sendable, Equatable {
         case ready
@@ -1573,6 +1560,10 @@ public enum Wire {
                 return previous
             case .patch(let base, let revision, let added, let removed):
                 guard let previous, previous.revision == base else { return nil }
+                if added.isEmpty && removed.isEmpty {
+                    guard Self.fits(previous.index.last?.maxLast, sourceLineCount) else { return nil }
+                    return GutterAuthorship(revision: revision, index: previous.index)
+                }
                 return replacing(revision: revision, previous: previous.index, added: added,
                                  removed: removed, sourceLineCount: sourceLineCount)
             }

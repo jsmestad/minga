@@ -522,6 +522,22 @@ struct MouseInputTests {
         #expect(spy.mouseEventCalls[0].eventType == MOUSE_PRESS)
     }
 
+    @Test("Ctrl-primary click sends a secondary press and release even if Ctrl is lifted first")
+    @MainActor func controlClickUsesSecondaryButton() throws {
+        let spy = SpyEncoder()
+        let view = try #require(makeView(spy: spy))
+        let point = NSPoint(x: 20, y: 20)
+        let press = try #require(mouseEvent(type: .leftMouseDown, location: point, modifiers: .control))
+        let release = try #require(mouseEvent(type: .leftMouseUp, location: point))
+
+        view.mouseDown(with: press)
+        view.mouseUp(with: release)
+
+        #expect(spy.mouseEventCalls.map(\.button) == [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_RIGHT])
+        #expect(spy.mouseEventCalls.map(\.modifiers) == [0, 0])
+        #expect(spy.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE])
+    }
+
     // MARK: - Middle click
 
     @Test("otherMouseDown sends middle button press")

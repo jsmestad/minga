@@ -3,11 +3,14 @@ defmodule Minga.Buffer.ReviewRibbon do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Lines
+  alias Minga.Buffer.Position
   alias Minga.Buffer.Provenance
   alias Minga.Buffer.ReviewDamage
   alias Minga.Buffer.UndoHistory
 
   @type t :: {[non_neg_integer()], non_neg_integer(), non_neg_integer()}
+  @type head :: {:text | :gap, pos_integer(), Document.position()}
+  @type extent :: {:lines, pos_integer()} | {:removed_bytes, pos_integer()} | :none
   @typep bounds :: {non_neg_integer(), non_neg_integer(), boolean()}
   @typep piece :: UndoHistory.review_region()
   @typep members :: %{Provenance.group_id() => Provenance.group_id()}
@@ -200,6 +203,31 @@ defmodule Minga.Buffer.ReviewRibbon do
     end
   end
 
+  @doc "Prepares the whole units of the exact displayed text or deletion head."
+  @spec prepare_presented(UndoHistory.t(), Document.t(), head()) ::
+          {:ok, UndoHistory.review_target()} | :empty
+  def prepare_presented(history, document, {kind, unit, {row, column} = position}) do
+    case Document.line_at(document, row) do
+      text when is_binary(text) and column <= byte_size(text) ->
+        point = Position.point_for(document, position)
+        size = Document.content_byte_size(document)
+
+        history
+        |> regions(document, [{point, min(point + 1, size), point == size}])
+        |> Enum.find_value(:empty, fn
+          {[^unit | _] = units, ^point, stop}
+          when (kind == :gap and stop == point) or (kind == :text and stop > point) ->
+            UndoHistory.prepare_review_units(history, units)
+
+          _other ->
+            nil
+        end)
+
+      _outside ->
+        :empty
+    end
+  end
+
   defp collect_units(history, doc, {units, head, stop}, point, count, seen, acc) do
     {seen, acc, added?} =
       Enum.reduce(units, {seen, acc, false}, fn unit, {seen, acc, added?} ->
@@ -240,6 +268,35 @@ defmodule Minga.Buffer.ReviewRibbon do
           {non_neg_integer(), non_neg_integer()}
   def source_rows(document, start, stop),
     do: {row_at(document, start), row_at(document, max(start, stop - 1))}
+
+  @doc "Counts distinct written source rows, or the retained preimage size of a deletion-only offer."
+  @spec extent(Document.t(), [Provenance.keep_source()]) :: extent()
+  def extent(document, sources) do
+    {ranges, removed} =
+      Enum.reduce(sources, {[], 0}, fn
+        {:written, _origin, start, bytes}, {ranges, removed} ->
+          {[source_rows(document, start, start + bytes) | ranges], removed}
+
+        {:removed, _origin, _point, text}, {ranges, removed} ->
+          {ranges, removed + byte_size(text)}
+      end)
+
+    case ranges do
+      [] when removed > 0 ->
+        {:removed_bytes, removed}
+
+      [] ->
+        :none
+
+      ranges ->
+        lines =
+          ranges
+          |> ReviewDamage.merge_ranges([])
+          |> Enum.reduce(0, fn {first, last}, total -> total + last - first + 1 end)
+
+        {:lines, lines}
+    end
+  end
 
   @doc "Expands byte damage to source rows on either side of each potential join."
   @spec damage_rows(Document.t(), [{non_neg_integer(), non_neg_integer()}]) ::

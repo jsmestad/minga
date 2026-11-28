@@ -321,17 +321,17 @@ enum StoryboardCapture {
 
     /// The surface and every ink under each part that shows text. A part can hold an icon and words; each ink is
     /// judged, so a strong icon cannot pass weak words.
-    private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?, covered: CGRect?) -> [[String: Any]] {
+    private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?, covered: [CGRect]) -> [[String: Any]] {
         guard let pixels else { return [] }
         return parts.compactMap { part in
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : nil) else { return nil }
+                  let sample = pixels.sample(part.frame, excluding: part.name == "breadcrumb.segment" ? covered : []) else { return nil }
             return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
         }
     }
 
     /// Every distinct ink colour in the visible Metal text, syntax colours included, with its surface.
-    private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?, covered: CGRect?) -> [String: Any] {
+    private static func code(_ elements: [[String: Any]], pixels: StoryboardPixels?, covered: [CGRect]) -> [String: Any] {
         guard let pixels,
               let editor = elements.first(where: { element in
                   guard element["role"] as? String == "AXTextArea",
@@ -376,8 +376,18 @@ enum StoryboardCapture {
                                    snapshot: CommittedEditorSnapshot) -> Data {
         var elements: [[String: Any]] = []
         walk(host, depth: 0, window: window, into: &elements)
-        // Audit the visible parts of the breadcrumb and editor, not the empty picker's fill and text.
-        let covered = parts.first { $0.name == "picker.panel" }?.frame
+        // Sample visible editor and breadcrumb ink, not the overlaid panel's fill or text.
+        // Two interior bars of the rounded Act menu leave its transparent corners and shadow in the sample.
+        let covered = parts.flatMap { part -> [CGRect] in
+            switch part.name {
+            case "picker.panel":
+                [part.frame]
+            case "actMenu.panel":
+                [part.frame.insetBy(dx: Radius.lg, dy: 0), part.frame.insetBy(dx: 0, dy: Radius.lg)]
+            default:
+                []
+            }
+        }
         let measured: [[String: Any]] = parts.filter { $0.name != "picker.panel" }.map { part in
             var entry: [String: Any] = [
                 "part": part.name,

@@ -76,19 +76,17 @@ defmodule Minga.RenderModel.Window.Gutter.Authorship do
     removed = old |> MapSet.difference(new) |> Enum.sort()
     added = new |> MapSet.difference(old) |> Enum.sort()
 
-    case {removed, added} do
-      {[], []} ->
-        %{previous | lease: lease, ranges: ranges, index: index}
-
-      _changed ->
-        %{
-          previous
-          | revision: revision,
-            lease: lease,
-            ranges: ranges,
-            index: index,
-            change: {previous.revision, added, removed}
-        }
+    if removed == [] and added == [] and lease == previous.lease do
+      %{previous | ranges: ranges, index: index}
+    else
+      %{
+        previous
+        | revision: revision,
+          lease: lease,
+          ranges: ranges,
+          index: index,
+          change: {previous.revision, added, removed}
+      }
     end
   end
 

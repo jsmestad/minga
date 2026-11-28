@@ -200,7 +200,9 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       gui_menu_bar: 0xAD,
       gui_agent_queue: 0xAE,
       gui_subagent_peek: 0xAF,
-      gui_subagent_peek_transcript: 0xB0
+      gui_subagent_peek_transcript: 0xB0,
+      gui_act_menu: 0xB1,
+      gui_file_location_action: 0xB2
     )
   end
 
@@ -278,7 +280,6 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       chat_returned_to_bottom: 0x5D,
       picker_query_changed: 0x5F,
       picker_item_activate: 0x60,
-      picker_action_activate: 0x61,
       search_focus: 0x62,
       file_dialog_result: 0x63,
       focus_window: 0x64,
@@ -300,7 +301,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       which_key_back: 0x74,
       agent_continue_turn: 0x75,
       agent_queue_action: 0x76,
-      subagent_peek_action: 0x77
+      subagent_peek_action: 0x77,
+      act_menu_action: 0x78,
+      review_ribbon_act: 0x79,
+      act_menu_target: 0x7A
     )
   end
 

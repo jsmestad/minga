@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -328,6 +330,24 @@ func TestAuthoredGutterPinsAcrossLeadingVirtualRowAndReleasesAtRegionEnd(t *test
 	authored, _ := model.windowGutter(windowID)
 	if region, head, shared, ok := authored.Authorship.RegionAt(2, true, false); !ok || head || !shared || region.Unit != 0 {
 		t.Errorf("the shared replacement must show both authors without an actionable head: %+v", region)
+	}
+
+	out := make(chan []byte, 16)
+	model.out = out
+	content.Rows[1].BufferLine = 1
+	model.windows[windowID] = content
+	model = settle(model)
+	view := model.View()
+	x := gutterRenderWidth(authored) - 1
+	click := tea.MouseClickMsg(tea.Mouse{X: x, Y: model.layout.body.Y, Button: tea.MouseLeft})
+	updateFromPublishedView(model, view, click)
+	want := []byte{0x07, 0x79, 0, windowID, 0, 0, 0, 0, 0, 0, 0, 11, 0}
+	want = binary.BigEndian.AppendUint64(want, 42)
+	want = binary.BigEndian.AppendUint64(want, 0) // The authored head is line 0, byte 0.
+	want = binary.BigEndian.AppendUint16(want, 0) // The sticky head painted over the virtual row.
+	want = binary.BigEndian.AppendUint16(want, uint16(x))
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("head on virtual row sent %x; want %x", packets, want)
 	}
 }
 

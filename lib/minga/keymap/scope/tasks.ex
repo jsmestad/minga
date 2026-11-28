@@ -77,6 +77,7 @@ defmodule Minga.Keymap.Scope.Tasks do
     |> Bindings.bind(~k(i), :tasks_inspect, "Inspect")
     |> Bindings.bind(~k(x), :tasks_stop, "Stop")
     |> Bindings.bind(~k(RET), :tasks_open, "Open")
+    |> Bindings.bind(~k(g .), :tasks_act_menu, "Act on the selected task")
     |> Bindings.bind(~k(] h), :tasks_next_change, "Next change")
     |> Bindings.bind(~k([ h), :tasks_prev_change, "Previous change")
     |> Bindings.bind(~k(q), :tasks_back, "Back or close")

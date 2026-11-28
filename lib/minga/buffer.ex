@@ -612,6 +612,14 @@ defmodule Minga.Buffer do
           | {:error, BufferProcess.review_selection_error()}
   defdelegate prepare_review(server, selection), to: BufferProcess
 
+  @doc "Prepares a review decision with its full source footprint and visual-selection ribbon count."
+  @spec prepare_review_with_extent(t(), BufferProcess.review_selection()) ::
+          {:ok, BufferProcess.review_target(), Minga.Buffer.UndoHistory.review_scope(),
+           pos_integer(), Minga.Buffer.ReviewRibbon.extent()}
+          | :empty
+          | {:error, BufferProcess.review_selection_error()}
+  defdelegate prepare_review_with_extent(server, selection), to: BufferProcess
+
   @doc "Moves to a pending change head in the current version of the buffer."
   @spec move_to_review_change(t(), :next | :previous, pos_integer()) ::
           {:ok, Document.position()} | :at_boundary
@@ -653,6 +661,11 @@ defmodule Minga.Buffer do
           | Minga.Buffer.UndoHistory.blocked()
           | {:error, BufferProcess.review_error()}
   defdelegate preview_review(server, target), to: BufferProcess
+
+  @doc "Checks that an offered review preview still matches the buffer and history."
+  @spec review_offer_current(t(), non_neg_integer(), BufferProcess.review_target()) ::
+          :ok | :stale
+  defdelegate review_offer_current(server, version, target), to: BufferProcess
 
   @doc "Resolves the same pending task unit and moves the file cursor to it."
   @spec move_to_review_unit(t(), Minga.Buffer.UndoHistory.review_location()) ::

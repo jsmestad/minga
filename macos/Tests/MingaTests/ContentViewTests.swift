@@ -2754,12 +2754,12 @@ struct ContentViewTests {
         let leftUp = try #require(mouseEvent(type: .leftMouseUp, locationInWindow: point, windowNumber: 0))
         let middleDown = try #require(mouseEvent(type: .otherMouseDown, locationInWindow: point, windowNumber: 0))
         let middleUp = try #require(mouseEvent(type: .otherMouseUp, locationInWindow: point, windowNumber: 0))
+        let rightDown = try #require(mouseEvent(type: .rightMouseDown, locationInWindow: point, windowNumber: 0))
         let rightUp = try #require(mouseEvent(type: .rightMouseUp, locationInWindow: point, windowNumber: 0))
 
         editorView.mouseDown(with: leftDown)
         editorView.otherMouseDown(with: middleDown)
-        editorView.beginMousePressForTesting(button: MOUSE_BUTTON_RIGHT)
-        let oldGeneration = editorView.interactionSnapshot.inputConnectionGeneration
+        editorView.rightMouseDown(with: rightDown)
 
         let intermediateEncoder = SpyEncoder()
         editorView.replaceConnection(encoder: intermediateEncoder)
@@ -2777,22 +2777,24 @@ struct ContentViewTests {
         editorView.mouseUp(with: leftUp)
         editorView.rightMouseUp(with: rightUp)
         editorView.otherMouseUp(with: middleUp)
-        editorView.performContextMenuActionForTesting("select_all", connectionGeneration: oldGeneration)
         #expect(intermediateEncoder.mouseEventCalls.isEmpty)
         #expect(intermediateEncoder.actions.isEmpty)
         #expect(replacementEncoder.mouseEventCalls.isEmpty)
         #expect(replacementEncoder.actions.isEmpty)
 
-        let replacementGeneration = editorView.interactionSnapshot.inputConnectionGeneration
         editorView.mouseDown(with: leftDown)
         editorView.mouseUp(with: leftUp)
         editorView.otherMouseDown(with: middleDown)
         editorView.otherMouseUp(with: middleUp)
-        editorView.performContextMenuActionForTesting("select_all", connectionGeneration: replacementGeneration)
+        editorView.rightMouseDown(with: rightDown)
+        editorView.rightMouseUp(with: rightUp)
 
-        #expect(replacementEncoder.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE])
-        #expect(replacementEncoder.actions.last == .executeCommand(name: "select_all"))
-        #expect(replacementEncoder.actions.count == 5)
+        #expect(replacementEncoder.mouseEventCalls.map(\.eventType) == [MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE, MOUSE_PRESS, MOUSE_RELEASE])
+        #expect(replacementEncoder.mouseEventCalls.map(\.button) == [
+            MOUSE_BUTTON_LEFT, MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_MIDDLE,
+            MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_RIGHT
+        ])
+        #expect(replacementEncoder.actions.count == 6)
     }
 
     @Test("replacement protocol connection accepts a lower keyframe from controlled pipes", .timeLimit(.minutes(1)))

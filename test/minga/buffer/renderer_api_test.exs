@@ -233,6 +233,57 @@ defmodule Minga.Buffer.RendererAPITest do
              Buffer.renderer_consume(buffer)
   end
 
+  test "a presented ribbon prepares exactly its grouped units without using the caret" do
+    buffer = start_supervised!({Buffer, content: "one\ntwo\nthree\nunchanged\nfour\n"})
+
+    for {row, old, new} <- [{0, "one", "ONE"}, {1, "two", "TWO"}, {2, "three", "THREE"}] do
+      source = EditSource.minga("task", new)
+      assert :ok = Buffer.apply_edit(buffer, row, 0, row, byte_size(old), new, source)
+    end
+
+    assert :ok = Buffer.apply_edit(buffer, 4, 0, 4, 4, "FOUR", EditSource.minga("other", "four"))
+    assert :ok = Buffer.move_to(buffer, {4, 0})
+    %{review_lease: lease, version: version} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:text, first, {0, 0}, 2}]} =
+             Buffer.render_review_regions(buffer, lease, [{1, 1}])
+
+    assert {:ok, [{:text, other, {4, 0}, 4}]} =
+             Buffer.render_review_regions(buffer, lease, [{4, 4}])
+
+    assert {:error, :stale_selection} =
+             Buffer.prepare_review(buffer, {:presented_ribbon, lease, {:text, first, {1, 0}}})
+
+    assert {:ok, target, _, 3} =
+             Buffer.prepare_review(buffer, {:presented_ribbon, lease, {:text, first, {0, 0}}})
+
+    assert Buffer.cursor(buffer) == {4, 0}
+    assert :ok = Buffer.decide_review(buffer, target, :keep)
+    assert Buffer.version(buffer) == version
+
+    assert {:error, :stale_selection} =
+             Buffer.prepare_review(buffer, {:presented_ribbon, lease, {:text, other, {4, 0}}})
+
+    assert {:ok, _, _, 1} = Buffer.prepare_review(buffer, {:cursor, 1})
+  end
+
+  test "a presented deletion head still identifies its exact unit at the end of file" do
+    buffer = start_supervised!({Buffer, content: "before tail"})
+    assert :ok = Buffer.apply_edit(buffer, 0, 6, 0, 11, "", EditSource.minga("task", "delete"))
+    %{review_lease: lease} = Buffer.renderer_consume(buffer)
+
+    assert {:ok, [{:gap, id, {0, 6}} = head]} =
+             Buffer.render_review_regions(buffer, lease, [{0, 0}])
+
+    assert {:error, :stale_selection} =
+             Buffer.prepare_review(buffer, {:presented_ribbon, lease, {:text, id, {0, 6}}})
+
+    assert {:ok, target, _, 1} = Buffer.prepare_review(buffer, {:presented_ribbon, lease, head})
+
+    assert {:ok, [_receipt]} = Buffer.decide_review(buffer, target, :reject)
+    assert Buffer.content(buffer) == "before tail"
+  end
+
   test "review regions join adjacent pieces without bridging disjoint work from the same unit" do
     buffer = start_supervised!({Buffer, content: "abcdef\nmid\nuvwxyz"})
     source = EditSource.minga("task", "resumed")

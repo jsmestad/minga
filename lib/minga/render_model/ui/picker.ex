@@ -4,7 +4,6 @@ defmodule Minga.RenderModel.UI.Picker do
   """
 
   alias Minga.RenderModel.UI.EmptyList
-  alias Minga.RenderModel.UI.Picker.ActionMenu
 
   @type load_status :: :ready | :loading | {:error, String.t()}
   @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
@@ -58,10 +57,8 @@ defmodule Minga.RenderModel.UI.Picker do
           marked_count: non_neg_integer(),
           activation_generation: non_neg_integer(),
           selected_item_id: non_neg_integer(),
-          selected_action_id: non_neg_integer(),
           has_preview?: boolean(),
           items: [item()],
-          action_menu: ActionMenu.t() | nil,
           mode_prefix: String.t(),
           load_status: load_status(),
           movement_keys: [movement_key()],
@@ -83,10 +80,8 @@ defmodule Minga.RenderModel.UI.Picker do
             marked_count: 0,
             activation_generation: 0,
             selected_item_id: 0,
-            selected_action_id: 0,
             has_preview?: false,
             items: [],
-            action_menu: nil,
             mode_prefix: "",
             load_status: :ready,
             movement_keys: [],

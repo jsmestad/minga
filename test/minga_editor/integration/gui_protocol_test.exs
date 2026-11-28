@@ -10,6 +10,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Adapter.GUI.ActMenuEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -22,6 +23,8 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
   alias Minga.Protocol.Opcodes
+  alias Minga.RenderModel.UI.ActMenu
+  alias Minga.RenderModel.UI.ActMenu.Row, as: ActMenuRow
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.FileTree
   alias Minga.RenderModel.UI.FileTree.Editing
@@ -1477,6 +1480,45 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  test "round-trips an exact shared review offer and hides it again", %{harness: harness} do
+    reject = %ActMenuRow{
+      id: 17,
+      key: "n",
+      label: "Reject 2 changes",
+      hint: "SPC a d",
+      detail: "Undoes Minga’s edits. Yours stay.",
+      section: "This change",
+      destructive?: true
+    }
+
+    model = %ActMenu{
+      id: 4_294_967_300,
+      title: "Minga’s changes",
+      role: :minga,
+      anchor: :caret,
+      query: "Reject",
+      selected: nil,
+      lead: [],
+      rows: [reject]
+    }
+
+    {shown, caches} = ActMenuEncoder.encode(model, Caches.new())
+
+    assert %{
+             "visible" => true,
+             "offer_id" => id,
+             "selected" => 0,
+             "anchor_row" => 0xFFFE,
+             "anchor_column" => 0xFFFE,
+             "query" => "Reject",
+             "rows" => [%{"id" => 17, "label" => "Reject 2 changes", "destructive" => true}]
+           } = round_trip(harness, shown, "gui_act_menu")
+
+    assert to_string(id) == to_string(model.id)
+    {hidden, _caches} = ActMenuEncoder.encode(:hidden, caches)
+    assert %{"visible" => false} = round_trip(harness, hidden, "gui_act_menu")
+  end
+
   describe "gui_picker visible" do
     test "round-trips visible picker with items", %{harness: harness} do
       # The production PickerBuilder normalizes a filtered legacy picker into
@@ -1520,7 +1562,6 @@ defmodule Minga.Integration.GUIProtocolTest do
             group: "Claude (subscription)"
           }
         ],
-        action_menu: nil,
         mode_prefix: ">",
         load_status: :ready,
         movement_keys: [

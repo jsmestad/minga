@@ -725,7 +725,7 @@ reason = "Syntax colours on the cursor line miss 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -737,7 +737,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -749,7 +749,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -761,7 +761,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek", "minga.tasks.child_selected"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek", "minga.tasks.child_selected", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "modeline.modePill"
 rule = "contrast"
@@ -773,7 +773,7 @@ reason = "The modeline.modePill text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek", "minga.tasks.child_selected"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty", "code.actions.none", "code.references.none", "files.tree.empty", "git.status.clean", "search.buffer.no_results", "start.empty", "start.open_dir.home", "start.open_dir.not_project", "start.open_dir.restored", "code.diagnostics.none", "files.switcher.no_match", "search.project.no_results", "settings.extensions.none", "minga.queue", "minga.queue.empty", "minga.subagent.peek", "minga.tasks.child_selected", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "modeline.modeText"
 rule = "contrast"
@@ -785,7 +785,7 @@ reason = "The modeline.modeText text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["start.project_switcher.empty", "minga.queue", "minga.queue.empty"]
+scenario = ["start.project_switcher.empty", "minga.queue", "minga.queue.empty", "minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
@@ -794,6 +794,40 @@ pairs = [
   "#eff1f5 on #1e66f5",
 ]
 reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#40a02b on #eff1f6",
+  "#8c8fa1 on #eff1f6",
+  "#df8d1d on #eff1f6",
+]
+reason = "Existing editor ink on the Latte background; visible pixels are unchanged from a menu-closed replay."
+issue = 4137
+
+[[exception]]
+scenario = "minga.act_menu.selection"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#fe640c on #eff1f6"]
+reason = "Existing literal colour on the Latte background; visible pixels are unchanged from a menu-closed replay."
+issue = 4137
+
+[[exception]]
+scenario = "minga.act_menu.selection"
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#828ba7 on #303446"]
+reason = "Existing muted editor ink on the Frappé background; visible pixels are unchanged from a menu-closed replay."
 issue = 4137
 
 [[exception]]

@@ -27,9 +27,8 @@ type CompletionSelection struct {
 }
 
 type PickerSelection struct {
-	Generation       uint32
-	SelectedID       uint32
-	SelectedActionID uint32
+	Generation uint32
+	SelectedID uint32
 }
 
 func decodeCursorlineChrome(payload []byte) (CursorlineChrome, string, int) {
@@ -107,10 +106,10 @@ func decodePickerSelection(payload []byte) (PickerSelection, string, int) {
 	if size == 0 || len(payload) < 15 {
 		return PickerSelection{}, "", len(payload)
 	}
+	// The last four bytes of the picker selection payload are reserved.
 	selection := PickerSelection{
-		Generation:       u32(payload, 3),
-		SelectedID:       u32(payload, 7),
-		SelectedActionID: u32(payload, 11),
+		Generation: u32(payload, 3),
+		SelectedID: u32(payload, 7),
 	}
 	return selection, "picker selection", size
 }

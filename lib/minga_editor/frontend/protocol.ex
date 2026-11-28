@@ -71,6 +71,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_set_link_cursor Opcodes.set_link_cursor()
   @op_application_quit_response Opcodes.application_quit_response()
   @op_gui_request Opcodes.gui_request()
+  @op_gui_file_location_action Opcodes.gui_file_location_action()
   @op_set_font Opcodes.set_font()
   @op_set_font_fallback Opcodes.set_font_fallback()
   @op_register_font Opcodes.register_font()
@@ -457,6 +458,14 @@ defmodule MingaEditor.Frontend.Protocol do
         byte_size(suggested_path)::16, suggested_path::binary>>
 
     <<@op_gui_request, byte_size(payload)::16, payload::binary>>
+  end
+
+  @doc "Encodes a validated file-row action for the native window."
+  @spec encode_file_location_action(:reveal | :terminal, String.t()) :: binary()
+  def encode_file_location_action(kind, path) when byte_size(path) <= 0xFFFF - 3 do
+    action = if kind == :reveal, do: 0, else: 1
+    size = byte_size(path)
+    <<@op_gui_file_location_action, size + 3::16, action::8, size::16, path::binary>>
   end
 
   @doc """

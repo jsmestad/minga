@@ -13,7 +13,46 @@ struct VisibleEditorPresentation: Sendable {
     let snapshot: CommittedEditorSnapshot
     let localTransform: EditorLocalPresentationTransform?
     var textLayout: PresentedTextLayout? = nil
+    var geometry: PresentedEditorGeometry? = nil
 }
+
+/// Pointer geometry captured from the same draw as the visible text layout.
+struct PresentedEditorGeometry: Sendable {
+    struct ReviewHead: Sendable {
+        let windowID: UInt16
+        let gutterRevision: UInt64
+        let kind: ReviewRibbonKind
+        let unit: UInt64
+        let sourceLine: UInt32
+        let byteColumn: UInt32
+    }
+
+    struct RibbonMark: Sendable {
+        let rect: CGRect
+        let head: ReviewHead?
+    }
+
+    enum RibbonHit: Equatable {
+        case mark
+        case head(OutboundAction)
+    }
+
+    let cellSize: CGSize
+    let caret: CGRect?
+    let ribbonMarks: [RibbonMark]
+
+    func ribbonHit(at point: CGPoint) -> RibbonHit? {
+        guard let mark = ribbonMarks.last(where: { $0.rect.contains(point) }) else { return nil }
+        guard let head = mark.head else { return .mark }
+        return .head(.reviewRibbonAct(
+            windowID: head.windowID, gutterRevision: head.gutterRevision, kind: head.kind,
+            unit: head.unit, sourceLine: head.sourceLine, byteColumn: head.byteColumn,
+            screenRow: UInt16(clamping: Int(point.y / cellSize.height)),
+            screenColumn: UInt16(clamping: Int(point.x / cellSize.width))
+        ))
+    }
+}
+
 /// Discardable app-layer allocation in the continuously mounted editor's coordinates.
 struct AgentPromptPlacement: Equatable, Sendable {
     let rect: CGRect

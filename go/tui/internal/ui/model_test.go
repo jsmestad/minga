@@ -20,12 +20,13 @@ import (
 )
 
 func (m Model) composeFrame(content string) string {
-	frame, _ := m.composeFrameWithLayers(content)
+	menu, _ := m.floatingActMenu()
+	frame, _, _ := m.composeFrameWithLayers(content, menu)
 	return frame
 }
 
 func (m Model) content() string {
-	content, _ := m.renderBody()
+	content, _ := m.renderBody(nil)
 	return content
 }
 
@@ -2617,7 +2618,7 @@ func TestSemanticWindowsUsePerWindowHeights(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "first"}}})
 	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "second"}}})
 
-	lines := model.semanticLines()
+	lines := model.semanticLines(nil)
 	joined := ansi.Strip(strings.Join(lines, "\n"))
 	if len(lines) != 2 || !strings.Contains(joined, "first") || !strings.Contains(joined, "second") {
 		t.Fatalf("semantic windows should not pad the first window over later windows: lines=%d %q", len(lines), joined)
@@ -2629,7 +2630,7 @@ func TestSemanticWindowsUsePaneGeometryRects(t *testing.T) {
 	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "left"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 10, Height: 1}}})
 	model.putWindow(protocol.WindowContent{ID: 2, Rows: []protocol.WindowRow{{Text: "right"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 12, Width: 10, Height: 1}}})
 
-	lines := ansi.Strip(strings.Join(model.semanticLines(), "\n"))
+	lines := ansi.Strip(strings.Join(model.semanticLines(nil), "\n"))
 	first := strings.Split(lines, "\n")[0]
 	if !strings.Contains(first, "left") || !strings.Contains(first, "right") {
 		t.Fatalf("semantic windows should compose into a body canvas: %q", first)

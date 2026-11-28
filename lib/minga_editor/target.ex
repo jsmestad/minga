@@ -42,7 +42,6 @@ defmodule MingaEditor.Target do
           | {:window, Window.t()}
           | {:completion, Completion.t()}
           | {:picker_item, non_neg_integer(), non_neg_integer()}
-          | {:picker_action, non_neg_integer(), non_neg_integer()}
           | :picker_dismissal
           | {:file_tree, FileTree.t(), FileTree.entry() | nil}
           | {:command_completion, String.t()}
@@ -218,35 +217,22 @@ defmodule MingaEditor.Target do
          generation: generation,
          item_id: <<id::32>>
        })
-       when intent in [:activate_item, :activate_action, :resolve],
-       do: resolve_picker_item(state, offer.items, offer.actions, generation, id)
+       when intent in [:activate_item, :resolve],
+       do: resolve_picker_item(state, offer, generation, id)
 
   defp resolve_picker_target(_state, _offer, _target), do: {:error, :target_mismatch}
 
   @spec resolve_picker_item(
           EditorState.t(),
-          [tuple()],
-          [tuple()],
+          ActivationOffer.t(),
           non_neg_integer(),
           non_neg_integer()
         ) ::
           {:ok, resolved()} | {:error, reason()}
-  defp resolve_picker_item(state, items, actions, generation, id) do
-    case List.keyfind(items, id, 0) do
-      nil -> resolve_picker_action(state, actions, generation, id)
-      {_id, _index, item} -> resolve_picker_reference(state, item, {:picker_item, generation, id})
-    end
-  end
-
-  @spec resolve_picker_action(EditorState.t(), [tuple()], non_neg_integer(), non_neg_integer()) ::
-          {:ok, resolved()} | {:error, reason()}
-  defp resolve_picker_action(state, actions, generation, id) do
-    case List.keyfind(actions, id, 0) do
-      nil ->
-        {:error, :not_found}
-
-      {_id, _action, item} ->
-        resolve_picker_reference(state, item, {:picker_action, generation, id})
+  defp resolve_picker_item(state, offer, generation, id) do
+    case ActivationOffer.resolve_item(offer, generation, id) do
+      {:ok, _index, item} -> resolve_picker_reference(state, item, {:picker_item, generation, id})
+      :error -> {:error, :not_found}
     end
   end
 

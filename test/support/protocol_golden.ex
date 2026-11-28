@@ -23,6 +23,7 @@ defmodule Minga.Test.ProtocolGolden do
   payloads (max-length strings, unicode, zero-item and populated lists).
   """
 
+  alias Minga.Frontend.Adapter.GUI.ActMenuEncoder
   alias Minga.Frontend.Adapter.GUI.AgentQueueEncoder
   alias Minga.Frontend.Adapter.GUI.BreadcrumbEncoder
   alias Minga.Frontend.Adapter.GUI.Caches
@@ -33,6 +34,8 @@ defmodule Minga.Test.ProtocolGolden do
   alias Minga.Frontend.Adapter.GUI.SearchStateEncoder
   alias Minga.Protocol.Encode
   alias Minga.Protocol.GoldenFields
+  alias Minga.RenderModel.UI.ActMenu
+  alias Minga.RenderModel.UI.ActMenu.Row, as: ActMenuRow
   alias Minga.RenderModel.UI.Breadcrumb
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.FocusOwner
@@ -64,7 +67,7 @@ defmodule Minga.Test.ProtocolGolden do
     completion_fixtures() ++
       picker_header_fixtures() ++
       picker_item_fixtures() ++
-      picker_action_menu_fixtures() ++
+      act_menu_fixtures() ++
       picker_load_status_fixtures() ++
       picker_movement_key_fixtures() ++
       picker_query_fixtures() ++
@@ -448,7 +451,6 @@ defmodule Minga.Test.ProtocolGolden do
       marked_count: 3,
       has_preview?: true,
       items: items,
-      action_menu: nil,
       mode_prefix: "",
       load_status: :ready
     }
@@ -649,43 +651,95 @@ defmodule Minga.Test.ProtocolGolden do
     %{item | status_tone: tone}
   end
 
-  # ── Fixtures: gui_picker action menu (GuiPickerActionMenu) ────────────────
-
-  @spec picker_action_menu_fixtures() :: [fixture()]
-  defp picker_action_menu_fixtures do
-    visible_menu = %Picker.ActionMenu{
-      actions: ["Open", "Delete"],
-      activation_ids: [29, 31],
-      selected_index: 1
+  @spec act_menu_fixtures() :: [fixture()]
+  defp act_menu_fixtures do
+    keep = %ActMenuRow{
+      id: 1,
+      label: "Keep",
+      key: "y",
+      hint: "y",
+      detail: "Review the whole change",
+      section: "This change",
+      destructive?: false
     }
 
-    empty_menu = %Picker.ActionMenu{actions: [], activation_ids: [], selected_index: 5}
+    reject = %ActMenuRow{
+      id: 2,
+      label: "Reject",
+      key: "n",
+      hint: "n",
+      detail: "Revert the change",
+      section: "This change",
+      destructive?: true
+    }
+
+    menu = %ActMenu{
+      id: 4_294_967_301,
+      title: "Minga's change",
+      role: :minga,
+      anchor: {4, 17},
+      selected: keep.id,
+      lead: [keep, reject],
+      rows: [],
+      query: ""
+    }
+
+    {<<0xB1, _shown_size::32, shown::binary>>, caches} = ActMenuEncoder.encode(menu, Caches.new())
+    {<<0xB1, _hidden_size::32, hidden::binary>>, _caches} = ActMenuEncoder.encode(:hidden, caches)
 
     [
       %{
-        name: "action_menu_hidden",
-        decoder: "GuiPickerActionMenu",
-        payload: section_body(picker_command(%{picker_model([]) | action_menu: nil}), 0x04),
-        expected: %{visible: 0, selected_index: 0, actions: [], activation_ids: []}
-      },
-      %{
-        name: "action_menu_visible",
-        decoder: "GuiPickerActionMenu",
-        payload:
-          section_body(picker_command(%{picker_model([]) | action_menu: visible_menu}), 0x04),
+        name: "act_menu_review_decision",
+        decoder: "GuiActMenuFields",
+        payload: shown,
         expected: %{
           visible: 1,
-          selected_index: 1,
-          actions: ["Open", "Delete"],
-          activation_ids: [29, 31]
+          offer_id: menu.id,
+          role: 1,
+          anchor_row: 4,
+          anchor_column: 17,
+          selected: keep.id,
+          title: menu.title,
+          query: "",
+          rows: [],
+          lead: [
+            %{
+              id: 1,
+              key: "y",
+              label: "Keep",
+              hint: "y",
+              detail: keep.detail,
+              section: keep.section,
+              destructive: 0
+            },
+            %{
+              id: 2,
+              key: "n",
+              label: "Reject",
+              hint: "n",
+              detail: reject.detail,
+              section: reject.section,
+              destructive: 1
+            }
+          ]
         }
       },
       %{
-        name: "action_menu_empty_actions",
-        decoder: "GuiPickerActionMenu",
-        payload:
-          section_body(picker_command(%{picker_model([]) | action_menu: empty_menu}), 0x04),
-        expected: %{visible: 1, selected_index: 5, actions: [], activation_ids: []}
+        name: "act_menu_hidden",
+        decoder: "GuiActMenuFields",
+        payload: hidden,
+        expected: %{
+          visible: 0,
+          offer_id: 0,
+          role: 0,
+          anchor_row: 0,
+          anchor_column: 0,
+          selected: 0,
+          title: "",
+          query: "",
+          lead: [],
+          rows: []
+        }
       }
     ]
   end

@@ -24,57 +24,6 @@ defmodule MingaEditor.State.PickerTest do
       assert {:ok, 0, ^second} = PickerState.resolve_item_activation(reordered, generation, 2)
     end
 
-    test "action offer captures the item and invalidates after the menu changes" do
-      first = %Item{id: :first, label: "First"}
-      picker = Picker.new([first], title: "Choose")
-
-      state =
-        %PickerState{picker: picker, query_generation: 7}
-        |> PickerState.open_action_menu([{"Open", :open}], first)
-
-      generation = state.activation_offer.generation
-
-      assert {:ok, {"Open", :open}, ^first} =
-               PickerState.resolve_action_activation(state, generation, 2)
-
-      closed = PickerState.close_action_menu(state)
-      assert :error = PickerState.resolve_action_activation(closed, generation, 2)
-    end
-
-    test "action-menu transitions own open, movement, and close across menu states" do
-      item = %Item{id: :first, label: "First"}
-      actions = [{"Open", :open}, {"Delete", :delete}]
-      closed = %PickerState{picker: Picker.new([item], title: "Choose"), query_generation: 7}
-
-      assert PickerState.open_action_menu(closed, [], item) == closed
-      assert PickerState.move_action_menu_selection(closed, :next) == closed
-      assert PickerState.move_action_menu_selection(closed, :previous) == closed
-      assert PickerState.close_action_menu(closed) == closed
-
-      opened = PickerState.open_action_menu(closed, actions, item)
-      assert opened.action_menu == {actions, 0, item}
-
-      for {direction, expected_index} <- [next: 1, previous: 1] do
-        moved = PickerState.move_action_menu_selection(opened, direction)
-
-        assert moved.action_menu == {actions, expected_index, item}
-        assert moved.activation_offer.generation == opened.activation_offer.generation
-        assert moved.activation_offer.actions == opened.activation_offer.actions
-      end
-
-      reopened =
-        opened
-        |> PickerState.move_action_menu_selection(:next)
-        |> PickerState.move_action_menu_selection(:next)
-
-      assert reopened.action_menu == {actions, 0, item}
-
-      closed_again = PickerState.close_action_menu(opened)
-      assert closed_again.action_menu == nil
-      assert closed_again.activation_offer.generation == opened.activation_offer.generation
-      assert closed_again.activation_offer.actions == []
-    end
-
     test "offers at most the rendered result window" do
       items = for id <- 1..150, do: %Item{id: id, label: Integer.to_string(id)}
 

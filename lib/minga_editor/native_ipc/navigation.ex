@@ -10,6 +10,8 @@ defmodule MingaEditor.NativeIPC.Navigation do
   alias MingaEditor.NativeIPC.NativePresentationObservation
   alias MingaEditor.NativeIPC.NavigationCommand
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Picker
@@ -238,10 +240,10 @@ defmodule MingaEditor.NativeIPC.Navigation do
          %NavigationCommand{kind: :activate_picker_choice} = command
        ) do
     with {:ok, picker_state} <- current_picker(state),
-         :ok <- exact_picker(identity, command, picker_state),
-         :ok <- exact_choice(command, picker_state) do
-      action = picker_action(command)
-      {:ok, GuiActionHandler.dispatch(state, action), :beam_applied}
+         surface <- picker_surface(state),
+         :ok <- exact_picker(identity, command, picker_state, surface),
+         {:ok, next} <- activate_choice(state, command, picker_state, surface) do
+      {:ok, next, :beam_applied}
     end
   end
 
@@ -369,44 +371,53 @@ defmodule MingaEditor.NativeIPC.Navigation do
 
   defp current_picker(%EditorState{}), do: {:error, :picker_not_open}
 
-  @spec exact_picker(Identity.t(), NavigationCommand.t(), Picker.t()) ::
+  @spec exact_picker(Identity.t(), NavigationCommand.t(), Picker.t(), picker_surface()) ::
           :ok | {:error, :picker_replaced}
-  defp exact_picker(identity, command, %Picker{activation_offer: offer}) do
-    if command.target_token == picker_token(identity, offer.generation) and
+  defp exact_picker(identity, command, %Picker{activation_offer: offer}, surface) do
+    if command.target_token == picker_token(identity, offer.generation, surface) and
          command.picker_generation == offer.generation,
        do: :ok,
        else: {:error, :picker_replaced}
   end
 
-  @spec exact_choice(NavigationCommand.t(), Picker.t()) :: :ok | {:error, :choice_not_found}
-  defp exact_choice(%NavigationCommand{choice_kind: :item} = command, picker_state) do
+  @spec activate_choice(EditorState.t(), NavigationCommand.t(), Picker.t(), picker_surface()) ::
+          {:ok, EditorState.t()} | {:error, :choice_not_found}
+  defp activate_choice(
+         state,
+         %NavigationCommand{choice_kind: :item} = command,
+         picker_state,
+         :items
+       ) do
     case Picker.resolve_item_activation(
            picker_state,
            command.picker_generation,
            command.activation_id
          ) do
-      {:ok, _index, %Item{}} -> :ok
-      :error -> {:error, :choice_not_found}
+      {:ok, _index, %Item{}} ->
+        {:ok,
+         GuiActionHandler.dispatch(
+           state,
+           {:picker_item_activate, command.picker_generation, command.activation_id}
+         )}
+
+      :error ->
+        {:error, :choice_not_found}
     end
   end
 
-  defp exact_choice(%NavigationCommand{choice_kind: :action} = command, picker_state) do
-    case Picker.resolve_action_activation(
-           picker_state,
-           command.picker_generation,
-           command.activation_id
-         ) do
-      {:ok, _action, %Item{}} -> :ok
-      :error -> {:error, :choice_not_found}
+  defp activate_choice(
+         state,
+         %NavigationCommand{choice_kind: :action, activation_id: id},
+         _picker,
+         {:menu, menu, %{id: offer}, _item}
+       ) do
+    case ActMenu.action(menu, offer, id) do
+      {:picker, _source_action} = action -> ActMenuWorkflow.choose_picker(state, menu, action)
+      _unoffered -> {:error, :choice_not_found}
     end
   end
 
-  @spec picker_action(NavigationCommand.t()) :: tuple()
-  defp picker_action(%NavigationCommand{choice_kind: :item} = command),
-    do: {:picker_item_activate, command.picker_generation, command.activation_id}
-
-  defp picker_action(%NavigationCommand{choice_kind: :action} = command),
-    do: {:picker_action_activate, command.picker_generation, command.activation_id}
+  defp activate_choice(_state, _command, _picker, _surface), do: {:error, :choice_not_found}
 
   @spec inspect_tabs(
           EditorState.t(),
@@ -625,13 +636,14 @@ defmodule MingaEditor.NativeIPC.Navigation do
   defp inspect_picker(state, identity, revision, offset, limit) do
     case current_picker(state) do
       {:ok, %Picker{activation_offer: offer, picker: picker}} ->
-        choices = picker_choices(offer)
+        surface = picker_surface(state)
+        choices = picker_choices(offer, surface)
         page = Enum.slice(choices, offset, limit)
         next_offset = offset + length(page)
         truncated? = next_offset < length(choices)
 
         %{
-          "target_token" => encode_token(picker_token(identity, offer.generation)),
+          "target_token" => encode_token(picker_token(identity, offer.generation, surface)),
           "generation" => offer.generation,
           "title" => if(picker, do: bounded_string(picker.title), else: ""),
           "query" => if(picker, do: bounded_string(picker.query), else: ""),
@@ -659,20 +671,30 @@ defmodule MingaEditor.NativeIPC.Navigation do
   defp picker_truncated?(%{"truncated" => truncated?}), do: truncated?
   defp picker_truncated?(nil), do: false
 
-  @spec picker_choices(ActivationOffer.t()) :: [map()]
-  defp picker_choices(offer) do
-    items =
-      Enum.map(ActivationOffer.offered_items(offer), fn {activation_id, _index, item} ->
-        choice_map("item", activation_id, item)
-      end)
+  @typep picker_surface ::
+           :items | {:menu, ActMenu.t(), Minga.RenderModel.UI.ActMenu.t(), Item.t()}
 
-    actions =
-      Enum.map(ActivationOffer.offered_actions(offer), fn {activation_id, {label, _action}, item} ->
-        action_label = bounded_string(label)
-        choice_map("action", activation_id, item) |> Map.put("action", action_label)
-      end)
+  @spec picker_surface(EditorState.t()) :: picker_surface()
+  defp picker_surface(state) do
+    with menu when menu != nil <- ActMenuWorkflow.current(state),
+         {:picker, {_generation, _activation, _edit_seq, %Item{} = item}} <- ActMenu.source(menu) do
+      {:menu, menu, ActMenu.model(menu), item}
+    else
+      _other -> :items
+    end
+  end
 
-    items ++ actions
+  @spec picker_choices(ActivationOffer.t(), picker_surface()) :: [map()]
+  defp picker_choices(offer, :items) do
+    Enum.map(ActivationOffer.offered_items(offer), fn {activation_id, _index, item} ->
+      choice_map("item", activation_id, item)
+    end)
+  end
+
+  defp picker_choices(_offer, {:menu, _menu, model, item}) do
+    Enum.map(model.lead ++ model.rows, fn row ->
+      choice_map("action", row.id, item) |> Map.put("action", bounded_string(row.label))
+    end)
   end
 
   @spec choice_map(String.t(), pos_integer(), Item.t()) :: map()
@@ -727,8 +749,11 @@ defmodule MingaEditor.NativeIPC.Navigation do
   @spec buffer_id(Identity.t(), pid()) :: non_neg_integer()
   defp buffer_id(identity, buffer), do: token(identity, :buffer, [inspect(buffer)])
 
-  @spec picker_token(Identity.t(), pos_integer()) :: non_neg_integer()
-  defp picker_token(identity, generation), do: token(identity, :picker, [generation])
+  @spec picker_token(Identity.t(), pos_integer(), picker_surface()) :: non_neg_integer()
+  defp picker_token(identity, generation, :items), do: token(identity, :picker, [generation])
+
+  defp picker_token(identity, generation, {:menu, _menu, %{id: offer}, _item}),
+    do: token(identity, :picker, [generation, offer])
 
   @spec inspection_revision(EditorState.t(), Identity.t(), TabBar.t() | nil) :: non_neg_integer()
   defp inspection_revision(state, identity, tab_bar) do
@@ -744,10 +769,13 @@ defmodule MingaEditor.NativeIPC.Navigation do
           []
       end
 
-    picker_generation =
+    picker_identity =
       case current_picker(state) do
-        {:ok, %Picker{activation_offer: offer}} -> offer.generation
-        {:error, :picker_not_open} -> nil
+        {:ok, %Picker{activation_offer: offer}} ->
+          picker_token(identity, offer.generation, picker_surface(state))
+
+        {:error, :picker_not_open} ->
+          nil
       end
 
     render_revision =
@@ -757,7 +785,7 @@ defmodule MingaEditor.NativeIPC.Navigation do
       render_revision,
       active_tab_id(tab_bar),
       tabs,
-      picker_generation,
+      picker_identity,
       state.frontend.native_presentation
     ])
   end

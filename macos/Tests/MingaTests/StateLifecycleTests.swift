@@ -223,11 +223,10 @@ struct PickerStateLifecycleTests {
                          description: "test/test.ex", annotation: "",
                          matchPositions: [])
         ]
-        let actionMenu = Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Split"])
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
                      totalCount: 50, markedCount: 7, title: "Find File", query: "edi",
-                     hasPreview: true, rawItems: raw, actionMenu: actionMenu,
+                     hasPreview: true, rawItems: raw,
                      modePrefix: ">")
 
         #expect(state.visible == true)
@@ -245,8 +244,6 @@ struct PickerStateLifecycleTests {
         #expect(state.items[1].isMarked == true)
         #expect(state.items[0].hasStatus == false)
         #expect(state.items[1].hasStatus == false)
-        #expect(state.actionMenu != nil)
-        #expect(state.actionMenu?.actions == ["Open", "Split"])
     }
 
     @Test("update() carries the status chip and the current-value flag")
@@ -262,7 +259,7 @@ struct PickerStateLifecycleTests {
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
                      totalCount: 2, markedCount: 1, title: "Models and connections", query: "",
-                     hasPreview: false, rawItems: [model, file], actionMenu: nil, modePrefix: "")
+                     hasPreview: false, rawItems: [model, file], modePrefix: "")
 
         #expect(state.items[0].isActive == true)
         #expect(state.items[0].isMarked == false)
@@ -328,7 +325,7 @@ struct PickerStateLifecycleTests {
         #expect(state.previewLines[0].segments[0].bold == true)
     }
 
-    @Test("hide() clears items, preview, and action menu")
+    @Test("hide() clears items and preview")
     @MainActor func hideClearsAll() {
         let state = PickerState()
         state.update(visible: true, selectedIndex: 0, filteredCount: 1,
@@ -337,7 +334,6 @@ struct PickerStateLifecycleTests {
                      rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "x",
                                              description: "", annotation: "",
                                              matchPositions: [])],
-                     actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["A"]),
                      modePrefix: "#")
         state.updatePreview(lines: [[Wire.PickerPreviewSegment(fgColor: 0, bold: false, text: "x")]])
 
@@ -349,7 +345,6 @@ struct PickerStateLifecycleTests {
         #expect(state.modePrefix == "")
         #expect(state.markedCount == 0)
         #expect(state.hasPreview == false)
-        #expect(state.actionMenu == nil)
     }
 }
 

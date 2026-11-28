@@ -133,13 +133,6 @@ func decodePicker(payload []byte) (Picker, string, int) {
 			if items, _, err := generated.DecodeGuiPickerItems(payload, sectionStart, sectionEnd); err == nil {
 				picker.Items = mapPickerItems(items)
 			}
-		case 0x04: // Action menu
-			if m, _, err := generated.DecodeGuiPickerActionMenu(payload, sectionStart, sectionEnd); err == nil {
-				picker.ActionVisible = m.Visible != 0
-				picker.ActionIndex = m.SelectedIndex
-				picker.Actions = m.Actions
-				picker.ActionActivationIDs = m.ActivationIds
-			}
 		case 0x05: // Mode prefix
 			if m, _, err := generated.DecodeGuiPickerModePrefix(payload, sectionStart, sectionEnd); err == nil {
 				picker.ModePrefix = m.Text

@@ -112,6 +112,31 @@ struct KeyboardInputTests {
         )
     }
 
+    @Test("the Act menu forwards literal filtering and selection keys instead of editor commands")
+    @MainActor func actMenuKeysGoToBeam() throws {
+        let spy = SpyEncoder()
+        let gui = GUIState()
+        let view = try #require(makeRequiredView(spy: spy, guiState: gui))
+        gui.actMenuState.update(.init(offerID: 81, role: .minga, anchorRow: .max, anchorColumn: .max,
+                                      selectedID: 0, title: "Act", query: "", lead: [], rows: []))
+        view.focusPolicy.focusOwnerDidChange(.init(responder: 0, surface: Wire.FocusOwner.actMenuSurface, windowID: 1, generation: 1))
+        let space = try #require(keyEvent(keyCode: 49, characters: " ", charactersIgnoringModifiers: " "))
+        let enter = try #require(keyEvent(keyCode: 36, characters: "\r", charactersIgnoringModifiers: "\r"))
+        let paste = try #require(keyEvent(keyCode: 9, modifiers: .command, characters: "v", charactersIgnoringModifiers: "v"))
+        view.inputMethodEventHandlerForTesting = { [weak view] _ in
+            view?.insertText(" ", replacementRange: NSRange(location: NSNotFound, length: 0))
+            return true
+        }
+
+        view.keyDown(with: space)
+        view.keyDown(with: enter)
+        #expect(view.performKeyEquivalent(with: paste))
+
+        #expect(spy.keyPressCalls.map(\.codepoint) == [32, 13, 118])
+        #expect(spy.keyPressCalls.map(\.modifiers) == [0, 0, 0x08])
+        #expect(spy.pasteCalls.isEmpty)
+    }
+
     // MARK: - Special key mapping
 
     @Test("Escape sends codepoint 27")

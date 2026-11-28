@@ -1,6 +1,7 @@
 defmodule MingaEditor.Renderer.TextPresentations do
   @moduledoc "Owns committed, active, and explicitly discarded text-presentation leases."
 
+  alias Minga.RenderModel.Window.Gutter.Authorship
   alias MingaEditor.Mouse.TextEvent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.RenderWindow
@@ -29,7 +30,16 @@ defmodule MingaEditor.Renderer.TextPresentations do
   def acknowledge_output(%__MODULE__{} = state, %Input{} = output) do
     presentations = output_presentations(output)
     state = acknowledge(state, presentations)
-    retain_current_windows(state, presentations)
+
+    leases =
+      for {window, %RenderWindow{render_cache: %{gutter_authorship: %Authorship{} = gutter}}} <-
+            output.windows.map,
+          into: %{} do
+        {window, {gutter.revision, gutter.lease}}
+      end
+
+    %{state | index: TextInteractionIndex.publish_gutters(state.index, leases)}
+    |> retain_current_windows(presentations)
   end
 
   @doc "Replaces current scroll geometry for a locally completed frame without retaining input leases."

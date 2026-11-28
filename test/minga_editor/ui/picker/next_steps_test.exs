@@ -167,7 +167,7 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
       state = open(["alpha"]) |> type("zz")
 
       acted = PickerUI.handle_key(state, ?., @ctrl)
-      assert {:picker, %{picker_ui: %{action_menu: nil}}} = acted.shell_runtime.state.modal
+      assert MingaEditor.Shell.Traditional.ActMenuWorkflow.current(acted) == nil
       assert Picker.toggle_mark(picker(state)).marked == %{}
     end
   end

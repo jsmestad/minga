@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Editing do
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Indent
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.Shell.Traditional.BlockedReviewWorkflow
   alias MingaEditor.Shell.Traditional.InFileReview
   alias MingaEditor.UI.Highlight
@@ -46,6 +47,7 @@ defmodule MingaEditor.Commands.Editing do
     {:reject_blocking_change, "Reject the Minga change blocking your undo", true},
     {:keep_minga_change, "Keep the Minga change at the cursor or in the selection", true},
     {:reject_minga_change, "Reject the Minga change at the cursor or in the selection", true},
+    {:act_menu, "Act on the current target", false},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},
@@ -60,6 +62,8 @@ defmodule MingaEditor.Commands.Editing do
   ]
 
   @spec execute(state(), Mode.command()) :: state()
+
+  def execute(state, :act_menu), do: ActMenuWorkflow.open(state)
 
   # ── Deletion ──────────────────────────────────────────────────────────────
 

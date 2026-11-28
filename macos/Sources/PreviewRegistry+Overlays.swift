@@ -54,7 +54,6 @@ extension PreviewRegistry {
                 Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
                 Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
             ],
-            actionMenu: nil,
             modePrefix: ""
         )
 
@@ -96,7 +95,6 @@ extension PreviewRegistry {
             query: "",
             hasPreview: false,
             rawItems: rows,
-            actionMenu: nil,
             modePrefix: "",
             activationGeneration: 1
         )
@@ -350,6 +348,6 @@ private struct PickerMixedScrollFixture: View {
     }
 
     private static func show(_ selected: UInt16, in state: PickerState) {
-        state.update(visible: true, selectedIndex: selected, filteredCount: 16, totalCount: 16, markedCount: 0, title: "Mixed Rows", query: "", hasPreview: false, rawItems: rows, actionMenu: nil, activationGeneration: 1)
+        state.update(visible: true, selectedIndex: selected, filteredCount: 16, totalCount: 16, markedCount: 0, title: "Mixed Rows", query: "", hasPreview: false, rawItems: rows, activationGeneration: 1)
     }
 }

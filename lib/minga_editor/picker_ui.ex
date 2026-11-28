@@ -26,11 +26,14 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Extension.Picker.Source, as: PublicContract
   alias MingaEditor.Handlers.BufferRegistry
+  alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
+  alias MingaEditor.State.Picker.ActivationOffer
   alias MingaEditor.State.BufferLifecycle
   alias MingaEditor.State.Buffers
   alias MingaEditor.UI.Picker
@@ -529,7 +532,6 @@ defmodule MingaEditor.PickerUI do
                    picker_ui:
                      %PickerState{
                        picker: %Picker{} = picker,
-                       action_menu: nil,
                        acknowledged_query_edit_seq: edit_seq
                      } = picker_state
                  }}
@@ -919,34 +921,6 @@ defmodule MingaEditor.PickerUI do
   @spec run_command(state(), PickerState.t(), picker_command() | atom()) ::
           state() | {state(), action()}
 
-  # The act menu owns the list keys while it is open.
-  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_cancel),
-    do: update_picker(state, &PickerState.close_action_menu/1)
-
-  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_next),
-    do: update_picker(state, &PickerState.move_action_menu_selection(&1, :next))
-
-  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_prev),
-    do: update_picker(state, &PickerState.move_action_menu_selection(&1, :previous))
-
-  defp run_command(
-         state,
-         %PickerState{action_menu: {actions, sel, item}, source: source},
-         :picker_select
-       ) do
-    case Enum.at(actions, sel) do
-      nil ->
-        update_picker(state, &PickerState.close_action_menu/1)
-
-      {_name, action_id} ->
-        state
-        |> update_picker(&PickerState.close_action_menu/1)
-        |> run_source_action_and_close(source, action_id, item)
-    end
-  end
-
-  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, _command), do: state
-
   defp run_command(state, %PickerState{}, :picker_cancel), do: cancel_picker(state)
 
   defp run_command(
@@ -998,16 +972,12 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  defp run_command(
-         state,
-         %PickerState{picker: picker, source: source, callback_source: callback_source},
-         :picker_act_menu
-       ) do
-    with %Item{} = item <- Picker.selected_item(picker),
-         [_ | _] = actions <- current_item_actions(state, source, picker, item, callback_source) do
-      update_picker(state, &PickerState.open_action_menu(&1, actions, item))
-    else
-      _no_item_or_actions -> state
+  defp run_command(state, %PickerState{picker: picker, activation_offer: offer}, :picker_act_menu) do
+    case Enum.find(ActivationOffer.offered_items(offer), fn {_id, index, _item} ->
+           index == picker.selected
+         end) do
+      {id, _index, _item} -> open_act_menu(state, offer.generation, id)
+      nil -> state
     end
   end
 
@@ -1067,9 +1037,6 @@ defmodule MingaEditor.PickerUI do
   # ── Query editing ───────────────────────────────────────────────────────────
 
   @spec edit_query(state(), PickerState.t(), non_neg_integer(), non_neg_integer()) :: state()
-  defp edit_query(state, %PickerState{action_menu: {_actions, _sel, _item}}, _cp, _mods),
-    do: state
-
   defp edit_query(state, %PickerState{} = picker_state, cp, _mods) when cp in [8, 127],
     do: delete_backward(state, picker_state)
 
@@ -1191,31 +1158,121 @@ defmodule MingaEditor.PickerUI do
 
   def activate_item(state, _generation, _activation_id), do: stale_activation(state)
 
-  @doc "Activates the exact source action offered to a native frontend."
-  @spec activate_action(state(), non_neg_integer(), non_neg_integer()) :: state()
-  def activate_action(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal: {:picker, %{picker_ui: %PickerState{source: source} = picker_state}}
-            }
-          }
-        } = state,
+  @type act_source :: {non_neg_integer(), pos_integer(), non_neg_integer(), Item.t()}
+
+  @doc "Opens on the exact item offered by this picker, including an item under the pointer."
+  @spec open_act_menu(state(), non_neg_integer(), pos_integer()) :: state()
+  def open_act_menu(
+        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{picker_ui: ps}}}}} = state,
         generation,
-        activation_id
+        id
       ) do
-    case PickerState.resolve_action_activation(picker_state, generation, activation_id) do
-      {:ok, {_name, action_id}, item} ->
+    case PickerState.resolve_item_activation(ps, generation, id) do
+      {:ok, _index, %Item{id: {:next_step, _step}}} ->
         state
-        |> update_picker(&PickerState.close_action_menu/1)
-        |> run_source_action_and_close(source, action_id, item)
+
+      {:ok, _index, %Item{} = item} ->
+        {lead, choices} = menu_choices(state, ps, item)
+        source = {generation, id, ps.acknowledged_query_edit_seq, item}
+        menu = ActMenu.new(item.label, :neutral, nil, {:picker, source}, lead, choices)
+        ActMenuWorkflow.replace(state, menu)
 
       :error ->
         stale_activation(state)
     end
   end
 
-  def activate_action(state, _generation, _activation_id), do: stale_activation(state)
+  def open_act_menu(state, _generation, _id), do: state
+
+  @doc "Runs an action only on the still-current item and query captured by the menu."
+  @spec act_on_item(state(), act_source(), :default | {:source, term()}) ::
+          {:ok, state()} | {:error, :choice_not_found}
+  def act_on_item(state, {generation, id, query_edit_seq, item}, action) do
+    target = %MingaEditor.Target{
+      surface: :picker,
+      intent: :resolve,
+      generation: generation,
+      item_id: <<id::32>>
+    }
+
+    with {:ok, {:picker_item, ^generation, ^id}} <- MingaEditor.Target.resolve(state, target),
+         %PickerState{acknowledged_query_edit_seq: ^query_edit_seq} = ps <- picker_state(state),
+         {:ok, _index, ^item} <- PickerState.resolve_item_activation(ps, generation, id) do
+      perform_menu_action(state, ps, {generation, id}, item, action)
+    else
+      _stale -> {:error, :choice_not_found}
+    end
+  end
+
+  @spec perform_menu_action(
+          state(),
+          PickerState.t(),
+          {non_neg_integer(), pos_integer()},
+          Item.t(),
+          :default | {:source, term()}
+        ) :: {:ok, state()} | {:error, :choice_not_found}
+  defp perform_menu_action(state, _ps, {generation, id}, _item, :default) do
+    case activate_item(state, generation, id) do
+      {next, {:execute_command, command}} -> {:ok, MingaEditor.dispatch_command(next, command)}
+      next -> {:ok, next}
+    end
+  end
+
+  defp perform_menu_action(state, ps, _identity, item, {:source, action}) do
+    actions = current_item_actions(state, ps.source, ps.picker, item, ps.callback_source)
+
+    case Enum.find(actions, fn {_label, id} -> id == action end) do
+      nil -> {:error, :choice_not_found}
+      _current -> {:ok, run_source_action(state, ps.source, action, item)}
+    end
+  end
+
+  @spec menu_choices(state(), PickerState.t(), Item.t()) ::
+          {[ActMenu.choice()], [ActMenu.choice()]}
+  defp menu_choices(state, ps, item) do
+    case current_item_actions(state, ps.source, ps.picker, item, ps.callback_source) do
+      [] ->
+        # A source's ordinary selection can discard data or uninstall a tool.
+        {[],
+         [
+           {"This item", "x", "Choose this item", "", "Runs this picker’s normal selection", true,
+            {:picker, :default}}
+         ]}
+
+      actions ->
+        project_source_actions(actions)
+    end
+  end
+
+  @spec project_source_actions([Source.action_entry()]) ::
+          {[ActMenu.choice()], [ActMenu.choice()]}
+  defp project_source_actions(actions) do
+    {lead, rest} =
+      case Enum.split_while(actions, fn {_label, id} -> destructive_picker_action?(id) end) do
+        {prefix, [{label, id} | suffix]} ->
+          {[{"This item", "↩", label, "↩", "", false, {:picker, {:source, id}}}],
+           prefix ++ suffix}
+
+        {destructive, []} ->
+          {[], destructive}
+      end
+
+    choices =
+      rest
+      |> Enum.with_index(?a)
+      |> Enum.map(fn {{label, id}, cp} ->
+        key = if cp <= ?z, do: <<cp>>, else: ""
+
+        {"This item", key, label, "", "", destructive_picker_action?(id),
+         {:picker, {:source, id}}}
+      end)
+
+    {lead, choices}
+  end
+
+  @spec destructive_picker_action?(term()) :: boolean()
+  defp destructive_picker_action?({:bulk, :kill_marked, _items}), do: true
+  defp destructive_picker_action?(id), do: id in [:delete, :discard, :remove, :kill, :uninstall]
 
   @spec stale_activation(state()) :: state()
   defp stale_activation(state) do
@@ -1224,12 +1281,6 @@ defmodule MingaEditor.PickerUI do
       "Picker choice changed; select it again"
     )
     |> EditorState.reset_frontend_render_state()
-  end
-
-  @spec run_source_action_and_close(EditorState.t(), module(), term(), Picker.item()) ::
-          EditorState.t()
-  defp run_source_action_and_close(state, source, action_id, item) do
-    run_source_action(state, source, action_id, item)
   end
 
   @spec run_source_action(EditorState.t(), module(), term(), Picker.item()) :: EditorState.t()
@@ -1388,10 +1439,6 @@ defmodule MingaEditor.PickerUI do
         PublicSource.actions(owner, source, public_item, args)
 
       {%PickerState{extension: %ExtensionPicker{}}, _item} ->
-        []
-
-      # A next-step row is an action already; it has no act menu.
-      {%PickerState{}, %Item{id: {:next_step, _step}}} ->
         []
 
       {%PickerState{}, _item} ->

@@ -14,7 +14,7 @@ struct PickerStateTests {
     }
 
     private func populateState(_ state: PickerState, selected: UInt16 = 0, count: Int = 5) {
-        state.update(visible: true, selectedIndex: selected, filteredCount: UInt16(count), totalCount: UInt16(count), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(count), actionMenu: nil, activationGeneration: 7)
+        state.update(visible: true, selectedIndex: selected, filteredCount: UInt16(count), totalCount: UInt16(count), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(count), activationGeneration: 7)
     }
 
     private let defaultMovementKeys = [
@@ -27,7 +27,7 @@ struct PickerStateTests {
     @Test("a key moves the preview only when the BEAM listed that exact key as picker movement")
     func movementDeltaFollowsTheListedKeys() {
         let state = PickerState()
-        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: nil, activationGeneration: 7, movementKeys: defaultMovementKeys)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), activationGeneration: 7, movementKeys: defaultMovementKeys)
 
         #expect(state.movementDelta(codepoint: 106, modifiers: 0x02) == 1)
         #expect(state.movementDelta(codepoint: 107, modifiers: 0x02) == -1)
@@ -45,19 +45,9 @@ struct PickerStateTests {
         populateState(state)
         #expect(state.movementDelta(codepoint: 57_353, modifiers: 0) == nil)
 
-        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: nil, activationGeneration: 7, movementKeys: defaultMovementKeys)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), activationGeneration: 7, movementKeys: defaultMovementKeys)
         state.hide()
         #expect(state.movementKeys.isEmpty)
-    }
-
-    @Test("the open act menu owns the list keys, so the picker row preview stays put")
-    func previewNavigationYieldsToTheActionMenu() {
-        let state = PickerState()
-        let menu = Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Kill"], activationIDs: [41, 42])
-        state.update(visible: true, selectedIndex: 1, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: menu, activationGeneration: 7, movementKeys: defaultMovementKeys)
-
-        #expect(state.previewNavigation(delta: 1) == false)
-        #expect(state.effectiveSelectedIndex == 1)
     }
 
     @Test("previewNavigation increments without mutating selectedIndex")
@@ -102,7 +92,7 @@ struct PickerStateTests {
     func previewNavigationWrapsLikeTheBEAM(rows: Int, selected: Int, filtered: Int, nextSteps: Bool, deltas: [Int], expected: Int) {
         let state = PickerState()
         let empty = nextSteps ? Wire.EmptyList(glyph: "", title: "No projects yet.", why: "", selected: 0, actions: []) : nil
-        state.update(visible: true, selectedIndex: UInt16(selected), filteredCount: UInt16(filtered), totalCount: UInt16(filtered), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(rows), actionMenu: nil, activationGeneration: 7, empty: empty)
+        state.update(visible: true, selectedIndex: UInt16(selected), filteredCount: UInt16(filtered), totalCount: UInt16(filtered), markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(rows), activationGeneration: 7, empty: empty)
 
         for delta in deltas { _ = state.previewNavigation(delta: delta) }
 
@@ -110,20 +100,6 @@ struct PickerStateTests {
         #expect(state.selectedIndex == selected)
         // A key with nothing to preview leaves no preview behind, so the next frame's row is shown as it is.
         if deltas.count == 1 { #expect((state.previewSelectedIndex != nil) == (expected != selected)) }
-    }
-
-    @Test("a preview made before the act menu's frame arrived is dropped by that frame", arguments: [(false, 2), (true, 1)])
-    func previewDoesNotOutliveTheActMenuFrame(menuOpens: Bool, expected: Int) {
-        let state = PickerState()
-        populateState(state, selected: 1)
-        #expect(state.previewNavigation(delta: 1))
-        #expect(state.effectiveSelectedIndex == 2)
-
-        // The key moved the menu on the BEAM, so its frame still has the picker on row 1.
-        let menu = menuOpens ? Wire.PickerActionMenu(selectedIndex: 1, actions: ["Open", "Kill"], activationIDs: [41, 42]) : nil
-        state.update(visible: true, selectedIndex: 1, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: makeItems(5), actionMenu: menu, activationGeneration: 7)
-
-        #expect(state.effectiveSelectedIndex == expected)
     }
 
     @Test("update clears preview index")
@@ -134,7 +110,7 @@ struct PickerStateTests {
         _ = state.previewNavigation(delta: 1)
         #expect(state.previewSelectedIndex != nil)
 
-        state.updateSelection(generation: 7, selectedItemID: 2, selectedActionID: 0)
+        state.updateSelection(generation: 7, selectedItemID: 2)
         #expect(state.previewSelectedIndex == nil)
     }
 
@@ -197,11 +173,11 @@ struct PickerStateTests {
         _ = state.previewNavigation(delta: 2)
 
         let items = makeItems(5)
-        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: items, actionMenu: nil, activationGeneration: 8)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 5, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: items, activationGeneration: 8)
         #expect(state.previewSelectedIndex == nil)
 
         _ = state.previewNavigation(delta: 2)
-        state.update(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: [items[0], items[1]], actionMenu: nil, activationGeneration: 8)
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 5, markedCount: 0, title: "Test", query: "", hasPreview: false, rawItems: [items[0], items[1]], activationGeneration: 8)
         #expect(state.previewSelectedIndex == nil)
     }
 }
@@ -279,7 +255,7 @@ struct PickerSectionHeaderTests {
         state.update(visible: true, selectedIndex: 0, filteredCount: 2, totalCount: 2, markedCount: 0, title: "Grouped", query: "", hasPreview: false, rawItems: [
             Wire.PickerItem(iconColor: 0, flags: 0, label: "a", description: "", annotation: "", matchPositions: [], activationID: 1),
             Wire.PickerItem(iconColor: 0, flags: 0, label: "b", description: "", annotation: "", matchPositions: [], activationID: 2)
-        ], actionMenu: nil, activationGeneration: 7)
+        ], activationGeneration: 7)
         #expect(PickerOverlay.fit(state, listHeight: 240) == PickerOverlay.Fit(generation: 7, rows: 2))
     }
 
@@ -291,7 +267,7 @@ struct PickerSectionHeaderTests {
         for (index, group) in groups.enumerated() {
             raw.append(Wire.PickerItem(iconColor: 0, flags: 0, label: "item\(index)", description: "", annotation: "", matchPositions: [], activationID: UInt32(index + 1), group: group))
         }
-        state.update(visible: true, selectedIndex: 1, filteredCount: 3, totalCount: 3, markedCount: 0, title: "Grouped", query: "", hasPreview: false, rawItems: raw, actionMenu: nil, activationGeneration: 7)
+        state.update(visible: true, selectedIndex: 1, filteredCount: 3, totalCount: 3, markedCount: 0, title: "Grouped", query: "", hasPreview: false, rawItems: raw, activationGeneration: 7)
 
         #expect(state.items.count == 3)
         #expect(state.items[2].group == "B")

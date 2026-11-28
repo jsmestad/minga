@@ -3,6 +3,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
 
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.ActMenu
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.StatusBar.Data, as: StatusBarData
@@ -26,6 +27,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
     :layout,
     :focus_tree,
     :focus_owner,
+    :act_menu,
     :diff_views,
     :git_syncing,
     :status_bar_data,
@@ -65,6 +67,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
           layout: term(),
           focus_tree: term(),
           focus_owner: Minga.RenderModel.UI.FocusOwner.t(),
+          act_menu: Minga.RenderModel.UI.ActMenu.t() | :hidden,
           diff_views: map(),
           git_syncing: boolean(),
           status_bar_data: term(),
@@ -103,6 +106,7 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
       layout: state.render.layout,
       focus_tree: state.render.focus_tree,
       focus_owner: MingaEditor.FocusOwner.derive(state),
+      act_menu: act_menu(Runtime.state(state.shell_runtime)),
       diff_views: state.git.diff_views,
       git_syncing: EffectScheduler.active_activity?(state.effect_scheduler, :git_syncing),
       status_bar_data: safe_status_bar_data(state),
@@ -121,6 +125,16 @@ defmodule MingaEditor.RenderPipeline.FrameIntent do
       tasks_drawer: tasks_drawer(state)
     }
   end
+
+  @spec act_menu(term()) :: Minga.RenderModel.UI.ActMenu.t() | :hidden
+  defp act_menu(%ShellState{act_menu: menu, modal: modal}) when menu != nil do
+    case MingaEditor.State.ModalOverlay.tag(modal) do
+      :conflict -> :hidden
+      _parent -> ActMenu.model(menu)
+    end
+  end
+
+  defp act_menu(_shell), do: :hidden
 
   # The tasks the project home lists, from the shared task model; none while the home is not shown.
   @spec home_tasks(EditorState.t()) :: [MingaEditor.State.Launchpad.task()]

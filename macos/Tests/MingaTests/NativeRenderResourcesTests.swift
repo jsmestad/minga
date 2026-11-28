@@ -11,12 +11,17 @@ private final class NativeTestDrawable: NSObject, CAMetalDrawable {
     let layer = CAMetalLayer()
     let drawableID: Int = 1
     let presentedTime: CFTimeInterval = 0
+    private var presentedHandlers: [MTLDrawablePresentedHandler] = []
 
     init(texture: MTLTexture) { self.texture = texture }
-    func present() {}
-    func present(at presentationTime: CFTimeInterval) { _ = presentationTime }
-    func present(afterMinimumDuration duration: CFTimeInterval) { _ = duration }
-    func addPresentedHandler(_ block: @escaping MTLDrawablePresentedHandler) { _ = block }
+    func present() {
+        let handlers = presentedHandlers
+        presentedHandlers.removeAll(keepingCapacity: true)
+        for handler in handlers { handler(self) }
+    }
+    func present(at presentationTime: CFTimeInterval) { present() }
+    func present(afterMinimumDuration duration: CFTimeInterval) { present() }
+    func addPresentedHandler(_ block: @escaping MTLDrawablePresentedHandler) { presentedHandlers.append(block) }
 }
 
 private enum InjectedSubmissionFailure: Error { case failed }
@@ -784,7 +789,7 @@ struct NativeRenderResourcesTests {
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
             presentationInputSeq: 301,
             onAttemptFinished: { finishedAttempts += 1 },
-            onTextPresented: { _, _ in textPresentations += 1 }
+            onInteractionPresented: { _, _, _ in textPresentations += 1 }
         )
         #expect(reports.count == 1)
         #expect(finishedAttempts == 1 && textPresentations == 0)
@@ -831,7 +836,7 @@ struct NativeRenderResourcesTests {
         #expect(renderer.lastCompletedPresentationGeneration == 4)
     }
 
-    @Test("candidate presents and promotes only after both commands complete")
+    @Test("input keeps the old presentation until the submitted drawable reports display")
     @MainActor func twoStagePresentationOrdering() {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -856,14 +861,15 @@ struct NativeRenderResourcesTests {
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 1)
         renderer.setupRenderers(fontManager: fontManager)
         let before = renderer.activeResourceSnapshot()
+        let drawable = NativeTestDrawable(texture: texture)
 
         renderer.render(
             snapshot: CommittedEditorSnapshot(generation: 3, frameSeq: 42, frameState: FrameState(cols: 4, rows: 4), themeColors: nil, surfaces: [], activeWindowId: nil, metadata: .empty), fontManager: fontManager,
-            drawableProvider: { NativeTestDrawable(texture: texture) },
+            drawableProvider: { drawable },
             viewportSize: CGSize(width: 64, height: 64), contentScale: 1,
             presentationInputSeq: 302,
             onAttemptFinished: { finishedAttempts += 1 },
-            onTextPresented: { snapshot, _ in
+            onInteractionPresented: { snapshot, _, _ in
                 #expect(snapshot.frameSeq == 42)
                 textPresentations += 1
             }
@@ -885,13 +891,16 @@ struct NativeRenderResourcesTests {
 
         completions[1](true, Int(MTLCommandBufferStatus.completed.rawValue))
         #expect(presentCalls == 1)
-        #expect(finishedAttempts == 1 && textPresentations == 1)
+        #expect(finishedAttempts == 1 && textPresentations == 0)
         #expect(metrics.snapshot() == [
             .init(frame: committedFrame, domain: .editor, outcome: .submitted),
             .init(frame: committedFrame, domain: .editor, outcome: .presented)
         ])
         #expect(renderer.lastCompletedPresentationGeneration == 1)
         #expect(renderer.activeResourceSnapshot() != before)
+
+        drawable.present()
+        #expect(textPresentations == 1)
     }
 
     @Test("old connection completion retires its slot without presenting or promoting resources")

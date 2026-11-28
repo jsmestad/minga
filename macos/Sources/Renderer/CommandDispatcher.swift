@@ -70,6 +70,7 @@ enum ApplicationCommitEffect: Equatable {
     case accessibilityModeChanged(String)
     case agentChatVisibilityChanged(Bool)
     case agentDesktopNotification(AgentDesktopNotification)
+    case nativeFileLocationAction(NativeFileLocationAction)
     /// How many tasks need you changed; the app shows it on the Dock badge while it is in the background.
     case needsYouCountChanged(Int)
 }
@@ -210,6 +211,7 @@ final class CommandDispatcher {
     func promoteVisibleEditorPresentation(
         snapshot: CommittedEditorSnapshot,
         localTransform: EditorLocalPresentationTransform?,
+        geometry: PresentedEditorGeometry? = nil,
         textLayout: PresentedTextLayout? = nil,
         connectionID: UInt64
     ) {
@@ -220,7 +222,8 @@ final class CommandDispatcher {
             return
         }
 
-        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform, textLayout: textLayout)
+        visibleEditorPresentation = VisibleEditorPresentation(snapshot: snapshot, localTransform: localTransform, textLayout: textLayout, geometry: geometry)
+        guiState.actMenuState.updatePresentedCaret(geometry?.caret)
         textPresentationLeases.present(snapshot)
         if pendingEditorPresentationFrame == presentedFrame {
             pendingEditorPresentationFrame = nil
@@ -402,6 +405,7 @@ final class CommandDispatcher {
         textPresentationLeases.replaceConnection()
         committedEditorSnapshot = nil
         visibleEditorPresentation = nil
+        guiState.actMenuState.updatePresentedCaret(nil)
         pendingEditorPresentationFrame = nil
         openPresentationTarget = nil
         operationReadiness.replaceConnection()
@@ -503,7 +507,7 @@ final class CommandDispatcher {
                 applyLocal(command)
             }
 
-        case .applicationQuitResponse, .agentDesktopNotification:
+        case .applicationQuitResponse, .agentDesktopNotification, .guiFileLocationAction:
             applyLocal(command)
 
         case .guiRequest(let request):
@@ -1151,6 +1155,9 @@ final class CommandDispatcher {
         case .agentDesktopNotification(let notification):
             effects.append(.application(.agentDesktopNotification(notification)))
 
+        case .guiFileLocationAction(let action):
+            effects.append(.application(.nativeFileLocationAction(action)))
+
         case .guiRequest:
             break
 
@@ -1290,15 +1297,19 @@ final class CommandDispatcher {
                 effects.append(.application(.needsYouCountChanged(update.needsYouCount)))
             }
 
-        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
+        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys, let movementKeys, let hints):
             if visible {
-                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys, movementKeys: movementKeys, hints: hints)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, markedCount: markedCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, modePrefix: modePrefix, loadStatus: loadStatus, queryGeneration: queryGeneration, acknowledgedQueryEditSeq: acknowledgedQueryEditSeq, activationGeneration: activationGeneration, empty: empty, listKeys: listKeys, movementKeys: movementKeys, hints: hints)
             } else {
                 guiState.pickerState.hide()
             }
 
-        case .guiPickerSelection(let generation, let selectedItemID, let selectedActionID):
-            guiState.pickerState.updateSelection(generation: generation, selectedItemID: selectedItemID, selectedActionID: selectedActionID)
+        case .guiPickerSelection(let generation, let selectedItemID):
+            guiState.pickerState.updateSelection(generation: generation, selectedItemID: selectedItemID)
+
+        case .guiActMenu(let menu):
+            if menu != nil { guiState.pickerState.discardNavigationPreview() }
+            guiState.actMenuState.update(menu)
 
         case .guiPickerPreview(let visible, let lines):
             if visible {

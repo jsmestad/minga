@@ -1,0 +1,563 @@
+{
+ "authorship": [
+  {
+   "column": 0,
+   "head": true,
+   "role": 0,
+   "row": 1,
+   "shared": false
+  }
+ ],
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule UsageLimit do\n  def label, do: \"Your plan limit applies\"\n  def window, do: 60\n  def retry?, do: false\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    298,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    22.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    94.5,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    210.5,
+    43.5,
+    71.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    296,
+    43.5,
+    94.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.act_menu"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    404.5,
+    43.5,
+    13.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    432,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    240,
+    107.5,
+    456,
+    336
+   ],
+   "part": "actMenu.panel"
+  },
+  {
+   "baseline": 133,
+   "frame": [
+    252,
+    119.5,
+    257.5,
+    17
+   ],
+   "part": "actMenu.title",
+   "text": "\u25cb Minga\u2019s change \u00b7 1 line \u00b7 unreviewed"
+  },
+  {
+   "baseline": 133,
+   "frame": [
+    629.5,
+    122.5,
+    54.5,
+    14
+   ],
+   "part": "actMenu.filter",
+   "text": "\u203a filter"
+  },
+  {
+   "frame": [
+    252,
+    157.5,
+    212,
+    82
+   ],
+   "part": "actMenu.decision"
+  },
+  {
+   "frame": [
+    472,
+    157.5,
+    212,
+    82
+   ],
+   "part": "actMenu.decision"
+  },
+  {
+   "baseline": 176,
+   "frame": [
+    286,
+    163.5,
+    81.5,
+    16
+   ],
+   "part": "actMenu.label",
+   "text": "Keep change"
+  },
+  {
+   "baseline": 176,
+   "frame": [
+    506,
+    163.5,
+    90,
+    16
+   ],
+   "part": "actMenu.label",
+   "text": "Reject change"
+  },
+  {
+   "baseline": 176,
+   "frame": [
+    264,
+    165.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "y"
+  },
+  {
+   "baseline": 176,
+   "frame": [
+    484,
+    165.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "n"
+  },
+  {
+   "baseline": 194,
+   "frame": [
+    286,
+    183.5,
+    153,
+    14
+   ],
+   "part": "actMenu.detail",
+   "text": "Leaves Minga\u2019s edits in place"
+  },
+  {
+   "baseline": 194,
+   "frame": [
+    506,
+    183.5,
+    119.5,
+    28
+   ],
+   "part": "actMenu.detail",
+   "text": "Undoes Minga\u2019s edits. Yours stay."
+  },
+  {
+   "baseline": 230,
+   "frame": [
+    404,
+    219.5,
+    48,
+    14
+   ],
+   "part": "actMenu.shortcut",
+   "text": "SPC a y"
+  },
+  {
+   "baseline": 230,
+   "frame": [
+    624,
+    219.5,
+    48,
+    14
+   ],
+   "part": "actMenu.shortcut",
+   "text": "SPC a d"
+  },
+  {
+   "baseline": 263,
+   "frame": [
+    252,
+    253.5,
+    61,
+    13
+   ],
+   "part": "actMenu.section",
+   "text": "This change"
+  },
+  {
+   "frame": [
+    240,
+    266.5,
+    456,
+    27
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 284,
+   "frame": [
+    282,
+    272.5,
+    55,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Show diff"
+  },
+  {
+   "baseline": 284,
+   "frame": [
+    252,
+    273.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "="
+  },
+  {
+   "baseline": 284,
+   "frame": [
+    677,
+    273.5,
+    7,
+    14
+   ],
+   "part": "actMenu.shortcut",
+   "text": "="
+  },
+  {
+   "frame": [
+    240,
+    293.5,
+    456,
+    27
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 311,
+   "frame": [
+    282,
+    299.5,
+    109,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Open conversation"
+  },
+  {
+   "baseline": 311,
+   "frame": [
+    252,
+    300.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "o"
+  },
+  {
+   "baseline": 336,
+   "frame": [
+    252,
+    326.5,
+    40,
+    13
+   ],
+   "part": "actMenu.section",
+   "text": "This file"
+  },
+  {
+   "frame": [
+    240,
+    339.5,
+    456,
+    27
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 357,
+   "frame": [
+    282,
+    345.5,
+    99.5,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Copy file:line link"
+  },
+  {
+   "baseline": 357,
+   "frame": [
+    252,
+    346.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "l"
+  },
+  {
+   "frame": [
+    240,
+    366.5,
+    456,
+    27
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 384,
+   "frame": [
+    282,
+    372.5,
+    213.5,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Attach file diagnostics to Agent draft"
+  },
+  {
+   "baseline": 384,
+   "frame": [
+    252,
+    373.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "d"
+  },
+  {
+   "baseline": 384,
+   "frame": [
+    622.5,
+    373.5,
+    61.5,
+    14
+   ],
+   "part": "actMenu.shortcut",
+   "text": "SPC a x d"
+  },
+  {
+   "baseline": 409,
+   "frame": [
+    252,
+    399.5,
+    50,
+    13
+   ],
+   "part": "actMenu.section",
+   "text": "Anywhere"
+  },
+  {
+   "frame": [
+    240,
+    412.5,
+    456,
+    27
+   ],
+   "part": "actMenu.row"
+  },
+  {
+   "baseline": 430,
+   "frame": [
+    282,
+    418.5,
+    121.5,
+    15
+   ],
+   "part": "actMenu.label",
+   "text": "Ask Minga about this"
+  },
+  {
+   "baseline": 430,
+   "frame": [
+    252,
+    419.5,
+    7,
+    14
+   ],
+   "part": "actMenu.key",
+   "text": "a"
+  },
+  {
+   "baseline": 430,
+   "frame": [
+    636,
+    419.5,
+    48,
+    14
+   ],
+   "part": "actMenu.shortcut",
+   "text": "SPC a ?"
+  },
+  {
+   "frame": [
+    0,
+    908,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    6,
+    908,
+    61,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    908,
+    86,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex \u25cf"
+  },
+  {
+   "frame": [
+    169,
+    908,
+    55.5,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "change: change 1/1"
+  },
+  {
+   "frame": [
+    1378,
+    908,
+    25.5,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1411.5,
+    908,
+    22.5,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 2:19"
+  },
+  {
+   "frame": [
+    6,
+    911,
+    61,
+    18
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "baseline": 923.5,
+   "frame": [
+    12,
+    913,
+    49,
+    14
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.act_menu",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 932,
+  "width": 1440
+ }
+}

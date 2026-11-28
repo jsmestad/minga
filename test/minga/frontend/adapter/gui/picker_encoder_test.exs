@@ -6,7 +6,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
   alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker
-  alias Minga.RenderModel.UI.Picker.ActionMenu
 
   @op_gui_picker Minga.Protocol.Opcodes.gui_picker()
   @op_gui_picker_preview Minga.Protocol.Opcodes.gui_picker_preview()
@@ -26,7 +25,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
     # family. The case below decodes the production wire format and asserts on
     # every section's decoded fields, preserving the coverage the oracle-anchored
     # test carried: header counts/title/preview flag, a flagged item with
-    # match_positions, the query, an action menu, the mode prefix, an error load
+    # match_positions, the query, the mode prefix, an error load
     # status, and the styled preview line.
     test "encodes every picker section and the preview into the wire format" do
       model = %Picker{
@@ -56,7 +55,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             group: "ChatGPT"
           }
         ],
-        action_menu: %ActionMenu{actions: ["Open"], selected_index: 0},
         mode_prefix: ">",
         load_status: {:error, "boom"},
         movement_keys: [
@@ -70,8 +68,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
 
       # The command is the picker payload followed by the preview payload.
-      <<@op_gui_picker, 8::8, picker_rest::binary>> = cmd
-      {sections, preview} = take_sections(picker_rest, 8, %{})
+      <<@op_gui_picker, 7::8, picker_rest::binary>> = cmd
+      {sections, preview} = take_sections(picker_rest, 7, %{})
 
       # Header (0x01)
       <<1::8, selected::16, filtered::16, total::16, has_preview::8, title_len::16,
@@ -109,9 +107,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert {first_pos, second_pos} == {0, 2}
       assert activation_id == 23
 
-      # Action menu (0x04): visible, selected 0, one action "Open"
-      assert <<1::8, 0::8, 1::8, 4::16, "Open", 0::8>> = sections[0x04]
-
       # Mode prefix (0x05)
       assert <<1::16, ">">> = sections[0x05]
 
@@ -141,8 +136,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       }
 
       {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
-      <<@op_gui_picker, 9::8, picker_rest::binary>> = cmd
-      {sections, _preview} = take_sections(picker_rest, 9, %{})
+      <<@op_gui_picker, 8::8, picker_rest::binary>> = cmd
+      {sections, _preview} = take_sections(picker_rest, 8, %{})
 
       title = "No results for “limit_lable”."
       why = "Ignored and hidden files were skipped."
@@ -155,44 +150,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert sections[0x09] == <<0>>
 
       {plain, _caches} = PickerEncoder.encode(%{model | empty: nil}, Caches.new())
-      assert <<@op_gui_picker, 8::8, _rest::binary>> = plain
-    end
-
-    test "encodes open picker with action menu and preview" do
-      model = %Picker{
-        visible?: true,
-        title: "Pick",
-        query: "o",
-        selected_index: 0,
-        filtered_count: 1,
-        total_count: 2,
-        marked_count: 1,
-        has_preview?: true,
-        items: [
-          %{
-            icon_color: 0,
-            flags: 2,
-            label: "One",
-            description: "",
-            annotation: "",
-            match_positions: [0],
-            activation_id: 1,
-            status: "",
-            status_tone: :none,
-            group: ""
-          }
-        ],
-        action_menu: %ActionMenu{actions: ["open"], selected_index: 0},
-        mode_prefix: ">",
-        preview_lines: [[{"hello", 0xFFFFFF, true}]]
-      }
-
-      {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
-
-      assert <<@op_gui_picker, 8::8, _picker_sections::binary>> =
-               binary_part(cmd, 0, byte_size(cmd) - 2)
-
-      assert :binary.match(cmd, <<@op_gui_picker_preview, 1::8>>) != :nomatch
+      assert <<@op_gui_picker, 7::8, _rest::binary>> = plain
     end
 
     test "returns nil on second call with same semantic data" do
@@ -297,21 +255,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
         assert_encoding_error(%{base | items: [changed_item]}, field, actual, max)
       end
     end
-
-    test "rejects oversized picker action menu fields" do
-      base = valid_picker()
-      oversized = String.duplicate("x", 65_536)
-
-      for {field, menu, actual, max} <- [
-            {:action_menu_selected_index, %ActionMenu{actions: [], selected_index: 256}, 256,
-             255},
-            {:action_count, %ActionMenu{actions: List.duplicate("Open", 256), selected_index: 0},
-             256, 255},
-            {:action_name, %ActionMenu{actions: [oversized], selected_index: 0}, 65_536, 65_535}
-          ] do
-        assert_encoding_error(%{base | action_menu: menu}, field, actual, max)
-      end
-    end
   end
 
   defp valid_picker do
@@ -368,9 +311,6 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   defp picker_schema_path(:item_match_position), do: [:items, 0, :match_positions, 0]
   defp picker_schema_path(:item_status), do: [:items, 0, :status]
   defp picker_schema_path(:item_group), do: [:items, 0, :group]
-  defp picker_schema_path(:action_menu_selected_index), do: [:action_menu, :selected_index]
-  defp picker_schema_path(:action_count), do: [:action_menu, :actions]
-  defp picker_schema_path(:action_name), do: [:action_menu, :actions, 0]
 
   # Splits `count` self-describing sections (id:1, len:2, payload:len) off the
   # front of the picker payload, returning a section-id => payload map and the

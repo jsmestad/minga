@@ -10,10 +10,10 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
   alias MingaEditor.Handlers.GuiActionHandler
+  alias MingaEditor.Input.ActMenu, as: ActMenuInput
   alias MingaEditor.Input.Picker, as: PickerInput
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
-  alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.FetchEffect
@@ -21,6 +21,8 @@ defmodule MingaEditor.PickerUITest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree
+  alias MingaEditor.Shell.Traditional.ActMenu
+  alias MingaEditor.Shell.Traditional.ActMenuWorkflow
   alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
@@ -57,11 +59,13 @@ defmodule MingaEditor.PickerUITest do
 
     state = %{state | workspace: SessionState.set_buffers(state.workspace, buffers)}
 
-    picker_state = %PickerState{
-      picker: marked_buffer_picker(buffers.list),
-      source: MingaEditor.UI.Picker.BufferSource,
-      restore: 0
-    }
+    picker_state =
+      %PickerState{
+        picker: marked_buffer_picker(buffers.list),
+        source: MingaEditor.UI.Picker.BufferSource,
+        restore: 0
+      }
+      |> PickerState.begin_query_session()
 
     ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
@@ -266,11 +270,9 @@ defmodule MingaEditor.PickerUITest do
   defp picker_state_for_source(state, source, items) do
     picker = items |> Picker.new(title: "Test", max_visible: 10) |> mark_all_picker()
 
-    picker_state = %PickerState{
-      picker: picker,
-      source: source,
-      restore: state.workspace.buffers.active_index
-    }
+    picker_state =
+      %PickerState{picker: picker, source: source, restore: state.workspace.buffers.active_index}
+      |> PickerState.begin_query_session()
 
     ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
@@ -281,7 +283,11 @@ defmodule MingaEditor.PickerUITest do
       |> Picker.new(title: "Test", max_visible: 10)
 
     state = TestHelpers.base_state(content: "initial")
-    picker_state = %PickerState{picker: picker, source: source, restore: 0}
+
+    picker_state =
+      %PickerState{picker: picker, source: source, restore: 0}
+      |> PickerState.begin_query_session()
+
     ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
 
@@ -308,11 +314,13 @@ defmodule MingaEditor.PickerUITest do
 
     state = TestHelpers.base_state(content: "initial")
 
-    picker_state = %PickerState{
-      picker: Picker.new([%Item{id: candidate, label: "kept.bin"}], title: "Find file"),
-      source: FileSource,
-      restore: state.workspace.buffers.active_index
-    }
+    picker_state =
+      %PickerState{
+        picker: Picker.new([%Item{id: candidate, label: "kept.bin"}], title: "Find file"),
+        source: FileSource,
+        restore: state.workspace.buffers.active_index
+      }
+      |> PickerState.begin_query_session()
 
     opened = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
     {opened, path, bytes}
@@ -547,12 +555,13 @@ defmodule MingaEditor.PickerUITest do
 
       new_state = PickerUI.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
 
-      {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
-        new_state.shell_runtime.state.modal
+      menu = new_state |> ActMenuWorkflow.current() |> ActMenu.model()
+      assert menu.lead == []
+      assert menu.selected == nil
+      assert [%{label: "Kill all marked", destructive?: true}] = menu.rows
 
-      assert [{"Kill all marked", {:bulk, :kill_marked, items}}] = actions
-      [_active | marked] = state.workspace.buffers.list
-      assert Enum.map(items, & &1.id) == Enum.map(marked, &{:buffer, &1})
+      {:handled, untouched} = ActMenuInput.handle_key(new_state, 13, 0)
+      assert untouched.workspace.buffers.list == state.workspace.buffers.list
     end
 
     test "Enter applies source bulk select when items are marked" do
@@ -631,24 +640,26 @@ defmodule MingaEditor.PickerUITest do
       assert selected.(PickerUI.handle_key(state, ?v, 0x04)) == selected.(state)
     end
 
-    test "the act menu takes ⌃J / ⌃K, ↩ and esc, and ignores typing" do
+    test "the act menu takes ⌃J / ⌃K and filtering without changing the parent query" do
       state = tab_picker_state(NoBulkActionsSource)
       menu = PickerUI.handle_key(state, ?., @ctrl)
 
-      assert {:picker, %{picker_ui: %{action_menu: {_actions, 0, _item}}}} =
-               menu.shell_runtime.state.modal
+      initial = menu |> ActMenuWorkflow.current() |> ActMenu.model()
+      assert [%{id: id, label: "Open"}] = initial.lead
+      assert initial.selected == id
 
-      moved = PickerUI.handle_key(menu, ?j, @ctrl)
+      {:handled, moved} = ActMenuInput.handle_key(menu, ?j, @ctrl)
 
-      assert {:picker, %{picker_ui: %{action_menu: {_actions, 1, _item}}}} =
-               moved.shell_runtime.state.modal
+      assert %{selected: selected, rows: [%{id: selected, label: "Delete"}]} =
+               moved |> ActMenuWorkflow.current() |> ActMenu.model()
 
-      assert PickerUI.handle_key(moved, ?x, 0) == moved
+      {:handled, filtered} = ActMenuInput.handle_key(moved, ?x, 0)
+      assert %{query: "x", rows: []} = filtered |> ActMenuWorkflow.current() |> ActMenu.model()
+      {:handled, dismissed} = ActMenuInput.handle_key(filtered, 27, 0)
+      assert ActMenuWorkflow.current(dismissed) == nil
+      assert dismissed.shell_runtime.state.modal == state.shell_runtime.state.modal
 
-      assert {:picker, %{picker_ui: %{action_menu: nil}}} =
-               PickerUI.handle_key(moved, 27, 0).shell_runtime.state.modal
-
-      ran = PickerUI.handle_key(moved, 13, 0)
+      {:handled, ran} = ActMenuInput.handle_key(moved, 13, 0)
       assert ran.shell_runtime.state.modal == :none
     end
   end
@@ -803,11 +814,9 @@ defmodule MingaEditor.PickerUITest do
       picker =
         Picker.new([%Item{id: :delete_me, label: "Delete me"}], title: "Delete Action Test")
 
-      picker_state = %PickerState{
-        picker: picker,
-        source: Minga.Test.DeleteActionPickerSource,
-        restore: 0
-      }
+      picker_state =
+        %PickerState{picker: picker, source: Minga.Test.DeleteActionPickerSource, restore: 0}
+        |> PickerState.begin_query_session()
 
       state = %EditorState{
         frontend: %MingaEditor.State.Frontend{port_manager: nil},
@@ -821,10 +830,13 @@ defmodule MingaEditor.PickerUITest do
 
       menu = PickerUI.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {[{"Delete", :delete}], 0, _item}}}} =
-               menu.shell_runtime.state.modal
+      model = menu |> ActMenuWorkflow.current() |> ActMenu.model()
+      assert [%{id: id, label: "Delete", destructive?: true}] = model.rows
+      assert model.selected == nil
+      {:handled, untouched} = ActMenuInput.handle_key(menu, 13, 0)
+      assert untouched == menu
 
-      result = PickerUI.handle_key(menu, 13, 0)
+      result = GuiActionHandler.dispatch(menu, {:act_menu_action, model.id, id})
 
       assert result.shell_runtime.state.modal == :none
       assert result.shell_runtime.state.notice.message == "Deleted via action"
@@ -842,7 +854,7 @@ defmodule MingaEditor.PickerUITest do
                PickerInput.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
 
       assert result == state
-      assert {:picker, %{picker_ui: %{action_menu: nil}}} = result.shell_runtime.state.modal
+      assert ActMenuWorkflow.current(result) == nil
       assert File.read!(path) == bytes
     end
 
@@ -855,19 +867,12 @@ defmodule MingaEditor.PickerUITest do
       assert {:handled, menu_state} =
                PickerInput.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {[{"Open", :open}], 0, _item}}}} =
-               menu_state.shell_runtime.state.modal
-
-      model =
-        menu_state
-        |> MingaEditor.Frontend.Emit.Context.from_editor_state()
-        |> PickerBuilder.build()
-
-      assert model.action_menu.actions == ["Open"]
-      refute "Delete" in model.action_menu.actions
+      model = menu_state |> ActMenuWorkflow.current() |> ActMenu.model()
+      assert [%{label: "Open"}] = model.lead
+      assert model.rows == []
       assert File.read!(path) == bytes
 
-      assert {:handled, opened_state} = PickerInput.handle_key(menu_state, 13, 0)
+      assert {:handled, opened_state} = ActMenuInput.handle_key(menu_state, 13, 0)
       on_exit(fn -> stop_added_buffers(opened_state, state) end)
 
       assert opened_state.shell_runtime.state.modal == :none
@@ -904,12 +909,11 @@ defmodule MingaEditor.PickerUITest do
 
       menu_state = PickerUI.handle_key(picker_state, ?., MingaEditor.Input.mod_ctrl())
 
-      assert {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
-               menu_state.shell_runtime.state.modal
+      model = menu_state |> ActMenuWorkflow.current() |> ActMenu.model()
+      assert [%{label: "Open"}] = model.lead
+      assert [%{label: "Delete"}] = model.rows
 
-      assert Enum.map(actions, &elem(&1, 0)) == ["Open", "Delete"]
-
-      new_state = PickerUI.handle_key(menu_state, 13, 0)
+      {:handled, new_state} = ActMenuInput.handle_key(menu_state, 13, 0)
 
       assert new_state.shell_runtime.state.modal == :none
       assert Map.get(new_state, :action_item_id) == :first
@@ -1095,6 +1099,17 @@ defmodule MingaEditor.PickerUITest do
       refute Map.has_key?(dismissed, :selected_item_id)
     end
 
+    test "secondary activation of a painted row is ignored after picker dismissal" do
+      state = tab_picker_state(NoBulkActionsSource)
+      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
+      generation = live_picker.activation_offer.generation
+      [{id, _, _} | _] = live_picker.activation_offer.items
+      closed = PickerUI.close(state)
+
+      assert GuiActionHandler.dispatch(closed, {:act_menu_target, {:picker, generation, id}}) ==
+               closed
+    end
+
     test "GUI dispatch activates the exact action captured when the menu opened" do
       item = %Item{id: :first, label: "first"}
       picker = Picker.new([item], title: "Test")
@@ -1108,13 +1123,9 @@ defmodule MingaEditor.PickerUITest do
         |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
         |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
 
-      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
-      generation = live_picker.activation_offer.generation
-
-      {delete_id, _, _} =
-        Enum.find(live_picker.activation_offer.actions, &(elem(&1, 1) == {"Delete", :delete}))
-
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, delete_id})
+      model = state |> ActMenuWorkflow.current() |> ActMenu.model()
+      [%{id: delete_id, label: "Delete"}] = model.rows
+      result = GuiActionHandler.dispatch(state, {:act_menu_action, model.id, delete_id})
 
       assert result.shell_runtime.state.modal == :none
       assert Map.get(result, :action_item_id) == {:delete, :first}
@@ -1139,13 +1150,9 @@ defmodule MingaEditor.PickerUITest do
           PickerState.update_picker(picker_state, Picker.select_index(picker_state.picker, 1))
         end)
 
-      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
-      generation = live_picker.activation_offer.generation
-
-      {delete_id, _, _} =
-        Enum.find(live_picker.activation_offer.actions, &(elem(&1, 1) == {"Delete", :delete}))
-
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, delete_id})
+      model = state |> ActMenuWorkflow.current() |> ActMenu.model()
+      [%{id: delete_id, label: "Delete"}] = model.rows
+      result = GuiActionHandler.dispatch(state, {:act_menu_action, model.id, delete_id})
 
       assert result.shell_runtime.state.modal == :none
       assert Map.get(result, :action_item_id) == {:delete, :first}
@@ -1166,10 +1173,9 @@ defmodule MingaEditor.PickerUITest do
         )
         |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
 
-      {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
-      generation = live_picker.activation_offer.generation
-      [{action_id, _action, _item}] = live_picker.activation_offer.actions
-      result = GuiActionHandler.dispatch(state, {:picker_action_activate, generation, action_id})
+      model = state |> ActMenuWorkflow.current() |> ActMenu.model()
+      [%{id: action_id}] = model.lead
+      result = GuiActionHandler.dispatch(state, {:act_menu_action, model.id, action_id})
 
       assert result.shell_runtime.state.modal == :none
       assert result.shell_runtime.state.notice.message == "Action failed for first"

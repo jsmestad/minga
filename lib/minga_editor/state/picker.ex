@@ -3,7 +3,7 @@ defmodule MingaEditor.State.Picker do
   Groups picker-related fields from EditorState.
 
   Tracks the current picker instance, the source module providing candidates,
-  the buffer index to restore on cancel, and the action-menu overlay state.
+  and the buffer index to restore on cancel.
   """
 
   alias MingaEditor.State.Picker.ActivationOffer
@@ -12,14 +12,6 @@ defmodule MingaEditor.State.Picker do
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.PublicSource
-
-  @typedoc "Action menu state: `{actions, selected_index, captured_item}` or nil when closed."
-  @type action_menu ::
-          {[MingaEditor.UI.Picker.Source.action_entry()], non_neg_integer(),
-           MingaEditor.UI.Picker.Item.t()}
-          | nil
-
-  @type action_menu_direction :: :next | :previous
 
   @typedoc "Async loading status for sources that fetch candidates in the background."
   @type load_status :: :ready | :loading | {:error, String.t()}
@@ -60,7 +52,6 @@ defmodule MingaEditor.State.Picker do
           restore: non_neg_integer() | nil,
           restore_cursor: Minga.Buffer.position() | nil,
           restore_theme: MingaEditor.UI.Theme.t() | nil,
-          action_menu: action_menu(),
           context: map() | nil,
           extension: Extension.t() | nil,
           layout: MingaEditor.UI.Picker.Source.layout(),
@@ -81,7 +72,6 @@ defmodule MingaEditor.State.Picker do
             restore: nil,
             restore_cursor: nil,
             restore_theme: nil,
-            action_menu: nil,
             context: nil,
             extension: nil,
             layout: :bottom,
@@ -151,7 +141,7 @@ defmodule MingaEditor.State.Picker do
       restore_theme: parent.restore_theme,
       context: context,
       layout: layout,
-      parent: %{parent | action_menu: nil}
+      parent: parent
     }
     |> begin_query_session()
   end
@@ -310,69 +300,16 @@ defmodule MingaEditor.State.Picker do
     |> refresh_activation_offer()
   end
 
-  @doc "Opens the source action menu for the exact item or marked set captured by `actions`."
-  @spec open_action_menu(
-          t(),
-          [MingaEditor.UI.Picker.Source.action_entry()],
-          MingaEditor.UI.Picker.Item.t()
-        ) :: t()
-  def open_action_menu(%__MODULE__{} = ps, [_first | _rest] = actions, item) do
-    %{ps | action_menu: {actions, 0, item}}
-    |> refresh_activation_offer()
-  end
-
-  def open_action_menu(%__MODULE__{} = ps, [], _item), do: ps
-
-  @doc "Moves the action-menu selection when the menu is open."
-  @spec move_action_menu_selection(t(), action_menu_direction()) :: t()
-  def move_action_menu_selection(
-        %__MODULE__{action_menu: {[], _selected, _item}} = ps,
-        _direction
-      ),
-      do: ps
-
-  def move_action_menu_selection(
-        %__MODULE__{action_menu: {[_first | _rest] = actions, selected, item}} = ps,
-        :next
-      ) do
-    next_selected = rem(selected + 1, length(actions))
-
-    %{ps | action_menu: {actions, next_selected, item}}
-    |> refresh_activation_offer()
-  end
-
-  def move_action_menu_selection(
-        %__MODULE__{action_menu: {[_first | _rest] = actions, selected, item}} = ps,
-        :previous
-      ) do
-    previous_selected = if selected == 0, do: length(actions) - 1, else: selected - 1
-
-    %{ps | action_menu: {actions, previous_selected, item}}
-    |> refresh_activation_offer()
-  end
-
-  def move_action_menu_selection(%__MODULE__{action_menu: nil} = ps, _direction), do: ps
-
-  @doc "Closes the source action menu if it is open."
-  @spec close_action_menu(t()) :: t()
-  def close_action_menu(%__MODULE__{action_menu: nil} = ps), do: ps
-
-  def close_action_menu(%__MODULE__{} = ps) do
-    %{ps | action_menu: nil}
-    |> refresh_activation_offer()
-  end
-
-  @doc "Replaces the activation offer after any result or action-menu transition."
+  @doc "Replaces the activation offer after a picker result transition."
   @spec refresh_activation_offer(t()) :: t()
   def refresh_activation_offer(
         %__MODULE__{
           picker: picker,
-          action_menu: action_menu,
           query_generation: generation,
           activation_offer: offer
         } = ps
       ) do
-    %{ps | activation_offer: ActivationOffer.refresh(offer, picker, action_menu, generation)}
+    %{ps | activation_offer: ActivationOffer.refresh(offer, picker, generation)}
   end
 
   @doc "Resolves an exact item identity from the current activation offer."
@@ -380,14 +317,6 @@ defmodule MingaEditor.State.Picker do
           {:ok, non_neg_integer(), MingaEditor.UI.Picker.Item.t()} | :error
   def resolve_item_activation(%__MODULE__{activation_offer: offer}, generation, activation_id) do
     ActivationOffer.resolve_item(offer, generation, activation_id)
-  end
-
-  @doc "Resolves an exact action identity from the current activation offer."
-  @spec resolve_action_activation(t(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, MingaEditor.UI.Picker.Source.action_entry(), MingaEditor.UI.Picker.Item.t()}
-          | :error
-  def resolve_action_activation(%__MODULE__{activation_offer: offer}, generation, activation_id) do
-    ActivationOffer.resolve_action(offer, generation, activation_id)
   end
 
   @doc "Returns the visible prefix for a switched source."

@@ -15,6 +15,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.Shell.Traditional.ClickRegions
   alias MingaEditor.Shell.Traditional.Drawers
   alias MingaEditor.Shell.Traditional.Flashes
+  alias MingaEditor.Shell.Traditional.ActMenu
   alias MingaEditor.Shell.Traditional.GitToast
   alias MingaEditor.Shell.Traditional.InputState
   alias MingaEditor.Shell.Traditional.Notice
@@ -53,6 +54,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           tab_bar: TabBar.t() | nil,
           agent_surfaces: AgentSurfaces.t(),
           modal: ModalOverlay.t(),
+          act_menu: ActMenu.t() | nil,
           input: InputState.t(),
           signature_help: SignatureHelp.t() | nil,
           tool_prompts: ToolPrompts.t()
@@ -70,6 +72,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             tab_bar: nil,
             agent_surfaces: %AgentSurfaces{},
             modal: :none,
+            act_menu: nil,
             input: %InputState{},
             signature_help: nil,
             tool_prompts: %ToolPrompts{}
@@ -77,6 +80,8 @@ defmodule MingaEditor.Shell.Traditional.State do
   @doc "Returns presentation state safe to retain outside the input owner."
   @spec render_snapshot(t()) :: t()
   def render_snapshot(%__MODULE__{modal: modal, tab_bar: tab_bar} = state) do
+    state = if state.act_menu == nil, do: state, else: %{state | act_menu: nil}
+
     state =
       case ModalOverlay.render_snapshot(modal) do
         ^modal -> state
@@ -88,6 +93,10 @@ defmodule MingaEditor.Shell.Traditional.State do
       snapshot -> %{state | tab_bar: snapshot}
     end
   end
+
+  @doc "Installs or dismisses only the act menu, leaving its parent input surface intact."
+  @spec put_act_menu(t(), ActMenu.t() | nil) :: t()
+  def put_act_menu(%__MODULE__{} = state, menu), do: %{state | act_menu: menu}
 
   @doc "Installs the configured missing-tool prompt suppression policy."
   @spec install_tool_prompt_suppression(t(), boolean()) :: t()
@@ -555,21 +564,42 @@ defmodule MingaEditor.Shell.Traditional.State do
   @doc "Opens an exact modal value through the conflict-sticky transition."
   @spec open_modal(t(), ModalOverlay.active()) :: t()
   def open_modal(%__MODULE__{} = state, modal),
-    do: %{state | modal: ModalOverlay.open(state.modal, modal)}
+    do: install_modal(state, ModalOverlay.open(state.modal, modal))
 
   @doc "Transitions to an exact modal value unconditionally."
   @spec transition_modal(t(), ModalOverlay.active()) :: t()
   def transition_modal(%__MODULE__{} = state, modal),
-    do: %{state | modal: ModalOverlay.transition(state.modal, modal)}
+    do: install_modal(state, ModalOverlay.transition(state.modal, modal))
 
   @doc "Closes a completed modal."
   @spec close_modal(t()) :: t()
-  def close_modal(%__MODULE__{} = state), do: %{state | modal: ModalOverlay.close(state.modal)}
+  def close_modal(%__MODULE__{} = state),
+    do: %{state | modal: ModalOverlay.close(state.modal), act_menu: nil}
 
   @doc "Dismisses a canceled modal."
   @spec dismiss_modal(t()) :: t()
   def dismiss_modal(%__MODULE__{} = state),
-    do: %{state | modal: ModalOverlay.dismiss(state.modal)}
+    do: install_modal(state, ModalOverlay.dismiss(state.modal))
+
+  @spec install_modal(t(), ModalOverlay.t()) :: t()
+  defp install_modal(
+         %__MODULE__{modal: {:picker, %{picker_ui: %{query_generation: generation}}}} = state,
+         {:picker, %{picker_ui: %{query_generation: generation}}} = modal
+       ),
+       do: %{state | modal: modal}
+
+  # Completion responses can arrive while the menu owns input. They can update
+  # or retire their own surface, not the menu layered over it.
+  defp install_modal(%__MODULE__{modal: :none} = state, {:completion, _} = modal),
+    do: %{state | modal: modal}
+
+  defp install_modal(%__MODULE__{modal: {:completion, _}} = state, {:completion, _} = modal),
+    do: %{state | modal: modal}
+
+  defp install_modal(%__MODULE__{modal: {:completion, _}} = state, :none),
+    do: %{state | modal: :none}
+
+  defp install_modal(state, modal), do: %{state | modal: modal, act_menu: nil}
 
   @doc "Updates the active completion value."
   @spec update_modal_completion(t(), (Minga.Editing.Completion.t() ->

@@ -612,30 +612,6 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
                <<2::16, "hi", 7::32, 11::32>>
     end
 
-    test "action_menu section encodes the visible conditional tail" do
-      menu = %Picker.ActionMenu{
-        selected_index: 1,
-        actions: ["Open", "Delete"],
-        activation_ids: [29, 31]
-      }
-
-      <<_opcode, section_count::8, sections_binary::binary>> =
-        PickerEncoder.encode_command(%Picker{visible?: true, action_menu: menu, items: []})
-
-      payload = extract_section_payload(sections_binary, section_count, 0x04)
-
-      # visible, selected index, labels, then the parallel opaque activation IDs.
-      assert payload ==
-               <<1::8, 1::8, 2::8, 4::16, "Open", 6::16, "Delete", 2::8, 29::32, 31::32>>
-    end
-
-    test "hidden action_menu encodes only the visible byte" do
-      <<_opcode, section_count::8, sections_binary::binary>> =
-        PickerEncoder.encode_command(%Picker{visible?: true, action_menu: nil, items: []})
-
-      assert extract_section_payload(sections_binary, section_count, 0x04) == <<0::8>>
-    end
-
     test "load_status error encodes the status==2 message tail" do
       <<_opcode, section_count::8, sections_binary::binary>> =
         PickerEncoder.encode_command(%Picker{

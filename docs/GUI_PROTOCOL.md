@@ -71,10 +71,12 @@ The BEAM-side encoder must use a documented length-prefixed envelope for all new
 | 0x9F | gui_sidebars | Semantic sidebar host metadata. Uses a 32-bit payload length so future sidebar lists can grow without changing the envelope. |
 | 0xA3 | gui_extension_runtime | Generic frontend-extension runtime envelope. Uses a 32-bit payload length so extension-owned payloads can grow without changing the shared envelope. |
 | 0xA6 | gui_completion_selection | Narrow completion selection and documentation update. |
-| 0xA7 | gui_picker_selection | Narrow picker item and action selection update. |
+| 0xA7 | gui_picker_selection | Narrow picker item selection update. |
 | 0xA9 | gui_resident_semantics | Atomic absolute-rank semantics for retained editor rows. |
 | 0xAA | gui_focus_owner | Authoritative keyboard responder and owning surface, changed frames and every keyframe. |
 | 0xAB | gui_agent_help | Independent Agent Help groups. Uses a 32-bit payload length and remains available while Chat is hidden. |
+| 0xB1 | gui_act_menu | Shared menu offer and its current filter, selection, and rows. |
+| 0xB2 | gui_file_location_action | macOS-only effect, outside frame transactions. Reveals a path in Finder or opens a directory in Terminal after validating the exact file-tree offer. |
 
 ### 0xA3 — gui_extension_runtime
 
@@ -441,7 +443,7 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title, marked_count, activation_generation |
 | 0x02 | Query | query string, native editing generation, acknowledged native edit sequence |
 | 0x03 | Items | item_count + items (positional per item) |
-| 0x04 | ActionMenu | visible flag + selected + actions + activation IDs |
+| 0x04 | Reserved | Picker actions now use `gui_act_menu` (wire version 60). |
 | 0x05 | ModePrefix | mode prefix string |
 | 0x06 | LoadStatus | ready, loading, or an error message |
 | 0x07 | Empty | the empty-state header (an `empty_list`), list_keys and the footer's key hints, present only while the picker offers next steps instead of results |
@@ -471,13 +473,6 @@ Per item:
   + match_pos_count(1) + match_positions(match_pos_count * 2) + activation_id(4)
   + status_len(2) + status(status_len) + status_tone(1)
   + group_len(2) + group(group_len)
-
-ActionMenu section 0x04 payload:
-  action_visible(1)
-  When action_visible == 1:
-    selected_action(1) + action_count(1) + actions...
-    Per action: name_len(2) + name(name_len)
-    + activation_id_count(1) + activation_ids(activation_id_count * 4)
 
 ModePrefix section 0x05 payload:
   mode_prefix_len(2) + mode_prefix(mode_prefix_len)
@@ -516,7 +511,7 @@ match_positions is a list of uint16 character indices for highlighting matched c
 has_preview indicates whether the picker source supports preview (triggers split layout).
 filtered_count and total_count enable "X/Y" display in the search field.
 marked_count is authoritative across the full picker item set, including marked items hidden by the current filter or item limit.
-action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
+The shared act menu owns source actions for a picker item. It captures that item's activation identity when it opens.
 activation_generation and activation IDs form opaque source-owned identities. Retained semantic items keep their IDs across reorder and refilter within the same activation generation. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
 mode prefix badges show switched picker sources like command, buffer, or project search.
 The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field, and plain keys go to the BEAM. With list_keys 0 the field stays live. The footer draws `hints` in order, each as "keys word" ("j k move", "↩ run", "q close" in a list; "⌃J ⌃K move", "↩ run", "esc close" in a prompt with the default keys). The BEAM resolves them from the live picker keymap, so a rebind shows; frontends hold no key literals.
@@ -532,13 +527,34 @@ When hidden:
 
 ### 0xA7 — gui_picker_selection
 
-Selection-only picker updates do not resend the result or action lists.
+Selection-only picker updates do not resend the result list.
 
 ```
-opcode(1) + payload_len(2) + activation_generation(4) + selected_item_id(4) + selected_action_id(4)
+opcode(1) + payload_len(2) + activation_generation(4) + selected_item_id(4) + reserved_zero(4)
 ```
 
-Apply the update only to the matching activation generation. Resolve the selected item and action by opaque ID, not by their previous positions.
+Apply the update only to the matching activation generation. Resolve the selected item by opaque ID, not by its previous position.
+
+### 0xB1 `gui_act_menu`
+
+Wire version 60. The BEAM commits one menu offer at a time. When it is visible, it owns keyboard events and pointer hit testing above its parent surface. Closing it restores the parent focus.
+
+```
+opcode(1) + payload_len(4) + visible(1)
+When visible == 1:
+  offer_id(8) + role(1) + anchor_row(2) + anchor_column(2) + selected(2)
+  + title(string16) + query(string16) + lead_count(1) + lead_rows
+  + row_count(2) + rows
+Per row:
+  action_id(2) + key(string8) + label(string16) + direct_key(string16)
+  + consequence(string16) + section(string16) + destructive(1)
+```
+
+`role` is 0 neutral, 1 Minga, or 2 failure. `selected` is zero when no row is selected. The anchor is a grid point from the click; `0xFFFE` in both fields follows the committed caret, and `0xFFFF` in both fields centers the menu. Row IDs belong to this offer only. On activation, return the offer ID and action ID exactly as displayed. The BEAM rejects an old offer or an action no longer in its filtered rows.
+
+### 0xB2 `gui_file_location_action`
+
+`opcode(1) + payload_len(2) + kind(1) + path(string16)`. Kind 0 reveals the validated absolute path in Finder. Kind 1 opens Terminal at the validated absolute directory. This native effect does not update a committed frame. Go does not offer either action.
 
 ### 0x7D — gui_picker_preview
 
@@ -1434,7 +1450,6 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x5D | chat_returned_to_bottom | (empty) | Reader returned to the transcript bottom; re-pins auto-follow (pin flag only, no offset move) |
 | 0x5F | picker_query_changed | generation(4) + edit_seq(4) + query_len(2) + query | Replace the native picker's complete query when the edit belongs to the active generation and is newer than the last acknowledged edit |
 | 0x60 | picker_item_activate | activation_generation(4) + activation_id(4) | Activate the exact picker item offered by the current BEAM-owned picker snapshot |
-| 0x61 | picker_action_activate | activation_generation(4) + activation_id(4) | Activate the exact Actions entry offered by the current BEAM-owned picker snapshot |
 | 0x62 | search_focus | replace_mode(1) | Open or focus the native search toolbar |
 | 0x63 | file_dialog_result | request_id(4) + outcome(1) + path_count(2) + paths | Complete a correlated native file-dialog request |
 | 0x64 | focus_window | window_id(2) + generation(8) | Request semantic activation of the exact accessible pane; the BEAM ignores a stale pane generation |
@@ -1457,6 +1472,9 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x75 | agent_continue_turn | `session_id(string16) + request_id(string16)` | Continue the interrupted request shown by the stopped conversation. A stale action cannot continue a replacement turn. This action does not send or clear the draft or advance the queue. |
 | 0x76 | agent_queue_action | `action(u8) + workspace_id(u32) + record_id(string16) + row_id(u64) + row_revision(u64) + removed_id(u64) + removed_revision(u64)` | `0` select, `1` remove, `2` put back after, `3` put back before, `4` edit, `5` close, `6` return to the composer from empty. Send the displayed pending pair for select, remove, edit and both placement actions. Placement also names the displayed removed pair. Close and empty use no pairs. An absent pair is two zeroes. A stale conversation or row leaves the queue unchanged. |
 | 0x77 | subagent_peek_action | `kind(u8) + window_id(u16) + displayed(string16) + target(string16) + row(u32) + column(u32)` | `0` pointer Started and `7` keyboard Return: parent window and target token. Return opens the selection only while the parent transcript owns input. If the same conversation's composer took focus, Return goes to that composer with the attachment offer the frontend saw (`displayed`, decimal or empty). `1` sibling: child window, displayed token and target token. `2` Brief, `3` composer cursor, `4` send, `5` close and `6` inspect: child window and displayed token, no target token. Only `3` includes a nonzero cursor coordinate. `8` commits UTF-8 text from `target` to the exact focused composer: child window and displayed child token, or reserved window `65534` and the parent composer presentation in decimal. Stale windows or tokens cannot retarget an action. |
+| 0x78 | act_menu_action | `offer_id(u64) + action_id(u16)` | Activate the displayed row. `0` dismisses the exact offer, `0xFFFF` starts filtering without running any row. |
+| 0x79 | review_ribbon_act | `window(u16) + gutter_revision(u64) + kind(u8) + unit(u64) + source_line(u32) + byte_column(u32) + screen_row(u16) + screen_column(u16)` | Offer actions for the exact painted ribbon head (`kind`: 0 text, 1 deletion). A frontend uses the head it painted, including a sticky head. The BEAM validates the committed revision and exact review group. |
+| 0x7A | act_menu_target | `kind(u8) + target` | Open a menu for an exact chrome target. Picker (0): generation(u32) + activation ID(u32). Fold (1): window(u16) + generation(u64) + source line(u32). File tree (2): generation(u64) + item ID(string16). Approval (3): session, request, and tool-call IDs (each string16). Tasks row (4): row ID(string16). |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

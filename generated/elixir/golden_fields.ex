@@ -6,6 +6,7 @@ defmodule Minga.Protocol.GoldenFields do
   """
 
   @units %{
+    "GuiActMenuFields" => [{"visible", "Visible", :scalar}, {"offer_id", "OfferID", :scalar}, {"role", "Role", :scalar}, {"anchor_row", "AnchorRow", :scalar}, {"anchor_column", "AnchorColumn", :scalar}, {"selected", "Selected", :scalar}, {"title", "Title", :string}, {"query", "Query", :string}, {"lead", "Lead", {:array, {:struct, [{"id", "ID", :scalar}, {"key", "Key", :string}, {"label", "Label", :string}, {"hint", "Hint", :string}, {"detail", "Detail", :string}, {"section", "Section", :string}, {"destructive", "Destructive", :scalar}]}}}, {"rows", "Rows", {:array, {:struct, [{"id", "ID", :scalar}, {"key", "Key", :string}, {"label", "Label", :string}, {"hint", "Hint", :string}, {"detail", "Detail", :string}, {"section", "Section", :string}, {"destructive", "Destructive", :scalar}]}}}],
     "GuiAgentChatComposerHints" => [{"hints", "Hints", {:array, {:struct, [{"keys", "Keys", :string}, {"action", "Action", :string}]}}}],
     "GuiAgentChatContinueTarget" => [{"session_id", "SessionID", :string}, {"request_id", "RequestID", :string}],
     "GuiAgentChatDraftAttachments" => [{"count", "Count", :scalar}, {"offer", "Offer", :scalar}],
@@ -38,7 +39,6 @@ defmodule Minga.Protocol.GoldenFields do
     "GuiHoverPopupFields" => [{"visible", "Visible", :scalar}],
     "GuiMinibufferFields" => [{"visible", "Visible", :scalar}],
     "GuiNotificationsFields" => [{"visible", "Visible", :scalar}, {"notification_count", "NotificationCount", :scalar}],
-    "GuiPickerActionMenu" => [{"visible", "Visible", :scalar}, {"selected_index", "SelectedIndex", :scalar}, {"actions", "Actions", {:array, :string}}, {"activation_ids", "ActivationIds", {:array, :scalar}}],
     "GuiPickerEmpty" => [{"empty", "Empty", {:struct, [{"glyph", "Glyph", :string}, {"title", "Title", :string}, {"why", "Why", :string}, {"selected", "Selected", :scalar}, {"actions", "Actions", {:array, {:struct, [{"id", "ID", :string}, {"key", "Key", :string}, {"label", "Label", :string}]}}}]}}, {"list_keys", "ListKeys", :scalar}, {"hints", "Hints", {:array, {:struct, [{"keys", "Keys", :string}, {"word", "Word", :string}]}}}],
     "GuiPickerEnterSelection" => [{"selects", "Selects", :scalar}],
     "GuiPickerHeader" => [{"visible", "Visible", :scalar}, {"selected_index", "SelectedIndex", :scalar}, {"filtered_count", "FilteredCount", :scalar}, {"total_count", "TotalCount", :scalar}, {"has_preview", "HasPreview", :scalar}, {"title", "Title", :string}, {"marked_count", "MarkedCount", :scalar}, {"activation_generation", "ActivationGeneration", :scalar}],

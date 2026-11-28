@@ -304,12 +304,17 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return inputSeq > 0 ? nil : .invalidPayload("Horizontal pan requires a positive input sequence")
         case .gitPullAndRetry(let toastID):
             return toastID > 0 ? nil : .invalidPayload("Git retry requires a positive toast identity")
+        case .actMenuTarget(.fileTree(_, let itemID)), .actMenuTarget(.tasksDrawer(let itemID)):
+            return oversizedString(itemID, limit: Int(UInt16.max))
+        case .actMenuTarget(.approval(let sessionID, let requestID, let toolCallID)):
+            return firstOversizedString(in: [sessionID, requestID, toolCallID], limit: Int(UInt16.max))
         case .ready, .keyPress, .resize, .frontendForeground, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
              .selectTab, .closeTab, .tabCopyPath, .tabReorder, .tabPin, .tabUnpin,
              .tabMoveLeft, .tabMoveRight, .hoverOpen, .pickerItemActivate,
-             .pickerActionActivate, .fileTreeEditCancel, .fileTreeCollapseAll,
+             .actMenuAction, .reviewRibbonAct, .actMenuTarget(.picker), .actMenuTarget(.fold),
+             .fileTreeEditCancel, .fileTreeCollapseAll,
              .fileTreeRefresh, .togglePanel, .newTab, .systemWillSleep,
              .systemDidWake, .powerThermalState, .commandCopy, .commandCut,
              .panelDismiss, .panelResize, .agentToolToggle,
@@ -390,7 +395,28 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         case .hoverOpen: encodeHoverOpenAction()
         case .pickerQueryChanged(let generation, let editSequence, let text): encodePickerQueryChanged(generation: generation, editSeq: editSequence, text: text)
         case .pickerItemActivate(let generation, let activationID): encodePickerItemActivate(generation: generation, activationID: activationID)
-        case .pickerActionActivate(let generation, let activationID): encodePickerActionActivate(generation: generation, activationID: activationID)
+        case .actMenuAction(let offerID, let actionID):
+            var buf = Data(count: 12)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_ACT_MENU_ACTION
+            writeU64(&buf, 2, offerID)
+            writeU16(&buf, 10, actionID)
+            writeFrame(buf)
+        case .actMenuTarget(let target):
+            encodeActMenuTarget(target)
+        case .reviewRibbonAct(let windowID, let gutterRevision, let kind, let unit, let sourceLine, let byteColumn, let screenRow, let screenColumn):
+            var buf = Data(count: 33)
+            buf[0] = OP_GUI_ACTION
+            buf[1] = GUI_ACTION_REVIEW_RIBBON_ACT
+            writeU16(&buf, 2, windowID)
+            writeU64(&buf, 4, gutterRevision)
+            buf[12] = kind.rawValue
+            writeU64(&buf, 13, unit)
+            writeU32(&buf, 21, sourceLine)
+            writeU32(&buf, 25, byteColumn)
+            writeU16(&buf, 29, screenRow)
+            writeU16(&buf, 31, screenColumn)
+            writeFrame(buf)
         case .pickerFit(let generation, let rows): encodePickerFit(generation: generation, rows: rows)
         case .fileTreeEditConfirm(let token, let text): encodeFileTreeEditConfirm(token: token, text: text)
         case .fileTreeEditCancel: encodeFileTreeEditCancel()
@@ -1015,10 +1041,33 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    private func encodePickerActionActivate(generation: UInt32, activationID: UInt32) {
-        var buf = Data([OP_GUI_ACTION, GUI_ACTION_PICKER_ACTION_ACTIVATE])
-        appendU32(&buf, generation)
-        appendU32(&buf, activationID)
+    private func encodeActMenuTarget(_ target: ActMenuTarget) {
+        var buf = Data([OP_GUI_ACTION, GUI_ACTION_ACT_MENU_TARGET])
+        switch target {
+        case .picker(let generation, let activationID):
+            buf.append(0)
+            appendU32(&buf, generation)
+            appendU32(&buf, activationID)
+        case .fold(let windowID, let generation, let sourceLine):
+            buf.count = 17
+            buf[2] = 1
+            writeU16(&buf, 3, windowID)
+            writeU64(&buf, 5, generation)
+            writeU32(&buf, 13, sourceLine)
+        case .fileTree(let generation, let itemID):
+            buf.count = 11
+            buf[2] = 2
+            writeU64(&buf, 3, generation)
+            appendString16(&buf, itemID)
+        case .approval(let sessionID, let requestID, let toolCallID):
+            buf.append(3)
+            appendString16(&buf, sessionID)
+            appendString16(&buf, requestID)
+            appendString16(&buf, toolCallID)
+        case .tasksDrawer(let rowID):
+            buf.append(4)
+            appendString16(&buf, rowID)
+        }
         writeFrame(buf)
     }
 

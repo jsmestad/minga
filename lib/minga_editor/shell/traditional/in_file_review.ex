@@ -101,6 +101,29 @@ defmodule MingaEditor.Shell.Traditional.InFileReview do
   def keep_blocker(state, buffer, target),
     do: decide_prepared(state, buffer, target, :keep, 1, :blocking)
 
+  @doc "Applies the exact captured offer; never prepares a new target after selection."
+  @spec decide_offer(
+          State.t(),
+          Buffer.t(),
+          BufferProcess.review_target(),
+          decision(),
+          pos_integer(),
+          PendingKeep.continuation()
+        ) ::
+          State.t()
+  def decide_offer(
+        %{workspace: %{editing: %{pending_keep: nil}}} = state,
+        buffer,
+        target,
+        decision,
+        count,
+        continuation
+      ),
+      do: decide_prepared(state, buffer, target, decision, count, continuation)
+
+  def decide_offer(state, _buffer, _target, _decision, _count, _continuation),
+    do: NoticeWorkflow.publish(state, "A review decision is still pending here")
+
   @spec decide_prepared(
           State.t(),
           Buffer.t(),

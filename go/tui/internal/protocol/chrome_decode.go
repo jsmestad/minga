@@ -23,6 +23,20 @@ func decodeChrome(payload []byte) (ChromePayload, bool, error) {
 		chrome.Which, chrome.Summary, chrome.Bytes = decodeWhichKey(payload)
 	case generated.OPGuiPicker:
 		chrome.Picker, chrome.Summary, chrome.Bytes = decodePicker(payload)
+	case generated.OPGuiActMenu:
+		size := payloadLen32Size(payload)
+		if size == 0 {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_act_menu: truncated payload")
+		}
+		menu, end, err := generated.DecodeGuiActMenuFields(payload, 5, size)
+		if err != nil {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_act_menu: %w", err)
+		}
+		if end != size || menu.Visible > 1 || menu.Role > 2 || len(menu.Lead) > 2 ||
+			(menu.Visible == 1 && menu.OfferID == 0) {
+			return ChromePayload{}, true, fmt.Errorf("malformed gui_act_menu: invalid offer, flags, or trailing data")
+		}
+		chrome.ActMenu, chrome.Summary, chrome.Bytes = menu, menu.Title, size
 	case generated.OPGuiPickerPreview:
 		chrome.Preview, chrome.Summary, chrome.Bytes = decodePickerPreview(payload)
 	case generated.OPGuiFileTree:

@@ -271,6 +271,7 @@ final class CoreTextMetalRenderer {
     private(set) var capacityDeferralCount = 0
     /// Generation of the last GPU-completed presentation whose candidate resources were promoted.
     private(set) var lastCompletedPresentationGeneration: UInt64 = 0
+    private var lastDisplayedInteractionGeneration: UInt64 = 0
     private let bgPipeline: MTLRenderPipelineState
     private let linePipeline: MTLRenderPipelineState
 
@@ -530,7 +531,7 @@ final class CoreTextMetalRenderer {
                 isPresentationCurrent: @escaping @MainActor () -> Bool = { true },
                 onAttemptFinished: @escaping @MainActor () -> Void = {},
                 onPresented: @escaping @MainActor (CommittedEditorSnapshot) -> Void = { _ in },
-                onTextPresented: @escaping @MainActor (CommittedEditorSnapshot, PresentedTextLayout) -> Void = { _, _ in }) -> NativeRenderSubmissionOutcome {
+                onInteractionPresented: @escaping @MainActor (CommittedEditorSnapshot, PresentedTextLayout, PresentedEditorGeometry) -> Void = { _, _, _ in }) -> NativeRenderSubmissionOutcome {
         guard let reservation = presentationGeneration.issue(slotCount: Self.nativeFrameSlotCount) else {
             capacityDeferralCount += 1
             os_signpost(.event, log: renderLog, name: "NativeSlotMiss",
@@ -750,6 +751,7 @@ final class CoreTextMetalRenderer {
         var lineInstances: [LineGPU] = []
         var gutterMarkInstances: [LineGPU] = []
         var gutterMarkQuads: [QuadGPU] = []
+        var ribbonMarks: [PresentedEditorGeometry.RibbonMark] = []
 
         // Semantic window content rendering (from 0x80 opcode).
         // Buffer windows with semantic content rendered via WindowContentRenderer;
@@ -1163,7 +1165,8 @@ final class CoreTextMetalRenderer {
                 bgQuads: &bgQuads,
                 lineInstances: &lineInstances,
                 gutterMarkInstances: &gutterMarkInstances,
-                gutterMarkQuads: &gutterMarkQuads
+                gutterMarkQuads: &gutterMarkQuads,
+                ribbonMarks: &ribbonMarks
             )
         }
 
@@ -1508,6 +1511,21 @@ final class CoreTextMetalRenderer {
         }
         let cursorSurface = resolvedCursor?.windowId.flatMap { id in surfaces.first { $0.windowId == id } }
         rebaseCursorAnimation(scrollX: Float(cursorSurface?.content.scrollLeft ?? 0) * cellW * scale, windowId: resolvedCursor?.windowId)
+        let presentedCellSize = CGSize(width: CGFloat(cellW), height: CGFloat(displayCellH))
+        let presentedCaret = resolvedCursor.flatMap { cursor -> CGRect? in
+            let offset = Self.presentationScrollOffset(
+                scrollLeft: cursorSurface?.content.scrollLeft ?? 0,
+                scrollOffsetPx: Self.smoothScrollOffset(for: cursor.windowId, targetWindowId: scrollTargetWindowId, scrollOffsetPx: smoothScrollOffsetPx)
+            )
+            let rect = CGRect(x: CGFloat((cursor.x - offset.x) / scale), y: CGFloat((cursor.y - offset.y) / scale),
+                              width: presentedCellSize.width, height: presentedCellSize.height)
+            let drawableBounds = CGRect(origin: .zero, size: CGSize(width: viewportSize.width / CGFloat(scale), height: viewportSize.height / CGFloat(scale)))
+            let visible = (promptTransform?.rect(rect) ?? rect).intersection(drawableBounds)
+            return visible.isNull || visible.isEmpty ? nil : visible
+        }
+        let candidateGeometry = PresentedEditorGeometry(
+            cellSize: presentedCellSize, caret: presentedCaret, ribbonMarks: renderingPrompt ? [] : ribbonMarks
+        )
         let renderCursor = animatedCursor(for: resolvedCursor, teleportLineThresholdPx: displayCellH * scale * 50.0)
         if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
             let cursorScrollLeft = cursorSurface?.content.scrollLeft ?? 0
@@ -1973,15 +1991,35 @@ final class CoreTextMetalRenderer {
                     )
                     return
                 }
-                do {
-                    if ProcessInfo.processInfo.environment["MINGA_STARTUP_TIMER"] == "1" {
-                        drawable.addPresentedHandler { shown in
-                            recordStartupPhase(
-                                "drawable_presented", frameSequence: presentationFrame.frameSeq,
-                                presentedTime: shown.presentedTime
-                            )
-                        }
+                let presentedTextLayout = if let promptTransform {
+                    PresentedTextLayout(
+                        panes: candidateTextLayout.panes, promptTransform: promptTransform,
+                        renderedWindowIDs: candidateTextLayout.renderedWindowIDs
+                    )
+                } else {
+                    candidateTextLayout
+                }
+                let publishInteraction: @MainActor @Sendable () -> Void = { [weak self] in
+                    guard let self, isPresentationCurrent(),
+                          self.configurationEpoch == candidateConfigurationEpoch,
+                          generation > self.lastDisplayedInteractionGeneration else { return }
+                    self.lastDisplayedInteractionGeneration = generation
+                    onInteractionPresented(presentedSnapshot, presentedTextLayout, candidateGeometry)
+                }
+                let recordsStartup = ProcessInfo.processInfo.environment["MINGA_STARTUP_TIMER"] == "1"
+                drawable.addPresentedHandler { shown in
+                    if recordsStartup {
+                        recordStartupPhase("drawable_presented", frameSequence: presentationFrame.frameSeq,
+                                           presentedTime: shown.presentedTime)
                     }
+                    if Thread.isMainThread {
+                        MainActor.assumeIsolated { publishInteraction() }
+                    } else {
+                        DispatchQueue.main.async { publishInteraction() }
+                    }
+                }
+
+                do {
                     try self.factories.present(drawable)
                 } catch {
                     self.recordNativeFailure(NativePresentationFailure(
@@ -2010,16 +2048,6 @@ final class CoreTextMetalRenderer {
                 latencyRecorder?.markPresented(seq: presentationInputSeq)
                 self.presentationMetrics?.recordMetalPresented(presentationFrame: presentationFrame)
                 onPresented(presentedSnapshot)
-                let presentedTextLayout: PresentedTextLayout
-                if let promptTransform {
-                    presentedTextLayout = PresentedTextLayout(
-                        panes: candidateTextLayout.panes, promptTransform: promptTransform,
-                        renderedWindowIDs: candidateTextLayout.renderedWindowIDs
-                    )
-                } else {
-                    presentedTextLayout = candidateTextLayout
-                }
-                onTextPresented(presentedSnapshot, presentedTextLayout)
                 os_signpost(.event, log: renderLog, name: "PresentationComplete",
                             signpostID: renderSignpostID,
                             "input=%{public}u", presentationInputSeq)
@@ -2127,7 +2155,8 @@ final class CoreTextMetalRenderer {
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU],
         gutterMarkInstances: inout [LineGPU],
-        gutterMarkQuads: inout [QuadGPU]
+        gutterMarkQuads: inout [QuadGPU],
+        ribbonMarks: inout [PresentedEditorGeometry.RibbonMark]
     ) {
         let signColWidth = Int(gutter.signColWidth)
         let baseRow = gutter.contentRow
@@ -2136,6 +2165,7 @@ final class CoreTextMetalRenderer {
         let clipTop = Float(gutter.contentRow) * cellH * scale
         let clipBottom = Float(gutter.contentRow + gutter.contentHeight) * cellH * scale
         var firstVisibleSourceRow = true
+        var twistClipTop = clipTop
 
         for (offset, row) in slice.rows.enumerated() {
             let rowIndex = slice.range.lowerBound + offset
@@ -2156,22 +2186,44 @@ final class CoreTextMetalRenderer {
                     let markWidth = max(Int((10 * scale).rounded(.down)), 1)
                     let prefix = Float(signColWidth + Int(gutter.lineNumberWidth)) * cellW * scale
                     let x = xOffset + prefix + (gutterPaddingPx - Float(markWidth)) / 2
-                    if pinned && yPos > clipTop {
-                        renderGutterTwist(
-                            mark: (mark.region, false, mark.shared), line: row.bufLine, pinned: false,
-                            windowId: gutter.windowId, background: frameState.defaultBg,
-                            x: x, y: yPos, width: markWidth, height: cellH * scale,
-                            clipTop: clipTop + cellH * scale, clipBottom: clipBottom, atlas: atlas,
-                            windowRenderer: windowRenderer, bgQuads: &gutterMarkQuads, lineInstances: &gutterMarkInstances
-                        )
+                    if pinned && yPos > clipTop,
+                       let body = renderGutterTwist(
+                           mark: (mark.region, false, mark.shared), line: row.bufLine, pinned: false,
+                           windowId: gutter.windowId, background: frameState.defaultBg,
+                           x: x, y: yPos, width: markWidth, height: cellH * scale,
+                           clipTop: clipTop + cellH * scale, clipBottom: clipBottom, atlas: atlas,
+                           windowRenderer: windowRenderer, bgQuads: &gutterMarkQuads, lineInstances: &gutterMarkInstances
+                       ) {
+                        ribbonMarks.append(.init(
+                            rect: CGRect(x: CGFloat(x / scale), y: CGFloat(body.y / scale),
+                                         width: CGFloat(Float(markWidth) / scale), height: CGFloat(body.height / scale)),
+                            head: nil
+                        ))
                     }
-                    renderGutterTwist(
+                    if let painted = renderGutterTwist(
                         mark: mark, line: row.bufLine, pinned: pinned, windowId: gutter.windowId,
                         background: frameState.defaultBg,
                         x: x, y: pinned ? clipTop : yPos, width: markWidth, height: cellH * scale,
-                        clipTop: clipTop, clipBottom: clipBottom, atlas: atlas,
+                        clipTop: twistClipTop, clipBottom: clipBottom, atlas: atlas,
                         windowRenderer: windowRenderer, bgQuads: &gutterMarkQuads, lineInstances: &gutterMarkInstances
-                    )
+                    ) {
+                        let head: PresentedEditorGeometry.ReviewHead? = if mark.head,
+                            mark.region.role == .pending || mark.region.role == .deletion {
+                            .init(windowID: gutter.windowId, gutterRevision: authorship.revision,
+                                  kind: mark.region.role == .pending ? .pending : .deletion,
+                                  unit: mark.region.unit, sourceLine: mark.region.firstLine, byteColumn: mark.region.firstColumn)
+                        } else {
+                            nil
+                        }
+                        ribbonMarks.append(.init(
+                            rect: CGRect(x: CGFloat(x / scale), y: CGFloat(painted.y / scale),
+                                         width: CGFloat(Float(markWidth) / scale), height: CGFloat(painted.height / scale)),
+                            head: head
+                        ))
+                        // Following scrolled rows may reach into the sticky row. They
+                        // must not paint over the head or its physical input target.
+                        if pinned { twistClipTop = clipTop + cellH * scale }
+                    }
                 }
             }
 
@@ -2239,16 +2291,16 @@ final class CoreTextMetalRenderer {
         windowId: UInt16, background: UInt32, x: Float, y: Float, width: Int, height: Float,
         clipTop: Float, clipBottom: Float, atlas: LineTextureAtlas, windowRenderer: WindowContentRenderer,
         bgQuads: inout [QuadGPU], lineInstances: inout [LineGPU]
-    ) {
+    ) -> (y: Float, height: Float)? {
         let theme = currentThemeColors
         if mark.region.role == .you {
             let humanColor = theme?.roleColorRGB(.you) ?? windowRenderer.defaultFgRGB
             let strandWidth = max(1, Float(width) * 0.15)
             let color = colorFromU24(humanColor, default: .zero)
-            appendClippedGutterQuad(x: x + (Float(width) - strandWidth) / 2, y: y,
-                                    width: strandWidth, height: height, color: color, alpha: 1,
-                                    clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
-            return
+            let quad = appendClippedGutterQuad(x: x + (Float(width) - strandWidth) / 2, y: y,
+                                              width: strandWidth, height: height, color: color, alpha: 1,
+                                              clipTop: clipTop, clipBottom: clipBottom, quads: &bgQuads)
+            return quad.map { (y: $0.position.y, height: $0.size.y) }
         }
         let variant: TwistVariant
         if mark.region.role == .kept {
@@ -2265,16 +2317,17 @@ final class CoreTextMetalRenderer {
         guard let entry = windowRenderer.renderGutterTwist(
             variant, singleLine: single, shared: mark.shared, strand: strand, shade: shade, background: background,
             width: width, windowId: windowId, atlas: atlas, metrics: &frameMetrics
-        ) else { return }
+        ) else { return nil }
         let (origin, size) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
-        appendClippedGutterLine(x: x, y: y, width: Float(entry.pixelWidth), height: height,
-                                uvOrigin: origin, uvSize: size, clipTop: clipTop,
-                                clipBottom: clipBottom, lineInstances: &lineInstances)
+        let published = appendClippedGutterLine(x: x, y: y, width: Float(entry.pixelWidth), height: height,
+                                                uvOrigin: origin, uvSize: size, clipTop: clipTop,
+                                                clipBottom: clipBottom, lineInstances: &lineInstances)
         if pinned {
             appendClippedGutterQuad(x: x, y: y + height - 1, width: Float(width), height: 1,
                                     color: .zero, alpha: 0.26, clipTop: clipTop,
                                     clipBottom: clipBottom, quads: &bgQuads)
         }
+        return published.map { (y: $0.position.y, height: $0.size.y) }
     }
 
     private func drawLineTextures(
@@ -2292,28 +2345,31 @@ final class CoreTextMetalRenderer {
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: instances.count)
     }
 
+    @discardableResult
     private func appendClippedGutterQuad(
         x: Float, y: Float, width: Float, height: Float,
         color: SIMD3<Float>, alpha: Float,
         clipTop: Float, clipBottom: Float,
         quads: inout [QuadGPU]
-    ) {
-        guard let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: height, top: clipTop, bottom: clipBottom) else { return }
+    ) -> QuadGPU? {
+        guard let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: height, top: clipTop, bottom: clipBottom) else { return nil }
         var quad = QuadGPU()
         quad.position = SIMD2<Float>(x, clipped.y)
         quad.size = SIMD2<Float>(width, clipped.height)
         quad.color = color
         quad.alpha = alpha
         quads.append(quad)
+        return quad
     }
 
+    @discardableResult
     private func appendClippedGutterLine(
         x: Float, y: Float, width: Float, height: Float,
         uvOrigin: SIMD2<Float>, uvSize: SIMD2<Float>,
         clipTop: Float, clipBottom: Float,
         lineInstances: inout [LineGPU]
-    ) {
-        guard let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: height, top: clipTop, bottom: clipBottom) else { return }
+    ) -> LineGPU? {
+        guard let clipped = CoreTextMetalRenderer.clipVerticalQuad(y: y, height: height, top: clipTop, bottom: clipBottom) else { return nil }
         let topRatio = height > 0 ? (clipped.y - y) / height : 0
         let visibleRatio = height > 0 ? clipped.height / height : 0
         var lineGPU = LineGPU()
@@ -2322,6 +2378,7 @@ final class CoreTextMetalRenderer {
         lineGPU.uvOrigin = SIMD2<Float>(uvOrigin.x, uvOrigin.y + uvSize.y * topRatio)
         lineGPU.uvSize = SIMD2<Float>(uvSize.x, uvSize.y * visibleRatio)
         lineInstances.append(lineGPU)
+        return lineGPU
     }
 
     /// Renders a git or diagnostic sign for one gutter row.

@@ -9,6 +9,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   Picker fit has the same exception: the u32 picker generation identifies the subject and rows is a u16 measurement of its list, not an item position. Changed or additional fields are not exempt.
 
   An absolute visual scrollbar target carries a pane and its exact retained presentation. A rank without that presentation is not an identity.
+
+  Act menu actions identify a committed offer and its local choice ID. Ribbon and fold openings identify the pane and its exact presentation plus a source position. Their 16-bit fields are not row indexes.
   """
 
   use Credo.Check,
@@ -98,7 +100,8 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   defp position_issues({:decode_gui_action, _, [{:@, _, [{opcode, _, _}]}, payload]}, meta, exemptions) do
     fields = binary_fields(payload)
     if opcode == :gui_action_tab_reorder or Keyword.has_key?(exemptions, opcode) or
-         identity?(fields) or presentation_rank?(opcode, fields) or physical_capacity?(opcode, fields) do
+         identity?(fields) or presentation_rank?(opcode, fields) or physical_capacity?(opcode, fields) or
+         act_target?(opcode, fields) do
       []
     else
       for {name, line} <- bare_positions(fields) do
@@ -144,6 +147,30 @@ defmodule Minga.Credo.ExplicitTargetCheck do
   end
 
   defp physical_capacity?(_opcode, _fields), do: false
+
+  defp act_target?(:gui_action_act_menu_action, fields),
+    do: act_fields(fields) == [offer: 64, id: 16]
+
+  defp act_target?(:gui_action_review_ribbon_act, fields),
+    do: act_fields(fields) == [window: 16, revision: 64, kind: 8, unit: 64, row: 32, column: 32, y: 16, x: 16]
+
+  defp act_target?(:gui_action_act_menu_target, [1 | fields]),
+    do: act_fields(fields) == [window: 16, generation: 64, line: 32]
+
+  defp act_target?(_opcode, _fields), do: false
+
+  defp act_fields(fields) do
+    Enum.map(fields, fn
+      {:"::", _, [{name, _, context}, type]} when is_atom(name) and is_atom(context) ->
+        {name, unsigned_integer_width(type)}
+
+      {name, _, context} when is_atom(name) and is_atom(context) ->
+        {name, 8}
+
+      _other ->
+        :other
+    end)
+  end
 
   defp identity?(fields) do
     Enum.any?(fields, fn

@@ -579,9 +579,58 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
         ]
       ),
       Entry.pending("minga.hover.attribution", 4053, "hover on a line Minga wrote"),
-      Entry.pending("minga.act_menu", 4052, "the act menu on a Minga change"),
-      Entry.pending("minga.act_menu.filtered", 4052, "the act menu after typing"),
-      Entry.pending("minga.act_menu.selection", 4052, "the act menu on a selection")
+      Entry.built("minga.act_menu",
+        start: act_menu_start(1),
+        reach: "g g ] h g .",
+        recognize: &Model.open?(&1, :act_menu),
+        checks: [
+          Check.new("Keep is safe by default, and preview has its own group", fn model ->
+            assert %{
+                     lead: [%{id: keep, label: "Keep change"}, %{label: "Reject change"}],
+                     selected: keep
+                   } =
+                     model.ui.act_menu
+
+            assert Enum.any?(
+                     model.ui.act_menu.rows,
+                     &(&1.label == "Show diff" and &1.section == "This change")
+                   )
+
+            model |> assert_focus(:act_menu) |> assert_mode(:normal)
+          end)
+        ]
+      ),
+      Entry.built("minga.act_menu.filtered",
+        start: act_menu_start(1),
+        reach: "g g ] h g . /conversation",
+        recognize: &match?(%{ui: %{act_menu: %{query: "conversation"}}}, &1),
+        checks: [
+          Check.new("Filtering projects only the matching action and selects it", fn model ->
+            assert %{
+                     lead: [],
+                     rows: [%{id: action, label: "Open conversation"}],
+                     selected: action
+                   } =
+                     model.ui.act_menu
+
+            assert_focus(model, :act_menu)
+          end)
+        ]
+      ),
+      Entry.built("minga.act_menu.selection",
+        start: act_menu_start(2),
+        reach: "g g V j j j g .",
+        recognize: &match?(%{ui: %{act_menu: %{lead: [%{label: "Keep 2 changes"} | _]}}}, &1),
+        checks: [
+          Check.new("Two separate edits are offered together without leaving Visual", fn model ->
+            assert %{lead: [%{label: "Keep 2 changes"}, %{label: "Reject 2 changes"}]} =
+                     model.ui.act_menu
+
+            assert Enum.any?(model.ui.act_menu.rows, &(&1.label == "Rewrite selection"))
+            model |> assert_focus(:act_menu) |> assert_mode(:visual)
+          end)
+        ]
+      )
     ]
   end
 
@@ -591,6 +640,15 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
   end
 
   defp child_selected?(%Model{}), do: false
+
+  @spec act_menu_start(1 | 2) :: keyword()
+  defp act_menu_start(1),
+    do: [content: @review_content, review_edits: Enum.take(review_edits(), 1)]
+
+  defp act_menu_start(2) do
+    [first, _unchanged_line, last] = review_edits()
+    [content: @review_content, review_edits: [first, last]]
+  end
 
   @spec review_start(boolean()) :: keyword()
   defp review_start(open? \\ false) do

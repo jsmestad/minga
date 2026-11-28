@@ -6,7 +6,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker, as: PickerModel
-  alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Extension.Picker.Source, as: PublicSource
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.EmptyStateBuilder
@@ -47,7 +46,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
            picker: %Picker{} = picker,
            source: source,
            callback_source: callback_source,
-           action_menu: action_menu,
            load_status: load_status,
            query_generation: query_generation,
            acknowledged_query_edit_seq: acknowledged_query_edit_seq,
@@ -90,10 +88,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       marked_count: Picker.marked_count(picker),
       activation_generation: activation_offer.generation,
       selected_item_id: selected_item_id,
-      selected_action_id: selected_action_activation_id(action_menu, activation_offer),
       has_preview?: has_preview,
       items: items,
-      action_menu: action_menu_model(action_menu, activation_offer),
       mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
       movement_keys: movement_keys(ctx, picker_state),
@@ -197,18 +193,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   defp offered_selection([], _selected), do: {0, 0}
 
-  @spec selected_action_activation_id(term(), ActivationOffer.t()) :: non_neg_integer()
-  defp selected_action_activation_id(nil, _offer), do: 0
-
-  defp selected_action_activation_id({_actions, selected, _item}, offer) do
-    case Enum.at(ActivationOffer.offered_actions(offer), selected) do
-      {activation_id, _action, _item} -> activation_id
-      nil -> 0
-    end
-  end
-
-  defp selected_action_activation_id(_action_menu, _offer), do: 0
-
   # Builds the deferred display fields (icon, color, two-line description, status
   # annotation) for just the visible window, then recomputes match positions
   # against the enriched label. Sources that already return fully-built items
@@ -266,17 +250,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   @spec status_fields(Picker.Item.Status.t() | nil) :: {String.t(), PickerModel.status_tone()}
   defp status_fields(nil), do: {"", :none}
   defp status_fields(%Picker.Item.Status{tone: tone, text: text}), do: {text, tone}
-
-  @spec action_menu_model(term(), ActivationOffer.t()) :: ActionMenu.t() | nil
-  defp action_menu_model(nil, _activation_offer), do: nil
-
-  defp action_menu_model({actions, selected, _item}, activation_offer) do
-    %ActionMenu{
-      actions: Enum.map(actions, fn {name, _id} -> name end),
-      activation_ids: ActivationOffer.action_activation_ids(activation_offer),
-      selected_index: selected
-    }
-  end
 
   # Build preview content for the currently selected picker item.
   @spec build_picker_preview(Context.t()) :: [[PickerModel.preview_segment()]] | nil

@@ -103,7 +103,27 @@ func storyboardParts(model Model, grid cellGrid) []storyboardPart {
 		parts = append(parts, modelineParts(status, grid)...)
 	}
 	parts = append(parts, storyboardAgentQueueParts(model, grid)...)
+	if model.actMenu().Visible == 1 {
+		parts = append(parts, storyboardActMenuPart(model, grid))
+	}
 	return parts
+}
+
+func storyboardActMenuPart(model Model, grid cellGrid) storyboardPart {
+	_, menu := model.floatingActMenu()
+	part := storyboardPart{Part: "actMenu.panel", Missing: true}
+	box := menu.box
+	right, bottom := box.X+box.Width-1, box.Y+box.Height-1
+	if box.Width < 2 || box.Height < 2 || box.X < 0 || box.Y < 0 || bottom >= len(grid) ||
+		right >= len(grid[box.Y]) || right >= len(grid[bottom]) {
+		return part
+	}
+	if grid[box.Y][box.X] == "╭" && grid[box.Y][right] == "╮" &&
+		grid[bottom][box.X] == "╰" && grid[bottom][right] == "╯" {
+		part.Frame = [4]int{box.X, box.Y, box.Width, box.Height}
+		part.Missing = false
+	}
+	return part
 }
 
 func storyboardAgentQueueParts(model Model, grid cellGrid) []storyboardPart {

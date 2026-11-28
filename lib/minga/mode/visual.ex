@@ -153,6 +153,10 @@ defmodule Minga.Mode.Visual do
     {:execute_then_transition, [:comment_visual_selection], :normal, %{state | pending_g: false}}
   end
 
+  def handle_key({?., 0}, %{pending_g: true} = state) do
+    {:execute, :act_menu, %{state | pending_g: false}}
+  end
+
   def handle_key({?g, 0}, state) do
     {:continue, Map.put(state, :pending_g, true)}
   end

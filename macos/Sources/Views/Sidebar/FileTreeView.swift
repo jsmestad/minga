@@ -45,6 +45,7 @@ public struct FileTreeView: View {
         case drop(sourcePaths: [String], targetIndex: UInt16, targetID: String, targetPathHash: UInt32, targetPath: String, targetIsDirectory: Bool, modifiers: UInt8, generation: UInt32)
         case refresh
         case semantic(intent: SemanticIntent, generation: UInt32, itemID: String)
+        case openActMenu(generation: UInt32, itemID: String)
         /// Runs an empty folder's next step by the command it names.
         case executeCommand(name: String)
     }
@@ -357,7 +358,13 @@ public struct FileTreeView: View {
                         resolveEntry: { fileTreeState.entry(withID: $0) }
                     )
                 )
-                .contextMenu { entryContextMenu(entry) }
+                .overlay {
+                    SecondaryClick { sendAction?(.openActMenu(generation: generation, itemID: entry.id)) }
+                        .accessibilityHidden(true)
+                }
+                .accessibilityAction(named: Text("Show Actions")) {
+                    sendAction?(.openActMenu(generation: generation, itemID: entry.id))
+                }
                 .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
                     HStack(spacing: Spacing.xs) {
                         Text(entry.icon)
@@ -394,103 +401,6 @@ public struct FileTreeView: View {
                 sendAction?(.editCancel)
             }
         )
-    }
-
-    // MARK: - Context menu
-
-    @ViewBuilder
-    private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
-        let entryId = entry.id
-        let generation = fileTreeState.generation
-
-        if !entry.isDir {
-            Button("Open") {
-                withCurrentEntry(entryId) { entry in
-                    sendAction?(.semantic(intent: .primary, generation: generation, itemID: entry.id))
-                }
-            }
-            Button("Open in Split") {
-                withCurrentEntry(entryId) { entry in
-                    sendAction?(.semantic(intent: .openInSplit, generation: generation, itemID: entry.id))
-                }
-            }
-            Divider()
-        }
-
-        if entry.isDir {
-            Button("New File…") {
-                sendAction?(.semantic(intent: .newFile, generation: generation, itemID: entryId))
-            }
-            Button("New Folder…") {
-                sendAction?(.semantic(intent: .newFolder, generation: generation, itemID: entryId))
-            }
-            Divider()
-        }
-
-        Button("Rename") {
-            withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .rename, generation: generation, itemID: entry.id))
-            }
-        }
-        Button("Duplicate") {
-            withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .duplicate, generation: generation, itemID: entry.id))
-            }
-        }
-
-        Divider()
-
-        Button("Copy Path") {
-            withCurrentEntry(entryId) { entry in
-                copyToClipboard(fileTreeState.fullPath(for: entry))
-            }
-        }
-        Button("Copy Relative Path") {
-            withCurrentEntry(entryId) { entry in
-                copyToClipboard(entry.relPath)
-            }
-        }
-
-        Divider()
-
-        Button("Reveal in Finder") {
-            withCurrentEntry(entryId) { entry in
-                let path = fileTreeState.fullPath(for: entry)
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-            }
-        }
-        Button("Open in Terminal") {
-            withCurrentEntry(entryId) { entry in
-                let path = fileTreeState.fullPath(for: entry)
-                let dirPath = entry.isDir ? path : (path as NSString).deletingLastPathComponent
-                let dirURL = URL(fileURLWithPath: dirPath)
-                NSWorkspace.shared.open(
-                    [dirURL],
-                    withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                    configuration: NSWorkspace.OpenConfiguration()
-                )
-            }
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
-            withCurrentEntry(entryId) { entry in
-                sendAction?(.semantic(intent: .delete, generation: generation, itemID: entry.id))
-            }
-        } label: {
-            Text("Move to Trash")
-        }
-    }
-
-    private func withCurrentEntry(_ id: String, perform: (FileTreeEntry) -> Void) {
-        guard let entry = fileTreeState.entry(withID: id) else { return }
-        perform(entry)
-    }
-
-    private func copyToClipboard(_ string: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(string, forType: .string)
     }
 
     // MARK: - Click handling
