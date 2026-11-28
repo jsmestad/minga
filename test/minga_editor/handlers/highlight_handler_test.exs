@@ -293,6 +293,13 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       state = base_state()
       buf = active_buffer(state)
 
+      correlation = EventCorrelation.new(make_ref(), 1)
+
+      assert {^state, []} =
+               HighlightHandler.handle(
+                 state,
+                 {:minga_highlight, {:buffer_event, buf, correlation, {:fold_ranges, [{0, 5}]}}}
+               )
       {_state, effects} =
         HighlightHandler.handle(state, {:minga_highlight, {:fold_ranges, buf, [{0, 5}]}})
 
@@ -317,7 +324,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
       state = base_state()
       buffer = active_buffer(state)
       registered = EventCorrelation.new(make_ref(), 0)
-      parse = %{registered | version: 1}
+      parse = %{registered | version: 7}
 
       state =
         state
@@ -327,19 +334,16 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
           HighlightSync.put_highlight(state, buffer, Highlight.correlate(current, registered))
         end)
 
-      state =
-        Enum.reduce([{:highlight_spans, []}, {:fold_ranges, [{0, 5}]}], state, fn payload,
-                                                                                  state ->
-          {state, effects} =
-            HighlightHandler.handle(
-              state,
-              {:minga_highlight, {:buffer_event, buffer, parse, payload}}
-            )
+      span_event = {:minga_highlight, {:buffer_event, buffer, parse, {:highlight_spans, []}}}
+      {state, effects} = HighlightHandler.handle(state, span_event)
+      assert effects == [{:request_semantic_tokens, buffer}, {:prettify_symbols, buffer}, :render]
+      assert %{version: 1, parser_correlation: ^parse} = HighlightSync.get_highlight(state, buffer)
+      refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
 
-          assert :render in effects
-          refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
-          state
-        end)
+      fold_event = {:minga_highlight, {:buffer_event, buffer, parse, {:fold_ranges, [{0, 5}]}}}
+      {state, effects} = HighlightHandler.handle(state, fold_event)
+      assert :render in effects
+      refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
 
       {state, []} =
         HighlightHandler.handle(
@@ -355,7 +359,7 @@ defmodule MingaEditor.Handlers.HighlightHandlerTest do
         HighlightHandler.handle(
           state,
           {:minga_highlight,
-           {:buffer_event, buffer, %{parse | version: 2}, {:highlight_spans, []}}}
+           {:buffer_event, buffer, %{parse | version: 8}, {:highlight_spans, []}}}
         )
 
       refute Highlight.parse_settled?(HighlightSync.get_highlight(state, buffer))
