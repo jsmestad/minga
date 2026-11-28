@@ -838,7 +838,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           [String.t()],
           non_neg_integer(),
-          [RenderSnapshot.extra_range()]
+          [Minga.Buffer.RenderSnapshot.extra_range()]
         ) :: ResidentBuild.source()
   defp resident_source(0, lines, count, extra_sources) do
     case length(lines) do
@@ -860,7 +860,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   # Composes complete visual groups only for dirty logical lines.
   @spec build_dirty_entries(
           MapSet.t(non_neg_integer()),
-          [RenderSnapshot.extra_range()],
+          [Minga.Buffer.RenderSnapshot.extra_range()],
           boolean(),
           Context.t(),
           map(),

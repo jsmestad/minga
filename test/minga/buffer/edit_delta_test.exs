@@ -97,13 +97,13 @@ defmodule Minga.Buffer.EditDeltaTest do
         splices = EditDelta.line_splices(deltas)
         result = apply_splices(base, splices)
 
-        assert length(result) == length(model)
+        assert Enum.count(result) == Enum.count(model)
 
         for {line, expected} <- Enum.zip(result, model), line != :changed do
           assert line == expected
         end
 
-        assert length(splices) <= 16
+        assert Enum.count_until(splices, 17) <= 16
 
         Enum.reduce(splices, 0, fn {start, delete_count, insert_count}, minimum ->
           assert start >= minimum
@@ -126,8 +126,9 @@ defmodule Minga.Buffer.EditDeltaTest do
 
         ranges = deltas |> EditDelta.line_splices() |> EditDelta.inserted_line_ranges()
 
-        assert {elem(hd(ranges), 0), elem(List.last(ranges), 1)} ==
-                 EditDelta.affected_line_range(deltas)
+        {first, _} = hd(ranges)
+        {_, last} = Enum.max_by(ranges, &elem(&1, 1))
+        assert {first, last} == EditDelta.affected_line_range(deltas)
       end
     end
   end
@@ -175,9 +176,9 @@ defmodule Minga.Buffer.EditDeltaTest do
     test "more than sixteen separate edits merge the closest neighbours" do
       deltas = for line <- 0..40, do: delta(line * 10, line * 10, line * 10)
       ranges = EditDelta.affected_line_ranges(deltas)
-      assert length(ranges) == 16
-      assert hd(ranges) |> elem(0) == 0
-      assert List.last(ranges) |> elem(1) == 400
+      assert Enum.count(ranges) == 16
+      assert [{0, _} | _] = ranges
+      assert ranges |> Enum.map(&elem(&1, 1)) |> Enum.max() == 400
     end
   end
 

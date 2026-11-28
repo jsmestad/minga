@@ -178,19 +178,19 @@ defmodule MingaEditor.Renderer.BufferChanges do
       end)
 
     case snapshot_ranges do
-      [] ->
-        caches
-        |> Enum.find_value([], fn cache ->
-          case MingaEditor.Renderer.WindowCache.pending_edit_deltas(cache) do
-            [] -> nil
-            pending -> pending
-          end
-        end)
-        |> EditDelta.affected_line_ranges()
-
-      ranges ->
-        EditDelta.affected_line_ranges([], ranges)
+      [] -> caches |> first_pending_deltas() |> EditDelta.affected_line_ranges()
+      ranges -> EditDelta.affected_line_ranges([], ranges)
     end
+  end
+
+  @spec first_pending_deltas([MingaEditor.Renderer.WindowCache.t()]) :: [EditDelta.t()]
+  defp first_pending_deltas(caches) do
+    Enum.find_value(caches, [], fn cache ->
+      case MingaEditor.Renderer.WindowCache.pending_edit_deltas(cache) do
+        [] -> nil
+        pending -> pending
+      end
+    end)
   end
 
   @spec materialize(State.t(), Intent.t(), MingaEditor.Renderer.HighlightCache.highlights()) ::

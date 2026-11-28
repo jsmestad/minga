@@ -912,46 +912,55 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
           tuple(),
           pos_integer()
         ) :: pos_integer()
-  defp measure_resident_extent(
-         window,
-         snapshot,
-         {width, oracle, cursor_line} = geometry,
-         basis,
-         limit
-       ) do
+  defp measure_resident_extent(window, snapshot, geometry, basis, limit) do
     previous_key = {window.render_cache.last_buf_version, basis, limit}
 
     case {Window.resident_build(window), Window.cached_total_visual_rows(window, previous_key),
           Window.pending_edit_deltas(window)} do
       {%ResidentBuild{store: store, line_count: old_count}, prior, [_ | _] = deltas}
       when is_integer(prior) and prior <= limit ->
-        source_splices = EditDelta.line_splices(deltas)
-
-        net =
-          Enum.reduce(source_splices, 0, fn {_start, delete_count, insert_count}, net ->
-            net + insert_count - delete_count
-          end)
-
-        removed = removed_visual_rows(store, source_splices)
-
-        if is_integer(removed) and old_count + net == snapshot.line_count do
-          added =
-            source_splices
-            |> EditDelta.inserted_line_ranges()
-            |> Enum.reduce(0, fn {first, last}, sum ->
-              range =
-                fetch_at_version!(buffer_pid(window), snapshot.version, first, last - first + 1)
-
-              sum + Enum.sum(WrapLayout.row_counts(range, width, oracle, cursor_line))
-            end)
-
-          prior - removed + added
-        else
-          measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
+        case spliced_extent(window, store, deltas, snapshot, old_count, geometry) do
+          {:ok, change} -> prior + change
+          :unmatched -> measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
         end
 
       _other ->
         measure_wrap_chunks(buffer_pid(window), snapshot, geometry, limit, 0, 0)
+    end
+  end
+
+  # The change in visual rows from the frame's edits: rows added by the lines each splice inserts, less the
+  # rows it removes. `:unmatched` when the splices do not fit the store, so the caller measures from scratch.
+  @spec spliced_extent(
+          Window.t(),
+          ResidentStore.t(),
+          [EditDelta.t()],
+          RenderSnapshot.t(),
+          non_neg_integer(),
+          wrap_geometry()
+        ) :: {:ok, integer()} | :unmatched
+  defp spliced_extent(window, store, deltas, snapshot, old_count, {width, oracle, cursor_line}) do
+    source_splices = EditDelta.line_splices(deltas)
+
+    net =
+      Enum.reduce(source_splices, 0, fn {_start, delete_count, insert_count}, net ->
+        net + insert_count - delete_count
+      end)
+
+    removed = removed_visual_rows(store, source_splices)
+
+    if is_integer(removed) and old_count + net == snapshot.line_count do
+      added =
+        source_splices
+        |> EditDelta.inserted_line_ranges()
+        |> Enum.reduce(0, fn {first, last}, sum ->
+          range = fetch_at_version!(buffer_pid(window), snapshot.version, first, last - first + 1)
+          sum + Enum.sum(WrapLayout.row_counts(range, width, oracle, cursor_line))
+        end)
+
+      {:ok, added - removed}
+    else
+      :unmatched
     end
   end
 

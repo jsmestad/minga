@@ -191,9 +191,14 @@ defmodule Minga.Buffer.EditDelta do
 
   # Past the limit, merge the two neighbours with the fewest unchanged lines between them, repeatedly.
   @spec limit_hunks([hunk()]) :: [hunk()]
-  defp limit_hunks(hunks) when length(hunks) <= @max_line_hunks, do: hunks
-
   defp limit_hunks(hunks) do
+    if Enum.count_until(hunks, @max_line_hunks + 1) > @max_line_hunks,
+      do: hunks |> merge_closest_pair() |> limit_hunks(),
+      else: hunks
+  end
+
+  @spec merge_closest_pair([hunk()]) :: [hunk()]
+  defp merge_closest_pair(hunks) do
     {_gap, index} =
       hunks
       |> Enum.chunk_every(2, 1, :discard)
@@ -206,7 +211,7 @@ defmodule Minga.Buffer.EditDelta do
     {head, [{first, _last, net}, {_next_first, next_last, next_net} | tail]} =
       Enum.split(hunks, index)
 
-    limit_hunks(head ++ [{first, next_last, net + next_net} | tail])
+    head ++ [{first, next_last, net + next_net} | tail]
   end
 
   @doc "Creates a delta for an insertion at a position (no text removed)."

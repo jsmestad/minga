@@ -27,7 +27,7 @@ defmodule Minga.Buffer.RenderSnapshot do
     :decorations,
     :change_sequence
   ]
-  defstruct @enforce_keys ++ [extra_ranges: []]
+  defstruct [{:extra_ranges, []} | @enforce_keys]
 
   @typedoc """
   A further changed line range read in the same buffer call: its first line, that line's byte offset,
