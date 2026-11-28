@@ -936,6 +936,7 @@ defmodule MingaEditor do
     new_state = EditorState.resize_frontend(state, vp)
     new_state = resize_all_windows(new_state)
     new_state = CodeHoverWorkflow.reconcile_source(new_state)
+    new_state = MingaEditor.Shell.Traditional.HoverPopupWorkflow.reflow_terminal(new_state)
     new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end

@@ -41,10 +41,10 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 // castsShadow reports whether the winning secondary overlay paints a drop shadow.
 // Help fills its exact authored containment, including its header. Footer bands
 // sit directly above the status row and command line, so a shadow one row below
-// would paint over them. Cursor-anchored popups keep their shadow.
+// would paint over them. Hover also stays inside its authored caret-safe rect.
 func castsShadow(surfaceID uint16) bool {
 	switch surfaceID {
-	case surfaceIDAgentHelp, surfaceIDFloatPopup, surfaceIDAgentContext, surfaceIDExtensionPanel,
+	case surfaceIDHoverPopup, surfaceIDAgentHelp, surfaceIDFloatPopup, surfaceIDAgentContext, surfaceIDExtensionPanel,
 		surfaceIDObservatory, surfaceIDNotifications, surfaceIDExtensionOverlay:
 		return false
 	default:

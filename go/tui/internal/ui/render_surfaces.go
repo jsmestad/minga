@@ -228,7 +228,10 @@ func (m Model) renderHover(hover protocol.HoverPopup) []string {
 	rect, _ := m.surfaceScreenRect(surfaceIDHoverPopup)
 	limit := min(rect.Height, m.maxOverlayHeight())
 	action, _ := m.hoverAction()
-	hasFooter := limit > 1 && action.Offer != 0 && (action.OpenLabel != "" || action.Actions)
+	if action.Actions {
+		return m.renderCodeHover(hover, action, rect)
+	}
+	hasFooter := limit > 1 && action.Offer != 0 && action.OpenLabel != ""
 	bodyLimit := limit - 1
 	if hasFooter {
 		bodyLimit--
@@ -239,27 +242,77 @@ func (m Model) renderHover(hover protocol.HoverPopup) []string {
 	lines = append(lines, style.Width(rect.Width).Bold(true).Render(title))
 	offset := min(int(hover.ScrollOffset), len(hover.Lines))
 	end := min(len(hover.Lines), offset+max(bodyLimit, 0))
-	for _, line := range hover.Lines[offset:end] {
-		lines = append(lines, m.renderHoverLine(line, style, rect.Width, action.Offer))
+	for row, line := range hover.Lines[offset:end] {
+		lines = append(lines, m.renderHoverLine(line, style, rect.Width, action.Offer, offset+row))
 	}
 	if hasFooter {
-		label := style.Underline(true)
-		footer := ""
-		if action.OpenLabel != "" {
-			footer = m.zones.Mark(zoneIDHoverAction(action.Offer, 0), label.Render(action.OpenLabel))
-		}
-		if action.Actions {
-			if footer != "" {
-				footer += style.Render(gap(spacePanel))
-			}
-			footer += m.zones.Mark(zoneIDHoverAction(action.Offer, 1), label.Render("g. actions"))
-		}
+		footer, _ := m.hoverFooter(action, style, rect.Width)
 		lines = append(lines, style.Width(rect.Width).Render(footer))
 	}
 	return lines
 }
 
-func (m Model) renderHoverLine(line protocol.RichLine, base lipgloss.Style, width int, offer uint64) string {
+// The BEAM already wraps and pages code hover to the placement's inner width.
+// Only decoration and click hit regions are local to the terminal.
+func (m Model) renderCodeHover(hover protocol.HoverPopup, action protocol.HoverAction, rect uiRect) []string {
+	if rect.Width < 6 || rect.Height < 1 {
+		return nil
+	}
+	width := rect.Width - 4
+	style := m.panelStyle().Width(0)
+	if rect.Height < 3 {
+		if len(hover.Lines) == 0 {
+			return nil
+		}
+		return []string{m.renderHoverLine(hover.Lines[0], style, rect.Width, action.Offer, 0)}
+	}
+	border := style.Foreground(m.palette().PopupBorder())
+	hint := "K more"
+	if hover.Focused {
+		border = border.Foreground(m.palette().Accent())
+		hint = "j/k scroll · q close"
+	}
+	title := xansi.Truncate(hint, width-1, "")
+	lines := make([]string, 0, rect.Height)
+	lines = append(lines, border.Render("╭─")+style.Render(" "+title+" ")+
+		border.Render(strings.Repeat("─", rect.Width-5-xansi.StringWidth(title))+"╮"))
+	inset := style.Render(" ")
+	left, right := border.Render("│")+inset, inset+border.Render("│")
+	for row, line := range hover.Lines[:min(len(hover.Lines), rect.Height-2)] {
+		lines = append(lines, left+m.renderHoverLine(line, style, width, action.Offer, row)+right)
+	}
+	footer, cells := m.hoverFooter(action, style, width)
+	if cells > 0 {
+		footer = inset + footer + inset
+		cells += 2
+	}
+	rail := "╰" + strings.Repeat("─", rect.Width-2-cells)
+	lines = append(lines, border.Render(rail)+footer+border.Render("╯"))
+	return lines
+}
+
+func (m Model) hoverFooter(action protocol.HoverAction, style lipgloss.Style, width int) (string, int) {
+	const actions = "g. actions"
+	label := style.Underline(true)
+	footer, cells := "", 0
+	openWidth := xansi.StringWidth(action.OpenLabel)
+	if openWidth > 0 && openWidth <= width {
+		footer = m.zones.Mark(zoneIDHoverAction(action.Offer, 0), label.Render(action.OpenLabel))
+		cells = openWidth
+	}
+	separator := ""
+	if cells > 0 {
+		separator = gap(spacePanel)
+	}
+	actionsWidth := len(actions) + xansi.StringWidth(separator)
+	if action.Actions && cells+actionsWidth <= width {
+		footer += style.Render(separator) + m.zones.Mark(zoneIDHoverAction(action.Offer, 1), label.Render(actions))
+		cells += actionsWidth
+	}
+	return footer, cells
+}
+
+func (m Model) renderHoverLine(line protocol.RichLine, base lipgloss.Style, width int, offer uint64, row int) string {
 	var rendered strings.Builder
 	for _, segment := range line.Segments {
 		if width <= 0 {
@@ -288,7 +341,7 @@ func (m Model) renderHoverLine(line protocol.RichLine, base lipgloss.Style, widt
 		}
 		styled := style.Render(text)
 		if offer != 0 && segment.LinkID >= 2 {
-			styled = m.zones.Mark(zoneIDHoverAction(offer, segment.LinkID), styled)
+			styled = m.zones.Mark(zoneIDHoverLink(offer, segment.LinkID, row), styled)
 		}
 		rendered.WriteString(styled)
 	}

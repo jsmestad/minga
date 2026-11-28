@@ -3572,10 +3572,14 @@ func TestGitSidebarContainsMaskedAndNonTargetPressesButNotWheel(t *testing.T) {
 	}
 }
 
-func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
-	model := New(60, 16, nil)
+func TestPublishedHoverRoutesEachVisibleActionAndWrappedLink(t *testing.T) {
+	out := make(chan []byte, 16)
+	model := New(60, 16, out)
 	model.chrome = map[byte]protocol.ChromePayload{
-		generated.OPGuiHoverPopup:  {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Style: 1, Text: "Read "}, {Style: 14, LinkID: 2, Text: "Documentation"}}}}}},
+		generated.OPGuiHoverPopup: {Hover: protocol.HoverPopup{Visible: true, Lines: []protocol.RichLine{
+			{Segments: []protocol.RichSegment{{Style: 1, Text: "Read "}, {Style: 14, LinkID: 2, Text: "Documentation"}}},
+			{Segments: []protocol.RichSegment{{Style: 14, LinkID: 2, Text: "continued"}}},
+		}}},
 		generated.OPGuiHoverAction: {HoverAction: protocol.HoverAction{Offer: 51, Actions: true, OpenLabel: "Open documentation"}},
 	}
 	// The hover popup is registry-placed now (#2281): it renders at its BEAM
@@ -3583,26 +3587,78 @@ func TestSemanticMouseRoutesHoverActionZone(t *testing.T) {
 	model.surfacePlacements = []generated.SurfacePlacement{
 		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 11, Col: 0, Width: 60, Height: 4}, Z: 290, HitKind: 8},
 	}
-	model.viewport.SetContent(model.content())
-	rendered := ansi.Strip(model.View().Content)
+	shown := model.View()
+	rendered := ansi.Strip(shown.Content)
 	if !strings.Contains(rendered, "Read Documentation") || !strings.Contains(rendered, "Open documentation   g. actions") {
 		t.Fatalf("rendered hover hides a styled span or footer action:\n%s", rendered)
 	}
 
-	for _, action := range []uint16{0, 1, 2} {
-		zone := waitForZone(t, model, zoneIDHoverAction(51, action))
+	for _, hit := range []struct {
+		id     string
+		action uint16
+	}{
+		{zoneIDHoverAction(51, 0), 0},
+		{zoneIDHoverAction(51, 1), 1},
+		{zoneIDHoverLink(51, 2, 0), 2},
+		{zoneIDHoverLink(51, 2, 1), 2},
+	} {
+		zone := waitForZone(t, model, hit.id)
 		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
-		cmd, ok := model.semanticMousePacket(click)
-		if !ok || !bytes.Equal(cmd, protocol.EncodeGUIHoverOpenAction(51, action)) {
-			t.Fatalf("hover action %d click sent %x, accepted=%v", action, cmd, ok)
+		_, _ = updateFromPublishedView(model, shown, click)
+		if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIHoverOpenAction(51, hit.action)) {
+			t.Fatalf("hover action %s click sent %x", hit.id, packets)
 		}
 	}
 
-	zone := waitForZone(t, model, zoneIDHoverAction(51, 0))
-	oldClick := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
-	model.chrome[generated.OPGuiHoverAction] = protocol.ChromePayload{HoverAction: protocol.HoverAction{Offer: 52, OpenLabel: "New target"}}
-	if cmd, ok := model.hoverActionMousePacket(oldClick); ok {
-		t.Fatalf("stale footer activated the replacement: %x", cmd)
+	zone := waitForZone(t, model, zoneIDHoverLink(51, 2, 0))
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY})
+	page := model.chrome[generated.OPGuiHoverPopup]
+	page.Hover.Lines[0].Segments[1].LinkID = 3
+	page.Hover.Lines[1].Segments[0].LinkID = 3
+	model.chrome[generated.OPGuiHoverPopup] = page
+	next := model.View()
+	if ansi.Strip(next.Content) != rendered {
+		t.Fatal("changing link identity changed the rendered cells")
+	}
+	if next.Content == shown.Content {
+		t.Fatal("an identity-only change must publish a new callback")
+	}
+	_, _ = updateFromPublishedView(model, shown, click)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIHoverOpenAction(51, 2)) {
+		t.Fatalf("unflushed hover page retargeted the old click: %x", packets)
+	}
+	_, _ = updateFromPublishedView(model, next, click)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIHoverOpenAction(51, 3)) {
+		t.Fatalf("newly published hover page did not route its link: %x", packets)
+	}
+}
+
+func TestNarrowHoverPaintsAndActivatesTwoCellLink(t *testing.T) {
+	for _, item := range []struct{ prefix, link string }{{"a", "⌚"}, {"a", "❤️"}, {"a", "［"}, {"🇺", "🇸"}} {
+		out := make(chan []byte, 4)
+		model := New(80, 16, out)
+		model.chrome[generated.OPGuiHoverPopup] = protocol.ChromePayload{Hover: protocol.HoverPopup{
+			Visible: true,
+			Lines: []protocol.RichLine{
+				{Segments: []protocol.RichSegment{{Text: item.prefix}}},
+				{Segments: []protocol.RichSegment{{Text: item.link, Style: 14, LinkID: 2}}},
+			},
+		}}
+		model.chrome[generated.OPGuiHoverAction] = protocol.ChromePayload{HoverAction: protocol.HoverAction{Offer: 59, Actions: true}}
+		model.surfacePlacements = []generated.SurfacePlacement{
+			{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 4, Col: 2, Width: 6, Height: 4}, Z: 290},
+		}
+		view := model.View()
+		rows := strings.Split(ansi.Strip(view.Content), "\n")
+		zone := waitForZone(t, model, zoneIDHoverLink(59, 2, 1))
+		if !strings.Contains(rows[zone.StartY-1], item.prefix) || !strings.Contains(rows[zone.StartY], item.link) {
+			t.Fatalf("two-cell link %q did not paint below %q", item.link, item.prefix)
+		}
+		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.EndX, Y: zone.StartY})
+		_, _ = updateFromPublishedView(model, view, click)
+		if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIHoverOpenAction(59, 2)) {
+			t.Fatalf("two-cell link %q sent %x", item.link, packets)
+		}
 	}
 }
 

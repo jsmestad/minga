@@ -6,12 +6,15 @@ defmodule MingaEditor.HoverPopup do
   """
 
   alias MingaAgent.Markdown
+  alias MingaEditor.HoverPopup.Terminal
 
   @enforce_keys [:content_lines, :anchor_row, :anchor_col]
   defstruct content_lines: [],
             anchor_row: 0,
             anchor_col: 0,
             scroll_offset: 0,
+            terminal_scroll_byte: 0,
+            terminal: nil,
             focused: false,
             open_action: nil,
             alt_content_lines: nil,
@@ -54,6 +57,8 @@ defmodule MingaEditor.HoverPopup do
           anchor_row: non_neg_integer(),
           anchor_col: non_neg_integer(),
           scroll_offset: non_neg_integer(),
+          terminal_scroll_byte: non_neg_integer(),
+          terminal: Terminal.t() | nil,
           focused: boolean(),
           open_action: open_action() | nil,
           alt_content_lines: [Markdown.parsed_line()] | nil,
@@ -121,6 +126,9 @@ defmodule MingaEditor.HoverPopup do
     %{
       popup
       | content_lines: lines,
+        scroll_offset: 0,
+        terminal_scroll_byte: 0,
+        terminal: nil,
         compact_code_lines: compact,
         pending_code: nil,
         offer_id: System.unique_integer([:monotonic, :positive]),
@@ -149,7 +157,9 @@ defmodule MingaEditor.HoverPopup do
       | content_lines: alternate,
         alt_content_lines: shown,
         expanded?: not popup.expanded?,
-        scroll_offset: 0
+        scroll_offset: 0,
+        terminal_scroll_byte: 0,
+        terminal: nil
     }
   end
 
@@ -163,6 +173,9 @@ defmodule MingaEditor.HoverPopup do
 
   @doc "Focuses the hover popup for scrolling."
   @spec focus(t()) :: t()
+  def focus(%__MODULE__{focused: false, compact_code_lines: [_ | _]} = popup),
+    do: %{popup | focused: true, scroll_offset: 0, terminal_scroll_byte: 0, terminal: nil}
+
   def focus(%__MODULE__{} = popup), do: %{popup | focused: true}
 
   @doc "Moves selection to the next or previous link, bringing its line into view."
@@ -180,8 +193,8 @@ defmodule MingaEditor.HoverPopup do
         {id, :previous} -> Integer.mod(id - 3, count)
       end
 
-    {row, _url} = elem(popup.links, index)
-    %{popup | selected_link: index + 2, scroll_offset: row}
+    {row, byte, _url} = elem(popup.links, index)
+    %{popup | selected_link: index + 2, scroll_offset: row, terminal_scroll_byte: byte}
   end
 
   def select_link(%__MODULE__{} = popup, _direction), do: popup
@@ -189,7 +202,7 @@ defmodule MingaEditor.HoverPopup do
   @doc "Resolves a documentation link by its action ID within this offer."
   @spec link_at(t(), non_neg_integer()) :: String.t() | nil
   def link_at(%__MODULE__{links: links}, id) when id >= 2 and id - 2 < tuple_size(links),
-    do: elem(elem(links, id - 2), 1)
+    do: elem(elem(links, id - 2), 2)
 
   def link_at(%__MODULE__{}, _id), do: nil
 
@@ -197,10 +210,13 @@ defmodule MingaEditor.HoverPopup do
   defp index_links(lines) do
     {links, _row} =
       Enum.reduce(lines, {[], 0}, fn {segments, _kind}, {links, row} ->
-        links =
-          Enum.reduce(segments, links, fn
-            {_label, {:link, url}}, links -> [{row, url} | links]
-            _non_link, links -> links
+        {links, _bytes} =
+          Enum.reduce(segments, {links, 0}, fn
+            {label, {:link, url}}, {links, byte} ->
+              {[{row, byte, url} | links], byte + byte_size(label)}
+
+            {text, _style}, {links, byte} ->
+              {links, byte + byte_size(text)}
           end)
 
         {links, row + 1}
@@ -246,6 +262,22 @@ defmodule MingaEditor.HoverPopup do
       Enum.map_join(segments, "", fn {text, _style} -> text end)
     end)
   end
+
+  @doc "Fits the cached terminal document variant to the current width."
+  @spec fit_terminal(t(), pos_integer()) :: t()
+  def fit_terminal(%__MODULE__{} = popup, cols) do
+    terminal =
+      Terminal.prepare(popup.terminal, display_lines(popup), cols, tuple_size(popup.links))
+
+    %{popup | terminal: terminal}
+  end
+
+  @doc "Commits the next terminal row by its logical line and source byte."
+  @spec scroll_terminal(t(), {non_neg_integer(), non_neg_integer()} | nil) :: t()
+  def scroll_terminal(%__MODULE__{} = popup, nil), do: popup
+
+  def scroll_terminal(%__MODULE__{} = popup, {row, byte}),
+    do: %{popup | scroll_offset: row, terminal_scroll_byte: byte, selected_link: nil}
 
   @doc "Scrolls content down by three lines."
   @spec scroll_down(t()) :: t()

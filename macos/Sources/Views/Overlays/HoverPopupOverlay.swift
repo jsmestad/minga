@@ -57,9 +57,20 @@ public struct HoverPopupOverlay: View {
                     ScrollView(.vertical, showsIndicators: showsScrollIndicators(content)) {
                         document
                     }
+                    .mask {
+                        // The document's bottom inset keeps its last line fully visible at the end of the scroll.
+                        VStack(spacing: 0) {
+                            Rectangle()
+                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                                .frame(height: Spacing.md)
+                        }
+                    }
                 }
                 .anatomyPart("hover.document", text: "Hover documentation")
-                if let offer = content.offer {
+                if let offer = content.offer, offer.showsActions || !offer.openLabel.isEmpty {
+                    Divider()
+                        .overlay(theme.popupBorder)
+                        .padding(.horizontal, Spacing.lg)
                     footer(offer)
                 }
             }
@@ -73,7 +84,7 @@ public struct HoverPopupOverlay: View {
                         .strokeBorder(
                             content.focused
                                 ? theme.accent.opacity(0.8)
-                                : theme.popupBorder.opacity(0.5),
+                                : theme.popupBorder,
                             lineWidth: content.focused ? 2 : 1
                         )
                 )
@@ -133,8 +144,10 @@ public struct HoverPopupOverlay: View {
         .font(Typography.font(.body, design: .monospaced))
         .foregroundStyle(theme.popupFg)
         .padding(.horizontal, Spacing.lg)
+        .padding(.top, Spacing.xs)
         .padding(.bottom, Spacing.md)
         .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     @ViewBuilder

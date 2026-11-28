@@ -2,9 +2,14 @@ defmodule MingaEditor.Input.HoverTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Editing
+  alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Presenter
+  alias MingaEditor.HoverPopup.Terminal
   alias MingaEditor.Input.Hover
+  alias MingaEditor.RenderModel.UI.HoverPopupBuilder
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.HoverPopupWorkflow
   alias MingaEditor.State.Registers
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -82,6 +87,117 @@ defmodule MingaEditor.Input.HoverTest do
       assert {:handled, returned} = Hover.handle_key(scrolled, ?u, 0x02)
       assert Runtime.state(returned.shell_runtime).hover_popup.scroll_offset == 0
       assert Minga.Buffer.cursor(buffer) == cursor
+    end
+
+    test "terminal scrolling reaches the end of one long paragraph and Tab reveals its wrapped link" do
+      state = base_state(rows: 24, cols: 28, rendering: :disabled)
+      Minga.Buffer.set_option(state.workspace.buffers.active, :clipboard, :none)
+      lead = Enum.map_join(1..33, " ", &"part#{&1}") <> " "
+      label = "the very long documentation link with 日本語 and several words"
+      url = "https://example.com/docs"
+      tail = Enum.map_join(34..76, " ", &" part#{&1}") <> " finalword"
+      document = [{[{lead, :plain}, {label, {:link, url}}, {tail, :bold}], :text}]
+
+      popup =
+        document
+        |> HoverPopup.from_parsed_lines(5, 2)
+        |> HoverPopup.bind_code(%{
+          trigger: :pointer,
+          tab: nil,
+          window: 1,
+          viewport: state.frontend.terminal_viewport,
+          buffer: state.workspace.buffers.active,
+          version: 0,
+          position: {0, 0},
+          anchor: {5, 2},
+          terminal_caret_row: 20,
+          path: nil
+        })
+        |> HoverPopup.resolve_code(document)
+
+      model = fn state ->
+        state |> Context.from_editor_state() |> HoverPopupBuilder.build()
+      end
+
+      visible_text = fn state ->
+        Enum.map_join(model.(state).content_lines, fn line ->
+          Enum.map_join(line.segments, & &1.text)
+        end)
+      end
+
+      state = HoverPopupWorkflow.show(state, popup)
+      assert {:handled, focused} = Hover.handle_key(state, @key_upper_k, @none)
+      assert visible_text.(focused) =~ "part1 part2"
+      refute visible_text.(focused) =~ "finalword"
+
+      scrolled =
+        Enum.reduce(1..12, focused, fn _, state ->
+          assert {:handled, next} = Hover.handle_key(state, @key_j, @none)
+          next
+        end)
+
+      assert visible_text.(scrolled) =~ "finalword"
+      assert {:handled, copied} = Hover.handle_key(scrolled, ?y, @none)
+      assert Registers.get(Editing.registers(copied), "") == {lead <> label <> tail, :charwise}
+
+      assert {:handled, selected} = Hover.handle_key(scrolled, 9, @none)
+      selected_popup = Runtime.state(selected.shell_runtime).hover_popup
+      assert HoverPopup.link_at(selected_popup, 2) == url
+
+      link_fragments = fn state ->
+        for line <- model.(state).content_lines,
+            %{style: {:link, 2, true}, text: text} <- line.segments,
+            do: text
+      end
+
+      assert [_, _ | _] = link_fragments.(selected)
+      assert Enum.join(link_fragments.(selected)) == label
+      {row, _col, width, height} = Presenter.terminal_box(selected_popup, {24, 28})
+      assert width == 28 and height <= 12
+      refute 5 in row..(row + height - 1)
+      refute 20 in row..(row + height - 1)
+
+      assert {:noreply, resized} =
+               MingaEditor.handle_info({:minga_input, {:resize, 44, 24}}, selected)
+
+      refute model.(resized).visible?
+
+      fresh_text = "New topic: " <> String.duplicate("fresh documentation ", 38)
+      fresh = [{[{fresh_text, :plain}], :text}]
+      current = Runtime.state(scrolled.shell_runtime).hover_popup
+      enriched = HoverPopupWorkflow.show(scrolled, HoverPopup.resolve_code(current, fresh))
+      assert String.starts_with?(visible_text.(enriched), "New topic:")
+      assert model.(enriched).focused?
+      assert model.(enriched).anchor_row == model.(scrolled).anchor_row
+    end
+
+    test "two-cell links move to the next row without joining graphemes across styles" do
+      for {prefix, glyph} <- [{"a", "⌚"}, {"a", "❤️"}, {"a", "［"}, {"🇺", "🇸"}] do
+        lines = [{[{prefix, :plain}, {glyph, {:link, "https://example.com"}}], :text}]
+        terminal = Terminal.prepare(nil, lines, 6, 1)
+
+        assert Terminal.page(terminal, {0, 0}, 4) == [
+                 {[{prefix, :plain}], :text},
+                 {[{glyph, {:hover_link, 2}}], :text}
+               ]
+
+        assert Terminal.scroll(terminal, {0, 0}, 3, 1) == {0, byte_size(prefix)}
+      end
+    end
+
+    test "wraps a word across styles but keeps one run's grapheme together" do
+      lines = [
+        {[{"a b", :plain}, {"cd", :bold}], :text},
+        {[{"🇺🇸", {:link, "https://example.com"}}], :text}
+      ]
+
+      terminal = Terminal.prepare(nil, lines, 8, 1)
+
+      assert Terminal.page(terminal, {0, 0}, 5) == [
+               {[{"a ", :plain}], :text},
+               {[{"b", :plain}, {"cd", :bold}], :text},
+               {[{"🇺🇸", {:hover_link, 2}}], :text}
+             ]
     end
 
     test "yank copies styled documentation in full without dismissing a scrolled hover" do

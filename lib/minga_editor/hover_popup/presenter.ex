@@ -4,6 +4,7 @@ defmodule MingaEditor.HoverPopup.Presenter do
   alias MingaAgent.Markdown
   alias MingaEditor.FloatingWindow
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Terminal
 
   @max_width 60
   @max_height 20
@@ -21,13 +22,39 @@ defmodule MingaEditor.HoverPopup.Presenter do
     end
   end
 
+  @doc "Fits the terminal code hover to its wrapped content and excludes the anchor and caret."
+  @spec terminal_box(HoverPopup.t(), {pos_integer(), pos_integer()}) ::
+          MingaEditor.Layout.rect() | nil
+  def terminal_box(%HoverPopup{terminal: %Terminal{} = terminal} = popup, viewport) do
+    height = min(tuple_size(terminal.rows), 10) + 2
+
+    case anchored_spec(popup, viewport, terminal.width, height) do
+      nil -> nil
+      spec -> FloatingWindow.box(spec)
+    end
+  end
+
+  def terminal_box(%HoverPopup{}, _viewport), do: nil
+
   @spec spec(HoverPopup.t(), {pos_integer(), pos_integer()}) :: FloatingWindow.Spec.t() | nil
   defp spec(%HoverPopup{} = popup, viewport) do
-    {viewport_rows, viewport_cols} = viewport
+    {_viewport_rows, viewport_cols} = viewport
+
     {content_width, content_height} = content_dimensions(HoverPopup.display_lines(popup))
 
     width = content_width |> max(@min_width) |> min(@max_width) |> min(max(viewport_cols - 2, 1))
     desired_height = min(content_height, @max_height) + 2
+    anchored_spec(popup, viewport, width + 2, desired_height)
+  end
+
+  @spec anchored_spec(
+          HoverPopup.t(),
+          {pos_integer(), pos_integer()},
+          pos_integer(),
+          pos_integer()
+        ) ::
+          FloatingWindow.Spec.t() | nil
+  defp anchored_spec(popup, {viewport_rows, _cols} = viewport, width, desired_height) do
     anchor_row = min(popup.anchor_row, viewport_rows - 1)
     caret_row = popup.code_source && Map.get(popup.code_source, :terminal_caret_row)
     {rows_above, rows_below} = available_rows(anchor_row, viewport_rows, caret_row)
@@ -36,7 +63,7 @@ defmodule MingaEditor.HoverPopup.Presenter do
 
     if height > 0 do
       %FloatingWindow.Spec{
-        width: {:cols, width + 2},
+        width: {:cols, width},
         height: {:rows, height},
         position: {:anchor, anchor_row, popup.anchor_col, side},
         viewport: viewport

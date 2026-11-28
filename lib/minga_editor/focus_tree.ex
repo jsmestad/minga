@@ -434,27 +434,42 @@ defmodule MingaEditor.FocusTree do
          %TreeNode{} = root,
          %RenderInput{
            intent: %{
-             frame: %{shell_state: %TraditionalState{} = shell_state, terminal_viewport: vp}
+             frame: %{
+               shell_state: %TraditionalState{} = shell_state,
+               terminal_viewport: vp,
+               capabilities: caps
+             }
            }
          }
        ) do
-    maybe_add_hover_overlay(root, TraditionalState.__struct__(), shell_state.hover_popup, vp)
+    maybe_add_hover_overlay(root, shell_state.hover_popup, vp, caps)
   end
 
   defp maybe_add_hover_overlay(
          %TreeNode{} = root,
          %EditorState{
            shell_runtime: %{state: %TraditionalState{} = shell_state},
-           frontend: %{terminal_viewport: vp}
+           frontend: %{terminal_viewport: vp, capabilities: caps}
          }
        ) do
-    maybe_add_hover_overlay(root, TraditionalState.__struct__(), shell_state.hover_popup, vp)
+    maybe_add_hover_overlay(root, shell_state.hover_popup, vp, caps)
   end
 
   defp maybe_add_hover_overlay(%TreeNode{} = root, _state), do: root
 
-  defp maybe_add_hover_overlay(%TreeNode{} = root, _owner, %HoverPopup{} = popup, vp) do
-    case HoverPresenter.box(popup, {vp.rows, vp.cols}) do
+  defp maybe_add_hover_overlay(%TreeNode{} = root, %HoverPopup{} = popup, vp, caps) do
+    viewport = {vp.rows, vp.cols}
+
+    box =
+      case {popup.code_source, caps} do
+        {source, %{frontend_type: :tui}} when source != nil ->
+          HoverPresenter.terminal_box(popup, viewport)
+
+        _ ->
+          HoverPresenter.box(popup, viewport)
+      end
+
+    case box do
       nil ->
         root
 
@@ -470,7 +485,7 @@ defmodule MingaEditor.FocusTree do
     end
   end
 
-  defp maybe_add_hover_overlay(%TreeNode{} = root, _owner, _hover_popup, _vp), do: root
+  defp maybe_add_hover_overlay(%TreeNode{} = root, _hover_popup, _vp, _caps), do: root
 
   @spec maybe_add_signature_overlay(t(), map()) :: t()
   defp maybe_add_signature_overlay(

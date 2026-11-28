@@ -77,6 +77,7 @@ One surface answers "what is this?" for everything: code, diagnostics, Minga's l
 
 - **Opening:** `K` from the keyboard, or resting the pointer on something for about 400 ms. A grace area lets the pointer travel into the popover.
 - **Two levels:** the first `K` shows a compact peek. `K` again focuses the hover. Use `j` / `k` and `⌃D` / `⌃U` to scroll, `Tab` / `Shift-Tab` to select a documentation link, `↩` to open it, `y` to copy, and `q` or `esc` to return. This is the Neovim `K K` model.
+- **Terminal wrapping:** long documentation wraps to the width of the card. Focus the hover to scroll through every continuation, including a paragraph taller than the card. `y` copies the original text without adding the on-screen line breaks. The hover closes if a resize invalidates its source view.
 - **Order:** the most urgent first: the diagnostic, then the signature, then the docs, then attribution ("Minga · 4 min ago · task · change 1 of 2 · unreviewed").
 - **Calm:** fixed position with no jitter, never covers the cursor line, a maximum size and then scrolling, no animation under Reduce Motion.
 - **It teaches keys:** hovering a modeline segment or a glyph shows its meaning and its key ("1 task needs you · SPC a a"). In the terminal the text goes to the echo area instead of a floating tooltip, and only when the terminal reports pointer motion.

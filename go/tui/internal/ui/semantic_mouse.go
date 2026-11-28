@@ -372,9 +372,6 @@ func (m Model) overlayMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.completionMousePacket(msg); ok {
 		return packet, true
 	}
-	if packet, ok := m.hoverActionMousePacket(msg); ok {
-		return packet, true
-	}
 	if packet, ok := m.floatPopupMousePacket(msg); ok {
 		return packet, true
 	}
@@ -694,7 +691,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 	queue := m.presentedAgentQueueHandler(layers)
 	peek := m.presentedSubagentPeekHandler(layers)
 	review := m.presentedReviewModelineHandler(layers)
-	if git == nil && agent == nil && queue == nil && peek == nil && review == nil && actTarget == nil {
+	hover, hoverStamp := m.presentedHoverHandler()
+	if git == nil && agent == nil && queue == nil && peek == nil && review == nil && actTarget == nil && hover == nil {
 		return nil, 0
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -707,7 +705,10 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 			}
 		}
 		if ok && click.Button == tea.MouseLeft {
-			if git != nil {
+			if hover != nil {
+				hover(click)
+			}
+			if !claim.claimed && git != nil {
 				git(click)
 			}
 			if !claim.claimed && queue != nil {
@@ -724,7 +725,7 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer, menu actMenuPrese
 			}
 		}
 		return nil
-	}, targetStamp
+	}, targetStamp ^ hoverStamp
 }
 
 type gutterActHit struct {
@@ -976,44 +977,70 @@ func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
-func (m Model) hoverActionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
-	hover, visible := m.hoverPopup()
+type hoverActionHit struct {
+	box    uiRect
+	action uint16
+}
+
+var hoverHitSeed = maphash.MakeSeed()
+
+func (m Model) presentedHoverHandler() (func(tea.MouseClickMsg), uint64) {
+	if m.pickerVisible() || m.whichKeyVisible() {
+		return nil, 0
+	}
+	winner, visible := m.overlayWinner()
 	action, ok := m.hoverAction()
-	if !visible || !hover.Visible || !ok || action.Offer == 0 {
-		return nil, false
+	if !visible || winner.surfaceID != surfaceIDHoverPopup || !ok || action.Offer == 0 {
+		return nil, 0
+	}
+	var hits []hoverActionHit
+	appendHit := func(id uint16, zone *zoneInfo) {
+		if zone != nil {
+			hits = append(hits, hoverActionHit{box: actMenuZoneRect(zone), action: id})
+		}
 	}
 	if action.OpenLabel != "" {
-		if packet, hit := m.hoverActionAt(msg, action.Offer, 0); hit {
-			return packet, true
-		}
+		appendHit(0, m.zones.Get(zoneIDHoverAction(action.Offer, 0)))
 	}
 	if action.Actions {
-		if packet, hit := m.hoverActionAt(msg, action.Offer, 1); hit {
-			return packet, true
-		}
+		appendHit(1, m.zones.Get(zoneIDHoverAction(action.Offer, 1)))
 	}
-	for _, line := range hover.Lines[min(int(hover.ScrollOffset), len(hover.Lines)):] {
+	hover, _ := m.hoverPopup()
+	offset := min(int(hover.ScrollOffset), len(hover.Lines))
+	for row, line := range hover.Lines[offset:] {
 		for _, segment := range line.Segments {
 			if segment.LinkID >= 2 {
-				if packet, hit := m.hoverActionAt(msg, action.Offer, segment.LinkID); hit {
-					return packet, true
-				}
+				appendHit(segment.LinkID, m.zones.Get(zoneIDHoverLink(action.Offer, segment.LinkID, offset+row)))
 			}
 		}
 	}
-	return nil, false
-}
-
-func (m Model) hoverActionAt(msg tea.MouseMsg, offer uint64, action uint16) ([]byte, bool) {
-	zone := m.zones.Get(zoneIDHoverAction(offer, action))
-	if zone != nil && zone.InBounds(msg) {
-		return protocol.EncodeGUIHoverOpenAction(offer, action), true
+	if len(hits) == 0 {
+		return nil, 0
 	}
-	return nil, false
+	var stamp maphash.Hash
+	stamp.SetSeed(hoverHitSeed)
+	maphash.WriteComparable(&stamp, action.Offer)
+	for _, hit := range hits {
+		maphash.WriteComparable(&stamp, hit)
+	}
+	offer, claim := action.Offer, m.presentedClick
+	return func(click tea.MouseClickMsg) {
+		for _, hit := range hits {
+			if hit.box.Contains(click.X, click.Y) {
+				claim.claimed = true
+				claim.packet = protocol.EncodeGUIHoverOpenAction(offer, hit.action)
+				return
+			}
+		}
+	}, stamp.Sum64()
 }
 
 func zoneIDHoverAction(offer uint64, action uint16) string {
 	return fmt.Sprintf("hover:%d:%d", offer, action)
+}
+
+func zoneIDHoverLink(offer uint64, action uint16, row int) string {
+	return fmt.Sprintf("hover:%d:%d:%d", offer, action, row)
 }
 
 func reviewModelineTarget(status protocol.StatusBar) (string, int) {

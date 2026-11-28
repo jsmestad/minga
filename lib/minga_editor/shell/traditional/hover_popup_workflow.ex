@@ -2,6 +2,8 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
   @moduledoc "Editor-state workflow for value-owned hover popup transitions."
 
   alias MingaEditor.HoverPopup
+  alias MingaEditor.HoverPopup.Presenter
+  alias MingaEditor.HoverPopup.Terminal
   alias MingaEditor.Commands
   alias MingaEditor.LspActions
   alias MingaEditor.Shell.Traditional.ActMenuWorkflow
@@ -19,17 +21,20 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
       when node != nil,
       do: state
 
-  def show(
-        %{shell_runtime: %{state: %ShellState{}}} = state,
-        %HoverPopup{focused: true} = popup
-      ) do
-    state
-    |> SignatureHelpWorkflow.dismiss()
-    |> update_shell_state(&ShellState.show_hover_popup(&1, popup))
-  end
+  def show(%{shell_runtime: %{state: %ShellState{}}} = state, %HoverPopup{} = popup) do
+    case drawable_popup(state, popup) do
+      nil ->
+        dismiss(state)
 
-  def show(%{shell_runtime: %{state: %ShellState{}}} = state, popup),
-    do: update_shell_state(state, &ShellState.show_hover_popup(&1, popup))
+      %HoverPopup{focused: true} = popup ->
+        state
+        |> SignatureHelpWorkflow.dismiss()
+        |> install(popup)
+
+      popup ->
+        install(state, popup)
+    end
+  end
 
   def show(state, _popup), do: state
 
@@ -49,15 +54,60 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
 
   @doc "Scrolls the active hover popup down."
   @spec scroll_down(EditorState.t()) :: EditorState.t()
-  def scroll_down(state), do: update(state, &HoverPopup.scroll_down/1)
+  def scroll_down(state), do: scroll(state, 1)
 
   @doc "Scrolls the active hover popup up."
   @spec scroll_up(EditorState.t()) :: EditorState.t()
-  def scroll_up(state), do: update(state, &HoverPopup.scroll_up/1)
+  def scroll_up(state), do: scroll(state, -1)
+
+  @spec scroll(EditorState.t(), -1 | 1) :: EditorState.t()
+  defp scroll(
+         %{frontend: %{capabilities: %{frontend_type: :tui}, terminal_viewport: vp}} = state,
+         direction
+       ) do
+    update(state, fn
+      %HoverPopup{code_source: source, terminal: %Terminal{} = terminal} = popup
+      when source != nil ->
+        case Presenter.terminal_box(popup, {vp.rows, vp.cols}) do
+          {_y, _x, _width, height} ->
+            position = {popup.scroll_offset, popup.terminal_scroll_byte}
+
+            HoverPopup.scroll_terminal(
+              popup,
+              Terminal.scroll(terminal, position, height, direction)
+            )
+
+          nil ->
+            popup
+        end
+
+      popup ->
+        scroll_logical(popup, direction)
+    end)
+  end
+
+  defp scroll(state, direction), do: update(state, &scroll_logical(&1, direction))
+
+  @spec scroll_logical(HoverPopup.t(), -1 | 1) :: HoverPopup.t()
+  defp scroll_logical(popup, 1), do: HoverPopup.scroll_down(popup)
+  defp scroll_logical(popup, -1), do: HoverPopup.scroll_up(popup)
 
   @doc "Toggles expanded hover content."
   @spec toggle_expand(EditorState.t()) :: EditorState.t()
   def toggle_expand(state), do: update(state, &HoverPopup.toggle_expand/1)
+
+  @doc "Refits a terminal hover that survived reconciliation of its captured pane."
+  @spec reflow_terminal(EditorState.t()) :: EditorState.t()
+  def reflow_terminal(
+        %{
+          frontend: %{capabilities: %{frontend_type: :tui}},
+          shell_runtime: %{state: %{hover_popup: %HoverPopup{code_source: source}}}
+        } = state
+      )
+      when source != nil,
+      do: update(state, &Function.identity/1)
+
+  def reflow_terminal(state), do: state
 
   @doc "Dismisses the active hover popup."
   @spec dismiss(EditorState.t()) :: EditorState.t()
@@ -192,11 +242,29 @@ defmodule MingaEditor.Shell.Traditional.HoverPopupWorkflow do
          %{shell_runtime: %{state: %{hover_popup: %MingaEditor.HoverPopup{} = popup}}} = state,
          transition
        ) do
-    updated_popup = transition.(popup)
-    update_shell_state(state, &ShellState.show_hover_popup(&1, updated_popup))
+    case drawable_popup(state, transition.(popup)) do
+      nil -> dismiss(state)
+      popup -> install(state, popup)
+    end
   end
 
   defp update(state, _transition), do: state
+
+  @spec drawable_popup(EditorState.t(), HoverPopup.t()) :: HoverPopup.t() | nil
+  defp drawable_popup(
+         %{frontend: %{capabilities: %{frontend_type: :tui}, terminal_viewport: vp}},
+         %HoverPopup{code_source: source} = popup
+       )
+       when source != nil do
+    popup = HoverPopup.fit_terminal(popup, vp.cols)
+    if Presenter.terminal_box(popup, {vp.rows, vp.cols}) != nil, do: popup
+  end
+
+  defp drawable_popup(_state, popup), do: popup
+
+  @spec install(EditorState.t(), HoverPopup.t()) :: EditorState.t()
+  defp install(state, popup),
+    do: update_shell_state(state, &ShellState.show_hover_popup(&1, popup))
 
   @spec update_shell_state(EditorState.t(), (MingaEditor.Shell.Traditional.State.t() ->
                                                MingaEditor.Shell.Traditional.State.t())) ::
