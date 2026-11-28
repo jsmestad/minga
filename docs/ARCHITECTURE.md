@@ -225,6 +225,8 @@ graph TD
 
 One process per open file, plus per-buffer git tracking. `one_for_one` means each buffer is independent: one buffer crashing doesn't affect any other.
 
+Quit must not wait on buffers that write swaps into another directory. Both the editor and headless runtimes start `Minga.Buffer.SwapRegistry` before `Minga.Buffer.Supervisor`. Each file buffer registers its own directory and current path by process. The quit command selects writers for its directory before calling them. A failed or expired release leaves the writer registered and its swap recoverable.
+
 ```mermaid
 graph TD
     BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
