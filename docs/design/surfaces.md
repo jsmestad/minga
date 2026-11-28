@@ -6,7 +6,7 @@ The resting screen has three parts: a plain title bar, your text, and the modeli
 
 Traffic lights, the small `minga` wordmark, and the centred file name followed by its project-relative directory in a secondary colour: `retry.ex  lib/minga_agent`. Never the full path after the name, which repeats it. Nothing else: no capsule, no buttons, no tabs.
 
-The title names the focused window, which is what macOS shows in the Window menu, Mission Control and ``⌘` `` switching. The modeline's file segment names the buffer of each split, so with two splits each modeline shows its own file while the title follows the one you are in. Terminal windows show the buffer and its working directory: `*terminal 2*  ~/code/minga`. The TUI has no title bar; the terminal tab title (OSC 2) carries `retry.ex · minga`.
+The title names the focused window, which is what macOS shows in the Window menu, Mission Control and ``⌘` `` switching. There is one modeline, and it follows focus as the title does: its file segment names the focused window's buffer ([ADR-0009](../adr/0009-one-modeline-and-window-labels.md)). While two or more buffer windows are visible, each one shows a one-row label at its top edge with its buffer's name, so a window you are not in is still named; with a single window there is no label. Terminal windows show the buffer and its working directory: `*terminal 2*  ~/code/minga`. The TUI has no title bar; the terminal tab title (OSC 2) carries `retry.ex · minga`.
 
 ## Modeline
 
