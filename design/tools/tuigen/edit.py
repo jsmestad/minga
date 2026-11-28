@@ -65,7 +65,7 @@ h=8; top=35-h; PX=8; PW=W-18
 wk=Grid(PW,h,bg=SURF)
 wk.box(0,0,h,PW,BORDER,SURF,title=[("SPC",DIM),(" › ",FAINT),("a",PURPLE,"b"),("  Minga",TXT,"b")],
       right=[("◐ ",PURPLED),("2/3",SUB),("   ",SUB),("◉ ",AMBER),("1 needs you",AMBER)],
-      bottom=[("⌫",TXT),(" back   ",DIM),("esc",TXT),(" cancel",DIM)])
+      bottom=[("⌫",TXT),(" back   ",DIM),("esc",TXT),(" close",DIM)])
 c=3
 for head,items in cols:
     wcol=max(3+len(lab)+(1+len(ex[0]) if ex else 0) for _,lab,ex in items)

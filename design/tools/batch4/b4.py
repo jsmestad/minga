@@ -143,7 +143,7 @@ write("Batch4_search_empty.dc.html",board("Batch 4: search with nothing found",(
 diag=es("No problems in this project.","elixir-ls and credo checked 1,204 files · 4 s ago",[("r","Check again"),("SPC c l i","Show what ran")],glyph="Done")
 dwin=macwin(editor_area(code(4,dim=True))+drawer(("*diagnostics*","Diagnostics"),'',f'{hint("q","close")}',diag,h=150)+modeline(file="*diagnostics*",right=None,pos="1:1"),w=684,h=300)
 e1=macwin(editor_area(code(3))+echo(f'<span style="color:#dcdce2">No code actions at 240:31.</span><span style="flex:1"></span>{hint("SPC a ?","ask Minga")}')+modeline(right=None),w=684,h=138)
-e2=macwin(editor_area(code(3))+echo(f'<span style="color:#dcdce2">No references to <span style="font-family:ui-monospace,monospace;font-size:12px">limit_label/1</span>.</span><span style="flex:1"></span>{hint("SPC c g","go to definition")}')+modeline(right=None),w=684,h=138)
+e2=macwin(editor_area(code(3))+echo(f'<span style="color:#dcdce2">No references to <span style="font-family:ui-monospace,monospace;font-size:12px">limit_label/1</span>.</span><span style="flex:1"></span>{hint("SPC c d","go to definition")}')+modeline(right=None),w=684,h=138)
 mac=f'<div style="display:flex;gap:24px">{labeled("SPC c x","nothing to report, and when it was last checked",dwin)}<div style="display:flex;flex-direction:column;gap:10px"><div class="lab"><b>SPC c a  ·  SPC c D</b>  a one-line answer in the echo area; nothing opens</div>{e1}{e2}</div></div>'
 g1=tgrid(62,TH); tcode(g1,8,dim=True,width=62)
 d=tbox(g1,0,9,62,[("*diagnostics*",G.SUB),("  Diagnostics",G.TXT,"b")],[("q",G.TXT),(" close",G.DIM)])
@@ -151,10 +151,10 @@ tes(d,"No problems in this project.","elixir-ls and credo checked 1,204 files ·
 blit(g1,d,9); tml(g1,18,"NORMAL",[(" *diagnostics* ",G.TXT,"#30313a","b")])
 g2=tgrid(62,TH); tcode(g2,13,dim=False,width=62)
 g2.fill(14,0,62,"#1b1c21"); g2.segs(14,1,[("No code actions at 240:31.",G.TXT,"#1b1c21"),("   SPC a ?",G.TXT,"#1b1c21"),(" ask Minga",G.DIM,"#1b1c21")])
-g2.fill(16,0,62,"#1b1c21"); g2.segs(16,1,[("No references to limit_label/1.",G.TXT,"#1b1c21"),("   SPC c g",G.TXT,"#1b1c21"),(" definition",G.DIM,"#1b1c21")])
+g2.fill(16,0,62,"#1b1c21"); g2.segs(16,1,[("No references to limit_label/1.",G.TXT,"#1b1c21"),("   SPC c d",G.TXT,"#1b1c21"),(" definition",G.DIM,"#1b1c21")])
 tml(g2,18,"NORMAL",[(" chrome_state.ex ",G.TXT,"#30313a","b")])
 write("Batch4_code_empty.dc.html",board("Batch 4: code intelligence with nothing to show",("Code empty states","a list only opens when there is something in it"),mac,"",tterms((g1,"TUI","SPC c x"),(g2,"","SPC c a, then SPC c D (two separate moments)")),
- [("diagnostics: r (preselected)","code.diagnostics.none (checks again)"),("diagnostics: SPC c l i","code.lsp_info"),("diagnostics: q / esc","edit.plain"),("actions: SPC a ?","minga.inline_ask (ask Minga about the line)"),("actions: (any key)","edit.plain (the echo fades)"),("references: SPC c g","edit.plain (at the definition)"),("references: (any key)","edit.plain")],
+ [("diagnostics: r (preselected)","code.diagnostics.none (checks again)"),("diagnostics: SPC c l i","code.lsp_info"),("diagnostics: q / esc","edit.plain"),("actions: SPC a ?","minga.inline_ask (ask Minga about the line)"),("actions: (any key)","edit.plain (the echo fades)"),("references: SPC c d","edit.plain (at the definition)"),("references: (any key)","edit.plain")],
  "Empty actions and references never open a drawer: an empty list is a dead end you have to close. The echo line answers and gets out of the way. Diagnostics opens because you asked for the list; it says when it last checked so \"none\" is trustworthy."))
 
 # ===== 4a. files empties

@@ -29,7 +29,7 @@ top=13; h=22; DX=7; DW=W-14
 d=Grid(DW,h,bg=SURF)
 d.box(0,0,h,DW,FOCUS,SURF,title=[("*minga-tasks*",SUB),("  Minga Tasks",TXT,"b")],
       right=[("◉ 1",AMBER),("  ",SUB),("◐ 1",PURPLE),("  ",SUB),("○ 1",SUB),("  ",SUB),("◆ 1",RED),("  ",SUB),("● 1",GREEN)],
-      bottom=[("j/k",TXT),(" move  ",DIM),("↩",TXT),(" open  ",DIM),("i",TXT),(" inspect  ",DIM),("x",TXT),(" stop  ",DIM),("/",TXT),(" filter  ",DIM),("q",TXT),(" close",DIM)],
+      bottom=[("j/k",TXT),(" move  ",DIM),("↩",TXT),(" open  ",DIM),("x",TXT),(" stop  ",DIM),("/",TXT),(" filter  ",DIM),("q",TXT),(" close",DIM)],
       bottom_right=[("SPC a a",FAINT)])
 SEL="#33302a"
 r=2
