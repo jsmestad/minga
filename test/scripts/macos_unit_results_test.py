@@ -318,7 +318,8 @@ class MacOSUnitResultsTest(unittest.TestCase):
 
     def test_policy_requires_every_own_function_not_passing_ancestors(self):
         tests = policy_tree()
-        errors, _ = native.validate_action("focus-policy", summary(13), tests, log(4101), 0)
+        count = len(native.POLICY_FUNCTIONS)
+        errors, _ = native.validate_action("focus-policy", summary(count), tests, log(4101), 0)
         self.assertEqual(errors, [])
         for replacement in (None, {"result": "Skipped"}, {"nodeType": "Test Suite"}):
             incomplete = copy.deepcopy(tests)
@@ -326,10 +327,10 @@ class MacOSUnitResultsTest(unittest.TestCase):
             if replacement is not None:
                 node.update(replacement)
                 incomplete["testNodes"][0]["children"].append(node)
-            errors, _ = native.validate_action("focus-policy", summary(13), incomplete, log(4101), 0)
-            self.assertTrue(any("all 13 own passed functions" in error for error in errors))
+            errors, _ = native.validate_action("focus-policy", summary(count), incomplete, log(4101), 0)
+            self.assertTrue(any("missing=" in error for error in errors))
         tests["testNodes"][0]["children"].append(case(f"{native.POLICY}/unrelated()"))
-        errors, _ = native.validate_action("focus-policy", summary(14), tests, log(4101), 0)
+        errors, _ = native.validate_action("focus-policy", summary(count + 1), tests, log(4101), 0)
         self.assertTrue(any("unexpected" in error for error in errors))
 
     def test_unrelated_executions_violate_focus_process_ownership(self):

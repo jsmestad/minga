@@ -11,19 +11,19 @@
    2 ▚  def label, do: "Your plan limit applies"
    1    def window, do: 60
    4 ▚  def retry?, do: true
-   1  ╭─○ 2 Minga changes · 2 lines · unreviewed──────────────────────› filter╮
-   2  │         y Keep 2 changes   SPC a y│        n Reject 2 changes  SPC a d│
-      │   Leaves Minga’s edits in place   │ Undoes Minga’s edits. Yours stay. │
-      │ This change ──────────────────────────────────────────────────────────│
-      │ = Show diff                                                         = │
-      │ o Open conversation                                                   │
-      │ This file ────────────────────────────────────────────────────────────│
-      │ l Copy file:line link                                                 │
-      │ d Attach file diagnostics to Agent draft                    SPC a x d │
-      │ Anywhere ─────────────────────────────────────────────────────────────│
-      │ a Ask Minga about this                                        SPC a ? │
-      │ e Rewrite selection                                           SPC a e │
-      ╰↑↓ move · ↵ choose · esc close─────────────────────────────────────────╯
+   1  ╭─○ 2 Minga changes · 2 lines · unreviewed────────────› filter╮
+   2  │       y Keep 2 changes       │      n Reject 2 changes      │
+      │Leaves Minga’s edits in place │  Undoes only Minga’s edits   │
+      │ This change ────────────────────────────────────────────────│
+      │ = Show diff                                               = │
+      │ o Open conversation                                         │
+      │ This file ──────────────────────────────────────────────────│
+      │ l Copy file:line link                                       │
+      │ d Attach file diagnostics to Agent draft          SPC a x d │
+      │ Anywhere ───────────────────────────────────────────────────│
+      │ a Ask Minga about this                              SPC a ? │
+      │ e Rewrite selection                                 SPC a e │
+      ╰↑↓ move · ↵ choose · esc close───────────────────────────────╯
       ~
       ~
       ~
@@ -143,76 +143,76 @@
 6 4-5 #4f525a #1a1d23 -
 6 6-7 #dd97f1 #14161b -
 6 8-47 #adb0bb #14161b bold
-6 48-69 #dd97f1 #14161b -
-6 70-77 #adb0bb #14161b -
-6 78-78 #dd97f1 #14161b -
-6 79-149 #63666f #1a1d23 -
+6 48-59 #dd97f1 #14161b -
+6 60-67 #adb0bb #14161b -
+6 68-68 #dd97f1 #14161b -
+6 69-149 #63666f #1a1d23 -
 7 0-2 #4f525a #1a1d23 -
 7 3-3 #82848a #1a1d23 -
 7 4-5 #4f525a #1a1d23 -
 7 6-6 #dd97f1 #14161b -
-7 7-41 #1a1d23 #dd97f1 bold,reverse
-7 42-42 #dd97f1 #14161b -
-7 43-77 #adb0bb #14161b bold
-7 78-78 #dd97f1 #14161b -
-7 79-149 #63666f #1a1d23 -
+7 7-36 #1a1d23 #dd97f1 bold,reverse
+7 37-37 #dd97f1 #14161b -
+7 38-67 #adb0bb #14161b bold
+7 68-68 #dd97f1 #14161b -
+7 69-149 #63666f #1a1d23 -
 8 0-5 #4f525a #1a1d23 -
 8 6-6 #dd97f1 #14161b -
-8 7-41 #1a1d23 #dd97f1 reverse
-8 42-42 #dd97f1 #14161b -
-8 43-77 #adb0bb #14161b -
-8 78-78 #dd97f1 #14161b -
-8 79-149 #393c44 #1a1d23 -
+8 7-36 #1a1d23 #dd97f1 reverse
+8 37-37 #dd97f1 #14161b -
+8 38-67 #adb0bb #14161b -
+8 68-68 #dd97f1 #14161b -
+8 69-149 #393c44 #1a1d23 -
 9 0-5 #4f525a #1a1d23 -
 9 6-6 #dd97f1 #14161b -
-9 7-77 #adb0bb #14161b -
-9 78-78 #dd97f1 #14161b -
-9 79-149 #393c44 #1a1d23 -
+9 7-67 #adb0bb #14161b -
+9 68-68 #dd97f1 #14161b -
+9 69-149 #393c44 #1a1d23 -
 10 0-5 #4f525a #1a1d23 -
 10 6-6 #dd97f1 #14161b -
-10 7-77 #adb0bb #14161b -
-10 78-78 #dd97f1 #14161b -
-10 79-149 #393c44 #1a1d23 -
+10 7-67 #adb0bb #14161b -
+10 68-68 #dd97f1 #14161b -
+10 69-149 #393c44 #1a1d23 -
 11 0-5 #4f525a #1a1d23 -
 11 6-6 #dd97f1 #14161b -
-11 7-77 #adb0bb #14161b -
-11 78-78 #dd97f1 #14161b -
-11 79-149 #393c44 #1a1d23 -
+11 7-67 #adb0bb #14161b -
+11 68-68 #dd97f1 #14161b -
+11 69-149 #393c44 #1a1d23 -
 12 0-5 #4f525a #1a1d23 -
 12 6-6 #dd97f1 #14161b -
-12 7-77 #adb0bb #14161b -
-12 78-78 #dd97f1 #14161b -
-12 79-149 #393c44 #1a1d23 -
+12 7-67 #adb0bb #14161b -
+12 68-68 #dd97f1 #14161b -
+12 69-149 #393c44 #1a1d23 -
 13 0-5 #4f525a #1a1d23 -
 13 6-6 #dd97f1 #14161b -
-13 7-77 #adb0bb #14161b -
-13 78-78 #dd97f1 #14161b -
-13 79-149 #393c44 #1a1d23 -
+13 7-67 #adb0bb #14161b -
+13 68-68 #dd97f1 #14161b -
+13 69-149 #393c44 #1a1d23 -
 14 0-5 #4f525a #1a1d23 -
 14 6-6 #dd97f1 #14161b -
-14 7-77 #adb0bb #14161b -
-14 78-78 #dd97f1 #14161b -
-14 79-149 #393c44 #1a1d23 -
+14 7-67 #adb0bb #14161b -
+14 68-68 #dd97f1 #14161b -
+14 69-149 #393c44 #1a1d23 -
 15 0-5 #4f525a #1a1d23 -
 15 6-6 #dd97f1 #14161b -
-15 7-77 #adb0bb #14161b -
-15 78-78 #dd97f1 #14161b -
-15 79-149 #393c44 #1a1d23 -
+15 7-67 #adb0bb #14161b -
+15 68-68 #dd97f1 #14161b -
+15 69-149 #393c44 #1a1d23 -
 16 0-5 #4f525a #1a1d23 -
 16 6-6 #dd97f1 #14161b -
-16 7-77 #adb0bb #14161b -
-16 78-78 #dd97f1 #14161b -
-16 79-149 #393c44 #1a1d23 -
+16 7-67 #adb0bb #14161b -
+16 68-68 #dd97f1 #14161b -
+16 69-149 #393c44 #1a1d23 -
 17 0-5 #4f525a #1a1d23 -
 17 6-6 #dd97f1 #14161b -
-17 7-77 #adb0bb #14161b -
-17 78-78 #dd97f1 #14161b -
-17 79-149 #393c44 #1a1d23 -
+17 7-67 #adb0bb #14161b -
+17 68-68 #dd97f1 #14161b -
+17 69-149 #393c44 #1a1d23 -
 18 0-5 #4f525a #1a1d23 -
 18 6-6 #dd97f1 #14161b -
 18 7-36 #adb0bb #14161b -
-18 37-78 #dd97f1 #14161b -
-18 79-149 #393c44 #1a1d23 -
+18 37-68 #dd97f1 #14161b -
+18 69-149 #393c44 #1a1d23 -
 19 0-5 #4f525a #1a1d23 -
 19 6-6 #828489 #1a1d23 -
 19 7-149 #393c44 #1a1d23 -

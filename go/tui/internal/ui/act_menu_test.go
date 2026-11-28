@@ -88,6 +88,25 @@ func TestActMenuFitsShortTerminalAndRevealsSelectedRow(t *testing.T) {
 	}
 }
 
+func TestActMenuKeepsBothConsequencesInsideTheWideTerminalWidthCap(t *testing.T) {
+	menu := reviewActMenuFixture()
+	menu.Title = "Minga’s change · 48 lines · unreviewed"
+	menu.Lead[0].Label = "Keep change"
+	menu.Lead[0].Detail = "Leaves Minga’s edits in place"
+	menu.Lead[1].Label = "Reject change"
+	menu.Lead[1].Detail = "Undoes only Minga’s edits"
+	menu.Rows[0].Label = strings.Repeat("long action ", 8)
+	model := applyTo(t, New(120, 40, nil), frame(actMenuCommand(menu))...)
+	layer, shown := model.floatingActMenu()
+	if layer == nil || shown.box.Width > 64 {
+		t.Fatalf("want a menu no wider than 64 columns, got %+v", shown.box)
+	}
+	plain := ansi.Strip(layer.GetContent())
+	if !strings.Contains(plain, menu.Lead[0].Detail) || !strings.Contains(plain, menu.Lead[1].Detail) {
+		t.Fatalf("both decision consequences should fit:\n%s", plain)
+	}
+}
+
 func TestActMenuClickUsesPublishedOfferUntilAnotherViewIsPainted(t *testing.T) {
 	out := make(chan []byte, 64)
 	model := New(80, 24, out)

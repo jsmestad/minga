@@ -567,8 +567,8 @@ defmodule MingaEditor.Shell.Traditional.ActMenuWorkflow do
     lead = [
       {"This change", "y", "Keep #{changes}", "SPC a y", "Leaves Minga’s edits in place", false,
        {:review, :keep}},
-      {"This change", "n", "Reject #{changes}", "SPC a d", "Undoes Minga’s edits. Yours stay.",
-       true, {:review, :reject}}
+      {"This change", "n", "Reject #{changes}", "SPC a d", "Undoes only Minga’s edits", true,
+       {:review, :reject}}
     ]
 
     title = "○ " <> subject <> review_size(extent) <> " · unreviewed"

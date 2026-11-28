@@ -94,27 +94,28 @@ struct EditorFocusPolicyTests {
         )
     }
 
-    @Test("Act menu hands focus back to the same picker or Find field without changing its query",
-          arguments: [true, false])
-    func actMenuReclaimsAndReturnsQueryFocus(picker: Bool) throws {
-        let fixture = Fixture()
-        defer { fixture.close() }
-        let field = picker ? fixture.picker : fixture.search
-        let kind: Wire.FocusOwner.Responder = picker ? .pickerQuery : .searchQuery
-        let originalOwner = owner(kind, surface: picker ? 8 : 11)
-        field.stringValue = "notes"
-        fixture.policy.register(field, as: kind)
-        fixture.policy.focusOwnerDidChange(originalOwner)
-        try #require(fixture.hasFocus(field))
-        try #require(fixture.window.firstResponder is NSText)
+    @Test("Act menu hands focus back to the same picker or Find field without changing its query")
+    func actMenuReclaimsAndReturnsQueryFocus() throws {
+        let targets: [(Wire.FocusOwner.Responder, UInt8)] = [(.pickerQuery, 8), (.searchQuery, 11)]
+        for (kind, surface) in targets {
+            let fixture = Fixture()
+            defer { fixture.close() }
+            let field = kind == .pickerQuery ? fixture.picker : fixture.search
+            let originalOwner = owner(kind, surface: surface)
+            field.stringValue = "notes"
+            fixture.policy.register(field, as: kind)
+            fixture.policy.focusOwnerDidChange(originalOwner)
+            try #require(fixture.hasFocus(field))
+            try #require(fixture.window.firstResponder is NSText)
 
-        fixture.policy.focusOwnerDidChange(owner(.editorView, surface: Wire.FocusOwner.actMenuSurface))
-        #expect(fixture.hasFocus(fixture.editor))
-        #expect(!fixture.policy.pendingOwnerApply)
+            fixture.policy.focusOwnerDidChange(owner(.editorView, surface: Wire.FocusOwner.actMenuSurface))
+            #expect(fixture.hasFocus(fixture.editor))
+            #expect(!fixture.policy.pendingOwnerApply)
 
-        fixture.policy.focusOwnerDidChange(originalOwner)
-        #expect(fixture.hasFocus(field))
-        #expect(field.stringValue == "notes")
+            fixture.policy.focusOwnerDidChange(originalOwner)
+            #expect(fixture.hasFocus(field))
+            #expect(field.stringValue == "notes")
+        }
     }
 
     @Test("dismantling a modeled text field ends its native editor and applies the pending owner")

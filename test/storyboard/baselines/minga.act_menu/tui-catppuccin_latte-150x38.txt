@@ -9,18 +9,18 @@
   / ❯ tmp ❯ minga-storyboard ❯ tui-150x38 ❯ minga.act_menu ❯ lib ❯ storyboard.ex
 ▾  1  defmodule UsageLimit do
    2 ▚  def label, do: "Your plan limit applies"
-   1    def window, do: ╭─○ Minga’s change · 1 line · unreviewed────────────────────────› filter╮
-   2    def retry?, do: │           y Keep change    SPC a y│          n Reject change   SPC a d│
-   3  end               │   Leaves Minga’s edits in place   │ Undoes Minga’s edits. Yours stay. │
-   4                    │ This change ──────────────────────────────────────────────────────────│
-      ~                 │ = Show diff                                                         = │
-      ~                 │ o Open conversation                                                   │
-      ~                 │ This file ────────────────────────────────────────────────────────────│
-      ~                 │ l Copy file:line link                                                 │
-      ~                 │ d Attach file diagnostics to Agent draft                    SPC a x d │
-      ~                 │ Anywhere ─────────────────────────────────────────────────────────────│
-      ~                 │ a Ask Minga about this                                        SPC a ? │
-      ~                 ╰↑↓ move · ↵ choose · esc close─────────────────────────────────────────╯
+   1    def window, do: ╭─○ Minga’s change · 1 line · unreviewed──────────────› filter╮
+   2    def retry?, do: │        y Keep change  SPC a y│       n Reject change        │
+   3  end               │Leaves Minga’s edits in place │  Undoes only Minga’s edits   │
+   4                    │ This change ────────────────────────────────────────────────│
+      ~                 │ = Show diff                                               = │
+      ~                 │ o Open conversation                                         │
+      ~                 │ This file ──────────────────────────────────────────────────│
+      ~                 │ l Copy file:line link                                       │
+      ~                 │ d Attach file diagnostics to Agent draft          SPC a x d │
+      ~                 │ Anywhere ───────────────────────────────────────────────────│
+      ~                 │ a Ask Minga about this                              SPC a ? │
+      ~                 ╰↑↓ move · ↵ choose · esc close───────────────────────────────╯
       ~
       ~
       ~
@@ -124,10 +124,10 @@
 4 23-23 #e18097 #eff1f5 -
 4 24-25 #8839ef #ccd0da -
 4 26-63 #4c4f69 #ccd0da bold
-4 64-87 #8839ef #ccd0da -
-4 88-95 #4c4f69 #ccd0da -
-4 96-96 #8839ef #ccd0da -
-4 97-149 #9ea0af #eff1f5 -
+4 64-77 #8839ef #ccd0da -
+4 78-85 #4c4f69 #ccd0da -
+4 86-86 #8839ef #ccd0da -
+4 87-149 #9ea0af #eff1f5 -
 5 0-2 #a6a8b6 #eff1f5 -
 5 3-3 #6c6d76 #eff1f5 -
 5 4-5 #a6a8b6 #eff1f5 -
@@ -140,86 +140,86 @@
 5 20-22 #9e5a6a #eff1f5 -
 5 23-23 #e18097 #eff1f5 -
 5 24-24 #8839ef #ccd0da -
-5 25-59 #eff1f5 #8839ef bold,reverse
-5 60-60 #8839ef #ccd0da -
-5 61-95 #4c4f69 #ccd0da bold
-5 96-96 #8839ef #ccd0da -
-5 97-149 #9ea0af #eff1f5 -
+5 25-54 #eff1f5 #8839ef bold,reverse
+5 55-55 #8839ef #ccd0da -
+5 56-85 #4c4f69 #ccd0da bold
+5 86-86 #8839ef #ccd0da -
+5 87-149 #9ea0af #eff1f5 -
 6 0-2 #a6a8b6 #eff1f5 -
 6 3-3 #6c6d76 #eff1f5 -
 6 4-5 #a6a8b6 #eff1f5 -
 6 6-8 #7c629f #eff1f5 bold
 6 9-23 #9ea0af #eff1f5 -
 6 24-24 #8839ef #ccd0da -
-6 25-59 #eff1f5 #8839ef reverse
-6 60-60 #8839ef #ccd0da -
-6 61-95 #4c4f69 #ccd0da -
-6 96-96 #8839ef #ccd0da -
-6 97-149 #9ea0af #eff1f5 -
+6 25-54 #eff1f5 #8839ef reverse
+6 55-55 #8839ef #ccd0da -
+6 56-85 #4c4f69 #ccd0da -
+6 86-86 #8839ef #ccd0da -
+6 87-149 #9ea0af #eff1f5 -
 7 0-2 #a6a8b6 #eff1f5 -
 7 3-3 #6c6d76 #eff1f5 -
 7 4-5 #a6a8b6 #eff1f5 -
 7 6-23 #9ea0af #eff1f5 -
 7 24-24 #8839ef #ccd0da -
-7 25-95 #4c4f69 #ccd0da -
-7 96-96 #8839ef #ccd0da -
-7 97-149 #9ea0af #eff1f5 -
+7 25-85 #4c4f69 #ccd0da -
+7 86-86 #8839ef #ccd0da -
+7 87-149 #9ea0af #eff1f5 -
 8 0-5 #a6a8b6 #eff1f5 -
 8 6-6 #6c6d73 #eff1f5 -
 8 7-23 #bec0cb #eff1f5 -
 8 24-24 #8839ef #ccd0da -
-8 25-95 #4c4f69 #ccd0da -
-8 96-96 #8839ef #ccd0da -
-8 97-149 #bec0cb #eff1f5 -
+8 25-85 #4c4f69 #ccd0da -
+8 86-86 #8839ef #ccd0da -
+8 87-149 #bec0cb #eff1f5 -
 9 0-5 #a6a8b6 #eff1f5 -
 9 6-6 #6c6d73 #eff1f5 -
 9 7-23 #bec0cb #eff1f5 -
 9 24-24 #8839ef #ccd0da -
-9 25-95 #4c4f69 #ccd0da -
-9 96-96 #8839ef #ccd0da -
-9 97-149 #bec0cb #eff1f5 -
+9 25-85 #4c4f69 #ccd0da -
+9 86-86 #8839ef #ccd0da -
+9 87-149 #bec0cb #eff1f5 -
 10 0-5 #a6a8b6 #eff1f5 -
 10 6-6 #6c6d73 #eff1f5 -
 10 7-23 #bec0cb #eff1f5 -
 10 24-24 #8839ef #ccd0da -
-10 25-95 #4c4f69 #ccd0da -
-10 96-96 #8839ef #ccd0da -
-10 97-149 #bec0cb #eff1f5 -
+10 25-85 #4c4f69 #ccd0da -
+10 86-86 #8839ef #ccd0da -
+10 87-149 #bec0cb #eff1f5 -
 11 0-5 #a6a8b6 #eff1f5 -
 11 6-6 #6c6d73 #eff1f5 -
 11 7-23 #bec0cb #eff1f5 -
 11 24-24 #8839ef #ccd0da -
-11 25-95 #4c4f69 #ccd0da -
-11 96-96 #8839ef #ccd0da -
-11 97-149 #bec0cb #eff1f5 -
+11 25-85 #4c4f69 #ccd0da -
+11 86-86 #8839ef #ccd0da -
+11 87-149 #bec0cb #eff1f5 -
 12 0-5 #a6a8b6 #eff1f5 -
 12 6-6 #6c6d73 #eff1f5 -
 12 7-23 #bec0cb #eff1f5 -
 12 24-24 #8839ef #ccd0da -
-12 25-95 #4c4f69 #ccd0da -
-12 96-96 #8839ef #ccd0da -
-12 97-149 #bec0cb #eff1f5 -
+12 25-85 #4c4f69 #ccd0da -
+12 86-86 #8839ef #ccd0da -
+12 87-149 #bec0cb #eff1f5 -
 13 0-5 #a6a8b6 #eff1f5 -
 13 6-6 #6c6d73 #eff1f5 -
 13 7-23 #bec0cb #eff1f5 -
 13 24-24 #8839ef #ccd0da -
-13 25-95 #4c4f69 #ccd0da -
-13 96-96 #8839ef #ccd0da -
-13 97-149 #bec0cb #eff1f5 -
+13 25-85 #4c4f69 #ccd0da -
+13 86-86 #8839ef #ccd0da -
+13 87-149 #bec0cb #eff1f5 -
 14 0-5 #a6a8b6 #eff1f5 -
 14 6-6 #6c6d73 #eff1f5 -
 14 7-23 #bec0cb #eff1f5 -
 14 24-24 #8839ef #ccd0da -
-14 25-95 #4c4f69 #ccd0da -
-14 96-96 #8839ef #ccd0da -
-14 97-149 #bec0cb #eff1f5 -
+14 25-85 #4c4f69 #ccd0da -
+14 86-86 #8839ef #ccd0da -
+14 87-149 #bec0cb #eff1f5 -
 15 0-5 #a6a8b6 #eff1f5 -
 15 6-6 #6c6d73 #eff1f5 -
 15 7-23 #bec0cb #eff1f5 -
 15 24-24 #8839ef #ccd0da -
 15 25-54 #4c4f69 #ccd0da -
-15 55-96 #8839ef #ccd0da -
-15 97-149 #bec0cb #eff1f5 -
+15 55-86 #8839ef #ccd0da -
+15 87-149 #bec0cb #eff1f5 -
 16 0-5 #a6a8b6 #eff1f5 -
 16 6-6 #6c6d73 #eff1f5 -
 16 7-149 #bec0cb #eff1f5 -

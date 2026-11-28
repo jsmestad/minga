@@ -797,17 +797,17 @@ reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, a
 issue = 4137
 
 [[exception]]
-scenario = ["minga.act_menu", "minga.act_menu.filtered", "minga.act_menu.selection"]
+scenario = ["minga.act_menu", "minga.act_menu.filtered"]
 frontend = "macos"
 part = "editor.code"
 rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#40a02b on #eff1f6",
-  "#8c8fa1 on #eff1f6",
-  "#df8d1d on #eff1f6",
+  "#a28dd5 on #eff1f5",
+  "#bbc5bf on #eff1f5",
+  "#cdc2c6 on #eff1f5",
 ]
-reason = "Existing editor ink on the Latte background; visible pixels are unchanged from a menu-closed replay."
+reason = "Existing editor inks also sampled in the hosted minga.reject_all.confirm frame, outside the Act menu panel."
 issue = 4137
 
 [[exception]]
@@ -816,8 +816,25 @@ frontend = "macos"
 part = "editor.code"
 rule = "contrast"
 theme = "catppuccin_latte"
-pairs = ["#fe640c on #eff1f6"]
-reason = "Existing literal colour on the Latte background; visible pixels are unchanged from a menu-closed replay."
+pairs = [
+  "#6d7ebf on #eff1f5",
+  "#7e9389 on #eff1f5",
+  "#866ac5 on #eff1f5",
+  "#918cae on #eff1f5",
+  "#9c8d9a on #eff1f5",
+  "#fe640c on #eff1f6",
+]
+reason = "Existing editor selection and syntax inks outside the Act menu panel, not menu text."
+issue = 4137
+
+[[exception]]
+scenario = ["minga.act_menu", "minga.act_menu.filtered"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#60414b on #303446"]
+reason = "Existing editor ink also sampled in the hosted minga.reject_all.confirm frame, outside the Act menu panel."
 issue = 4137
 
 [[exception]]
@@ -826,8 +843,8 @@ frontend = "macos"
 part = "editor.code"
 rule = "contrast"
 theme = "catppuccin_frappe"
-pairs = ["#828ba7 on #303446"]
-reason = "Existing muted editor ink on the Frappé background; visible pixels are unchanged from a menu-closed replay."
+pairs = ["#414559 on #303446", "#746071 on #303446"]
+reason = "Existing editor selection and syntax inks outside the Act menu panel, not menu text."
 issue = 4137
 
 [[exception]]

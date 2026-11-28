@@ -10,19 +10,19 @@
    2 ▚  def label, do: "Your plan limit applies"
    1    def window, do: 60
    4 ▚  def retry?, do: true
-   1  ╭─○ 2 Minga changes · 2 lines · unreviewed──────────────────────› filter╮
-   2  │         y Keep 2 changes   SPC a y│        n Reject 2 changes  SPC a d│
-      │   Leaves Minga’s edits in place   │ Undoes Minga’s edits. Yours stay. │
-      │ This change ──────────────────────────────────────────────────────────│
-      │ = Show diff                                                         = │
-      │ o Open conversation                                                   │
-      │ This file ────────────────────────────────────────────────────────────│
-      │ l Copy file:line link                                                 │
-      │ d Attach file diagnostics to Agent draft                    SPC a x d │
-      │ Anywhere ─────────────────────────────────────────────────────────────│
-      │ a Ask Minga about this                                        SPC a ? │
-      │ e Rewrite selection                                           SPC a e │
-      ╰↑↓ move · ↵ choose · esc close─────────────────────────────────────────╯
+   1  ╭─○ 2 Minga changes · 2 lines · unreviewed────────────› filter╮
+   2  │       y Keep 2 changes       │      n Reject 2 changes      │
+      │Leaves Minga’s edits in place │  Undoes only Minga’s edits   │
+      │ This change ────────────────────────────────────────────────│
+      │ = Show diff                                               = │
+      │ o Open conversation                                         │
+      │ This file ──────────────────────────────────────────────────│
+      │ l Copy file:line link                                       │
+      │ d Attach file diagnostics to Agent draft          SPC a x d │
+      │ Anywhere ───────────────────────────────────────────────────│
+      │ a Ask Minga about this                              SPC a ? │
+      │ e Rewrite selection                                 SPC a e │
+      ╰↑↓ move · ↵ choose · esc close───────────────────────────────╯
       ~
       ~
       ~
@@ -102,76 +102,76 @@
 5 4-5 #a6a8b6 #eff1f5 -
 5 6-7 #8839ef #ccd0da -
 5 8-47 #4c4f69 #ccd0da bold
-5 48-69 #8839ef #ccd0da -
-5 70-77 #4c4f69 #ccd0da -
-5 78-78 #8839ef #ccd0da -
-5 79-79 #9ea0af #eff1f5 -
+5 48-59 #8839ef #ccd0da -
+5 60-67 #4c4f69 #ccd0da -
+5 68-68 #8839ef #ccd0da -
+5 69-79 #9ea0af #eff1f5 -
 6 0-2 #a6a8b6 #eff1f5 -
 6 3-3 #6c6d76 #eff1f5 -
 6 4-5 #a6a8b6 #eff1f5 -
 6 6-6 #8839ef #ccd0da -
-6 7-41 #eff1f5 #8839ef bold,reverse
-6 42-42 #8839ef #ccd0da -
-6 43-77 #4c4f69 #ccd0da bold
-6 78-78 #8839ef #ccd0da -
-6 79-79 #9ea0af #eff1f5 -
+6 7-36 #eff1f5 #8839ef bold,reverse
+6 37-37 #8839ef #ccd0da -
+6 38-67 #4c4f69 #ccd0da bold
+6 68-68 #8839ef #ccd0da -
+6 69-79 #9ea0af #eff1f5 -
 7 0-5 #a6a8b6 #eff1f5 -
 7 6-6 #8839ef #ccd0da -
-7 7-41 #eff1f5 #8839ef reverse
-7 42-42 #8839ef #ccd0da -
-7 43-77 #4c4f69 #ccd0da -
-7 78-78 #8839ef #ccd0da -
-7 79-79 #bec0cb #eff1f5 -
+7 7-36 #eff1f5 #8839ef reverse
+7 37-37 #8839ef #ccd0da -
+7 38-67 #4c4f69 #ccd0da -
+7 68-68 #8839ef #ccd0da -
+7 69-79 #bec0cb #eff1f5 -
 8 0-5 #a6a8b6 #eff1f5 -
 8 6-6 #8839ef #ccd0da -
-8 7-77 #4c4f69 #ccd0da -
-8 78-78 #8839ef #ccd0da -
-8 79-79 #bec0cb #eff1f5 -
+8 7-67 #4c4f69 #ccd0da -
+8 68-68 #8839ef #ccd0da -
+8 69-79 #bec0cb #eff1f5 -
 9 0-5 #a6a8b6 #eff1f5 -
 9 6-6 #8839ef #ccd0da -
-9 7-77 #4c4f69 #ccd0da -
-9 78-78 #8839ef #ccd0da -
-9 79-79 #bec0cb #eff1f5 -
+9 7-67 #4c4f69 #ccd0da -
+9 68-68 #8839ef #ccd0da -
+9 69-79 #bec0cb #eff1f5 -
 10 0-5 #a6a8b6 #eff1f5 -
 10 6-6 #8839ef #ccd0da -
-10 7-77 #4c4f69 #ccd0da -
-10 78-78 #8839ef #ccd0da -
-10 79-79 #bec0cb #eff1f5 -
+10 7-67 #4c4f69 #ccd0da -
+10 68-68 #8839ef #ccd0da -
+10 69-79 #bec0cb #eff1f5 -
 11 0-5 #a6a8b6 #eff1f5 -
 11 6-6 #8839ef #ccd0da -
-11 7-77 #4c4f69 #ccd0da -
-11 78-78 #8839ef #ccd0da -
-11 79-79 #bec0cb #eff1f5 -
+11 7-67 #4c4f69 #ccd0da -
+11 68-68 #8839ef #ccd0da -
+11 69-79 #bec0cb #eff1f5 -
 12 0-5 #a6a8b6 #eff1f5 -
 12 6-6 #8839ef #ccd0da -
-12 7-77 #4c4f69 #ccd0da -
-12 78-78 #8839ef #ccd0da -
-12 79-79 #bec0cb #eff1f5 -
+12 7-67 #4c4f69 #ccd0da -
+12 68-68 #8839ef #ccd0da -
+12 69-79 #bec0cb #eff1f5 -
 13 0-5 #a6a8b6 #eff1f5 -
 13 6-6 #8839ef #ccd0da -
-13 7-77 #4c4f69 #ccd0da -
-13 78-78 #8839ef #ccd0da -
-13 79-79 #bec0cb #eff1f5 -
+13 7-67 #4c4f69 #ccd0da -
+13 68-68 #8839ef #ccd0da -
+13 69-79 #bec0cb #eff1f5 -
 14 0-5 #a6a8b6 #eff1f5 -
 14 6-6 #8839ef #ccd0da -
-14 7-77 #4c4f69 #ccd0da -
-14 78-78 #8839ef #ccd0da -
-14 79-79 #bec0cb #eff1f5 -
+14 7-67 #4c4f69 #ccd0da -
+14 68-68 #8839ef #ccd0da -
+14 69-79 #bec0cb #eff1f5 -
 15 0-5 #a6a8b6 #eff1f5 -
 15 6-6 #8839ef #ccd0da -
-15 7-77 #4c4f69 #ccd0da -
-15 78-78 #8839ef #ccd0da -
-15 79-79 #bec0cb #eff1f5 -
+15 7-67 #4c4f69 #ccd0da -
+15 68-68 #8839ef #ccd0da -
+15 69-79 #bec0cb #eff1f5 -
 16 0-5 #a6a8b6 #eff1f5 -
 16 6-6 #8839ef #ccd0da -
-16 7-77 #4c4f69 #ccd0da -
-16 78-78 #8839ef #ccd0da -
-16 79-79 #bec0cb #eff1f5 -
+16 7-67 #4c4f69 #ccd0da -
+16 68-68 #8839ef #ccd0da -
+16 69-79 #bec0cb #eff1f5 -
 17 0-5 #a6a8b6 #eff1f5 -
 17 6-6 #8839ef #ccd0da -
 17 7-36 #4c4f69 #ccd0da -
-17 37-78 #8839ef #ccd0da -
-17 79-79 #bec0cb #eff1f5 -
+17 37-68 #8839ef #ccd0da -
+17 69-79 #bec0cb #eff1f5 -
 18 0-5 #a6a8b6 #eff1f5 -
 18 6-6 #6c6d73 #eff1f5 -
 18 7-79 #bec0cb #eff1f5 -

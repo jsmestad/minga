@@ -42,6 +42,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/WorkspaceState.swift#WorkspaceState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionOverlayState.swift#ExtensionOverlayState": "protocol presentation owner",
         "Sources/Views/Extensions/ExtensionPanelState.swift#ExtensionPanelState": "protocol presentation owner",
+        "Sources/Views/Overlays/ActMenuState.swift#ActMenuState": "protocol presentation owner",
         "Sources/Views/Overlays/CompletionState.swift#CompletionState": "protocol presentation owner",
         "Sources/Views/Overlays/FloatPopupState.swift#FloatPopupState": "protocol presentation owner",
         "Sources/Views/Overlays/HoverPopupState.swift#HoverPopupState": "protocol presentation owner",

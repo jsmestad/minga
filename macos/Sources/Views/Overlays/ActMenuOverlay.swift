@@ -17,7 +17,7 @@ struct ActMenuOverlay: View {
         if let menu = state.menu {
             GeometryReader { proxy in
                 let size = proxy.size
-                let width = max(0, min(456, size.width - 2 * Spacing.md))
+                let width = max(0, min(420, size.width - 2 * Spacing.md))
                 let anchor = anchorRect(menu.anchor, in: proxy)
                 ZStack(alignment: .topLeading) {
                     Color.clear
@@ -230,6 +230,7 @@ private struct ActMenuPanel: View {
                         }
                         .padding(.horizontal, Spacing.lg)
                         .padding(.top, Spacing.sm)
+                        .padding(.bottom, Spacing.xs)
                     }
                 }
                 action(row) {
@@ -284,7 +285,7 @@ private struct ActMenuPanel: View {
 
     private func shortcut(_ text: String) -> some View {
         Text(text)
-            .font(Typography.monospacedSmall)
+            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
             .foregroundStyle(theme.popupFg)
             .lineLimit(1)
             .anatomyPart("actMenu.shortcut", text: text, font: .small, monospaced: true, enabled: !text.isEmpty)
@@ -310,7 +311,7 @@ private struct ActMenuPanel: View {
 
     private func key(_ text: String) -> some View {
         Text(text)
-            .font(Typography.monospacedSmall)
+            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
             .foregroundStyle(theme.popupFg)
             .lineLimit(1)
             .anatomyPart("actMenu.key", text: text, font: .small, monospaced: true, enabled: !text.isEmpty)
@@ -323,7 +324,8 @@ private struct ActMenuPanel: View {
         } label: {
             label()
                 .padding(.horizontal, Spacing.lg)
-                .padding(.vertical, Spacing.sm)
+                .padding(.vertical, decision ? Spacing.sm : Spacing.xs)
+                .frame(minHeight: decision ? 44 : 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     if decision {
@@ -332,6 +334,10 @@ private struct ActMenuPanel: View {
                         shape.strokeBorder(selected ? border.opacity(0.65) : theme.popupBorder.opacity(0.5), lineWidth: Spacing.pixel)
                     } else if selected {
                         border.opacity(0.08)
+                            .overlay(alignment: .leading) {
+                                Rectangle().fill(border).frame(width: Spacing.hairline)
+                                    .padding(.leading, Spacing.xs)
+                            }
                     }
                 }
                 .contentShape(Rectangle())

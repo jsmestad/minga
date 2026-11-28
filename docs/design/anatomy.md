@@ -146,7 +146,7 @@ The act menu, the twist-head menu's successor, and any compact panel at a target
 | Width | content | 280 to 420 pt | 36 to 64 columns |
 | Panel vertical padding | `xs` | 4 pt | 0 rows |
 
-Labels use `body`; menu keys and direct keys use `Typography.monospacedSmall` on macOS. The menu text must reach 4.5:1 against the panel and any selection fill. The storyboard audit measures the text in the menu and the still-visible text behind it. Help sits in the bottom border in the TUI and is absent on macOS. The panel fits its content and stays within the viewport.
+Labels use `body`; menu keys and direct keys use semibold, small monospaced text on macOS so single glyphs stay legible on non-Retina displays. The menu text must reach 4.5:1 against the panel and any selection fill. The storyboard audit measures the text in the menu and the still-visible text behind it. Help sits in the bottom border in the TUI and is absent on macOS. The panel fits its content and stays within the viewport.
 
 ## Which-key panel
 

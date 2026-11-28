@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	actMenuMaxWidth = 73
+	actMenuMaxWidth = 64
 	actMenuCaret    = 0xfffe
 	actMenuCenter   = 0xffff
 	actMenuHelp     = "↑↓ move · ↵ choose · esc close"

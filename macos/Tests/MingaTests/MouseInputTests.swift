@@ -8,7 +8,7 @@
 /// NSEvent.mouseEvent creates synthetic events at known pixel positions;
 /// the view's cellPosition divides by cell dimensions to get grid coordinates.
 
-import MingaUI
+@testable import MingaUI
 import Testing
 import Foundation
 import AppKit
@@ -26,12 +26,11 @@ struct MouseInputTests {
     /// Uses scale=1.0 so cell dimensions are predictable (no Retina scaling
     /// of the coordinate math; cellWidth/cellHeight are in points).
     @MainActor
-    private func makeView(spy: SpyEncoder) -> EditorNSView? {
+    private func makeView(spy: SpyEncoder, factories: NativeRenderFactories = .production) -> EditorNSView? {
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
-        guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
-        ctRenderer.setupRenderers(fontManager: fm)
+        guard let ctRenderer = makeOffscreenRenderer(factories: factories, fontManager: fm) else { return nil }
         let view = EditorNSView(encoder: spy, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
         view.editorInput = guiState.editorInput
@@ -525,7 +524,7 @@ struct MouseInputTests {
     @Test("Ctrl-primary click sends a secondary press and release even if Ctrl is lifted first")
     @MainActor func controlClickUsesSecondaryButton() throws {
         let spy = SpyEncoder()
-        let view = try #require(makeView(spy: spy))
+        let view = try #require(makeView(spy: spy, factories: offscreenNativeTestFactories()))
         let point = NSPoint(x: 20, y: 20)
         let press = try #require(mouseEvent(type: .leftMouseDown, location: point, modifiers: .control))
         let release = try #require(mouseEvent(type: .leftMouseUp, location: point))
